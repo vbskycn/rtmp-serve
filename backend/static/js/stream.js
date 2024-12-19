@@ -464,56 +464,56 @@ function getStatusText(status) {
 
 // 页面加载时初始化
 document.addEventListener('DOMContentLoaded', function() {
-    debug('页面加载完成，开始初始��...');
+    debug('页面加载完成，开始初始化...');
     
+    // 绑定按钮事件
+    bindButtonEvents();
+    
+    // 初始化数据
+    refreshStreamList();
+    
+    // 开始定时更新系统状态
+    setInterval(updateSystemStats, 2000);
+    
+    debug('初始化完成');
+});
+
+// 绑定按钮事件
+function bindButtonEvents() {
     // 添加流按钮
     const addBtn = document.getElementById('addStreamBtn');
     if (addBtn) {
-        addBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            showAddForm();
-        });
+        addBtn.addEventListener('click', showAddForm);
     }
     
     // 批量添加按钮
     const batchAddBtn = document.getElementById('batchAddBtn');
     if (batchAddBtn) {
-        batchAddBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            showBatchAddForm();
-        });
+        batchAddBtn.addEventListener('click', showBatchAddForm);
     }
     
     // 转码配置按钮
     const configBtn = document.getElementById('configBtn');
     if (configBtn) {
-        configBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            showConfigPanel();
-        });
+        configBtn.addEventListener('click', showConfigPanel);
     }
     
     // 导出配置按钮
     const exportBtn = document.getElementById('exportBtn');
     if (exportBtn) {
-        exportBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            exportStreams();
-        });
+        exportBtn.addEventListener('click', exportStreams);
     }
     
     // 批量操作按钮
     document.querySelectorAll('.panel-section button[data-action]').forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.preventDefault();
+        btn.addEventListener('click', function() {
             batchAction(this.dataset.action);
         });
     });
     
     // 筛选按钮
     document.querySelectorAll('.filter-btn').forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.preventDefault();
+        btn.addEventListener('click', function() {
             filterStreams(this.dataset.filter);
         });
     });
@@ -521,25 +521,25 @@ document.addEventListener('DOMContentLoaded', function() {
     // 搜索输入框
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
-        searchInput.addEventListener('input', function(e) {
-            searchStreams(e.target.value);
+        searchInput.addEventListener('input', function() {
+            searchStreams(this.value);
         });
     }
     
     // 刷新按钮
     const refreshBtn = document.querySelector('.refresh-btn');
     if (refreshBtn) {
-        refreshBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            refreshStreamList();
-        });
+        refreshBtn.addEventListener('click', refreshStreamList);
     }
     
-    // 初始化数据
-    refreshStreamList();
-    
-    debug('初始化完成');
-});
+    // 全选按钮
+    const selectAllBtn = document.getElementById('selectAll');
+    if (selectAllBtn) {
+        selectAllBtn.addEventListener('click', function() {
+            toggleAllStreams(this);
+        });
+    }
+}
 
 // 添加调试功能
 function debug(...args) {
@@ -668,7 +668,4 @@ async function updateSystemStats() {
         console.error('Failed to update system stats:', error);
     }
 }
-
-// 定期更新系统状态
-setInterval(updateSystemStats, 2000);
 </rewritten_file> 
