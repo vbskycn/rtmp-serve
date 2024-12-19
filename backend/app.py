@@ -13,9 +13,6 @@ from functools import wraps
 from flask import session
 from backend.logging_config import setup_logging
 import secrets
-from functools import lru_cache
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
 CORS(app)
@@ -40,12 +37,6 @@ app.config.update(
     SESSION_TYPE='filesystem',  # 使用文件系统存储会话
     SESSION_FILE_DIR='data/sessions',  # 会话文件存储目录
     SESSION_FILE_THRESHOLD=500  # 会话文件数量阈值
-)
-
-limiter = Limiter(
-    app=app,
-    key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"]
 )
 
 class StreamManager:
@@ -174,7 +165,7 @@ class StreamManager:
                 try:
                     process.wait(timeout=5)  # 等待进程结束
                 except subprocess.TimeoutExpired:
-                    # 如果超时，强��结束
+                    # 如果超时，强行结束
                     process.kill()
                     process.wait()
                 
@@ -211,7 +202,7 @@ class StreamManager:
                         logging.error(f"Error reading stderr for stream {stream_id}: {str(e)}")
                         stderr_output = ""
 
-                    # 检查 ffmpeg 进程是否真的在推流
+                    # 检查 ffmpeg 进程��否真的在推流
                     try:
                         ps_process = subprocess.run(['ps', '-p', str(process.pid), '-o', 'cmd='], 
                                                  capture_output=True, text=True)
@@ -362,7 +353,7 @@ class StreamManager:
         return False
 
     def get_stream_metrics(self, stream_id):
-        """获取流的详细指标"""
+        """取流的详细指标"""
         if stream_id not in self.streams:
             raise StreamNotFoundError()
             
@@ -429,7 +420,7 @@ class StreamManager:
 
 stream_manager = StreamManager()
 
-# 登录装饰器
+# ��录装饰器
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -470,7 +461,6 @@ def index():
     return send_from_directory('static', 'index.html')
 
 @app.route('/api/streams', methods=['POST'])
-@limiter.limit("20 per minute")  # 限制每分钟最多20个请求
 @login_required
 def add_stream():
     data = request.json

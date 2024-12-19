@@ -5,8 +5,4 @@ gunicorn==20.1.0
 Werkzeug==2.0.1
 SQLAlchemy==1.4.23
 psutil==5.8.0
-Flask-Limiter==2.4.7  # 修改为最新的稳定版本
 flask-debugtoolbar==0.11.0
-# 添加其他依赖
-redis==4.5.1  # Flask-Limiter 的依赖
-limits==2.8.0  # Flask-Limiter 的依赖
