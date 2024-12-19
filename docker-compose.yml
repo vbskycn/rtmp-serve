@@ -33,9 +33,8 @@ services:
     command: >
       bash -c "
         mkdir -p /app/data /app/logs &&
-        chown -R www-data:www-data /app/data /app/logs &&
         chmod -R 777 /app/data /app/logs &&
-        su www-data -s /bin/bash -c 'flask run --host=0.0.0.0 --port=10088'
+        flask run --host=0.0.0.0 --port=10088
       "
     logging:
       driver: "json-file"

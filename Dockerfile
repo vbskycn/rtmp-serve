@@ -39,8 +39,6 @@ COPY conf/ conf/
 
 # 创建必要的目录并设置权限
 RUN mkdir -p /app/data/sessions /app/logs \
-    && chown -R www-data:www-data /app \
-    && chmod -R 755 /app \
     && chmod -R 777 /app/data /app/logs
 
 # 设置环境变量
@@ -48,9 +46,6 @@ ENV PYTHONPATH=/app
 ENV FLASK_APP=backend/app.py
 ENV FLASK_ENV=development
 ENV FLASK_DEBUG=1
-
-# 切换到非 root 用户
-USER www-data
 
 # 启动命令
 CMD ["flask", "run", "--host=0.0.0.0", "--port=10088"] 
