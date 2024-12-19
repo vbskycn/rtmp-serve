@@ -10,6 +10,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      - ./backend:/app/backend
     environment:
       - PORT=5000
       - HOST=0.0.0.0
@@ -18,9 +19,20 @@ services:
       - LOG_LEVEL=INFO
       - REMOTE_RTMP_URL=rtmp://ali.push.yximgs.com/live/
       - LOCAL_RTMP_URL=rtmp://srs:1935/live/
+      - PYTHONUNBUFFERED=1
     depends_on:
       - srs
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   srs:
     image: ossrs/srs:4
@@ -31,3 +43,8 @@ services:
     volumes:
       - ./conf/srs.conf:/usr/local/srs/conf/srs.conf
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:1985/api/v1/versions"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
