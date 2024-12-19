@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>流媒体转推服务</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        code {
+            font-family: Consolas, monospace;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f5f5f5;
+        }
+    </style>
+</head>
+<body>
+    <h1>流媒体转推服务</h1>
+
+    <h2>项目介绍</h2>
+    <p>这是一个基于 Flask 的流媒体转推服务，支持将视频流转推到其他平台。主要功能包括：</p>
+    <ul>
+        <li>单个流的添加和管理</li>
+        <li>批量导入流配置</li>
+        <li>实时状态监控</li>
+        <li>灵活的转码配置</li>
+    </ul>
+
+    <h2>系统要求</h2>
+    <ul>
+        <li>Python 3.8+</li>
+        <li>FFmpeg</li>
+    </ul>
+
+    <h2>安装部署</h2>
+    <h3>1. 安装 FFmpeg</h3>
+    <pre><code>sudo apt update
+sudo apt install ffmpeg</code></pre>
+
+    <h3>2. 创建并激活虚拟环境</h3>
+    <pre><code># 安装 virtualenv（如果还没安装）
+sudo apt install python3-venv
+
+# 创建虚拟环境
+python3 -m venv venv
+
+# 激活虚拟环境
+source venv/bin/activate</code></pre>
+
+    <h3>3. 安装 Python 依赖</h3>
+    <pre><code># 确保在虚拟环境中
+pip install -r requirements.txt</code></pre>
+
+    <h2>配置说明</h2>
+    <p>在 backend/.env 文件中配置以下参数：</p>
+    <ul>
+        <li>PORT: 服务端口号（默认：10088）</li>
+        <li>HOST: 监听地址（默认：0.0.0.0）</li>
+        <li>DEBUG: 调试模式（默认：True）</li>
+    </ul>
+
+    <h2>启动服务</h2>
+    <h3>使用脚本启动（推荐）</h3>
+    <pre><code># 首次部署时执行
+chmod +x setup.sh start.sh
+./setup.sh
+
+# 启动服务
+./start.sh</code></pre>
+
+    <h3>手动启动</h3>
+    <pre><code># 1. 激活虚拟环境
+source venv/bin/activate
+
+# 2. 启动服务
+# 开发环境
+python backend/app.py
+
+# 生产环境（推荐）
+gunicorn -w 4 -b 0.0.0.0:10088 backend.app:app
+
+# 3. 退出虚拟环境
+deactivate</code></pre>
+
+    <h2>API 接口</h2>
+    <table>
+        <tr>
+            <th>接口</th>
+            <th>方法</th>
+            <th>说明</th>
+        </tr>
+        <tr>
+            <td>/api/streams</td>
+            <td>POST</td>
+            <td>添加新的转推流</td>
+        </tr>
+        <tr>
+            <td>/api/streams/{stream_id}</td>
+            <td>DELETE</td>
+            <td>停止指定的转推流</td>
+        </tr>
+        <tr>
+            <td>/api/streams/{stream_id}/status</td>
+            <td>GET</td>
+            <td>获取转推流状态</td>
+        </tr>
+        <tr>
+            <td>/api/streams/batch</td>
+            <td>POST</td>
+            <td>批量导入转推流</td>
+        </tr>
+    </table>
+
+    <h2>使用示例</h2>
+    <h3>添加新的转推流</h3>
+    <pre><code>{
+    "id": "stream1",
+    "sourceUrl": "rtmp://source.example.com/live/stream",
+    "outputUrl": "rtmp://target.example.com/live/",
+    "key": "streamkey",
+    "videoCodec": "copy",
+    "audioBitrate": "128k"
+}</code></pre>
+
+    <h3>使用 curl 测试</h3>
+    <pre><code># 添加新流
+curl -X POST http://localhost:10088/api/streams \
+-H "Content-Type: application/json" \
+-d '{
+    "id": "stream1",
+    "sourceUrl": "rtmp://source.example.com/live/stream",
+    "outputUrl": "rtmp://target.example.com/live/",
+    "key": "streamkey",
+    "videoCodec": "copy",
+    "audioBitrate": "128k"
+}'
+
+# 查看流状态
+curl http://localhost:10088/api/streams/stream1/status
+
+# 停止流
+curl -X DELETE http://localhost:10088/api/streams/stream1</code></pre>
+
+    <h2>生产环境部署</h2>
+    <h3>设置系统服务</h3>
+    <pre><code>sudo nano /etc/systemd/system/rtmp-server.service</code></pre>
+
+    <p>服务配置内容：</p>
+    <pre><code>[Unit]
+Description=RTMP Stream Server
+After=network.target
+
+[Service]
+User=your_username
+WorkingDirectory=/path/to/rtmp-server
+Environment="PATH=/path/to/rtmp-server/venv/bin"
+ExecStart=/path/to/rtmp-server/venv/bin/gunicorn -w 4 -b 0.0.0.0:10088 backend.app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+
+    <p>启用服务：</p>
+    <pre><code>sudo systemctl daemon-reload
+sudo systemctl enable rtmp-server
+sudo systemctl start rtmp-server</code></pre>
+
+    <h2>常用维护命令</h2>
+    <pre><code># 查看服务状态
+sudo systemctl status rtmp-server
+
+# 查看日志
+tail -f stream_server.log
+
+# 重启服务
+sudo systemctl restart rtmp-server</code></pre>
+
+    <h2>注意事项</h2>
+    <ul>
+        <li>确保有足够的网络带宽进行转推</li>
+        <li>建议在生产环境中使用 gunicorn 作为 WSGI 服务器</li>
+        <li>定期检查日志文件大小，避免占用过多磁盘空间</li>
+        <li>确保服务器防火墙开放了 10088 端口</li>
+        <li>建议设置日志轮转以防止日志文件过大</li>
+    </ul>
+</body>
+</html> 

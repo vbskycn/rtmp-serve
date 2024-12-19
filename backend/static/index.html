@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>流媒体转推管理</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/modal.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+</head>
+<body>
+    <div class="layout">
+        <!-- 顶部导航栏 -->
+        <header class="header">
+            <div class="logo">
+                <i class="fas fa-video"></i>
+                流媒体转推管理系统
+            </div>
+            <div class="user-info">
+                <span>管理员</span>
+                <button onclick="window.location.href='/api/logout'" class="logout-btn">
+                    <i class="fas fa-sign-out-alt"></i> 退出
+                </button>
+            </div>
+        </header>
+
+        <!-- 主要内容区 -->
+        <div class="main-content">
+            <!-- 功能区 -->
+            <div class="action-panel">
+                <div class="panel-section">
+                    <h3><i class="fas fa-plus-circle"></i> 添加流</h3>
+                    <button onclick="showAddForm()" class="action-btn primary">
+                        <i class="fas fa-plus"></i> 添加新流
+                    </button>
+                    <button onclick="showBatchAddForm()" class="action-btn secondary">
+                        <i class="fas fa-file-import"></i> 批量添加
+                    </button>
+                </div>
+
+                <div class="panel-section">
+                    <h3><i class="fas fa-cogs"></i> 配置管理</h3>
+                    <button onclick="showConfigPanel()" class="action-btn primary">
+                        <i class="fas fa-sliders-h"></i> 转码配置
+                    </button>
+                    <button onclick="exportStreams()" class="action-btn secondary">
+                        <i class="fas fa-file-export"></i> 导出配置
+                    </button>
+                </div>
+
+                <div class="panel-section">
+                    <h3><i class="fas fa-tasks"></i> 批量操作</h3>
+                    <button onclick="batchAction('start')" class="action-btn success">
+                        <i class="fas fa-play"></i> 批量启动
+                    </button>
+                    <button onclick="batchAction('stop')" class="action-btn warning">
+                        <i class="fas fa-stop"></i> 批量停止
+                    </button>
+                    <button onclick="batchAction('delete')" class="action-btn danger">
+                        <i class="fas fa-trash"></i> 批量删除
+                    </button>
+                </div>
+            </div>
+
+            <!-- 流列表区域 -->
+            <div class="stream-list-container">
+                <div class="list-header">
+                    <h2>流列表</h2>
+                    <button onclick="refreshStreamList()" class="refresh-btn">
+                        <i class="fas fa-sync"></i> 刷新
+                    </button>
+                </div>
+                <div class="table-container">
+                    <table class="stream-table">
+                        <thead>
+                            <tr>
+                                <th class="batch-select">
+                                    <input type="checkbox" onclick="toggleAllStreams(this)">
+                                </th>
+                                <th>名称</th>
+                                <th>源地址</th>
+                                <th>推流地址</th>
+                                <th>播放地址</th>
+                                <th>转码配置</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="streamTableBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框内容保持不变 -->
+    <div id="addStreamForm" class="modal">
+        <div class="modal-content">
+            <h2>添加新流</h2>
+            <div class="form-group">
+                <label>名称:</label>
+                <input type="text" id="streamName" placeholder="流名称">
+            </div>
+            <div class="form-group">
+                <label>源地址:</label>
+                <input type="text" id="sourceUrl" placeholder="例如: http://example.com/live/stream">
+            </div>
+            <div class="form-group">
+                <label>推流地址:</label>
+                <select id="outputUrlType" onchange="updateOutputUrl()">
+                    <option value="remote">远程服务器</option>
+                    <option value="local">本地服务器</option>
+                </select>
+                <input type="text" id="outputUrl" readonly>
+            </div>
+            <div class="form-group">
+                <label>推流密钥:</label>
+                <input type="text" id="streamKey" placeholder="推流密钥">
+            </div>
+            <div class="form-group">
+                <label>转码配置:</label>
+                <select id="streamConfig">
+                    <option value="default-copy">原画配置</option>
+                </select>
+            </div>
+            <div class="form-actions">
+                <button onclick="addStream()" class="action-btn primary">添加</button>
+                <button onclick="hideAddForm()" class="action-btn secondary">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 批量添加模态框 -->
+    <div id="batchAddForm" class="modal">
+        <div class="modal-content">
+            <h2>批量添加流</h2>
+            <div class="form-group">
+                <label>源地址列表:</label>
+                <textarea id="batchSourceUrls" placeholder="每行一个源地址" rows="10"></textarea>
+            </div>
+            <div class="form-group">
+                <label>推流地址:</label>
+                <select id="batchOutputUrlType" onchange="updateBatchOutputUrl()">
+                    <option value="remote">远程服务器</option>
+                    <option value="local">本地服务器</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>转码配置:</label>
+                <select id="batchStreamConfig">
+                    <option value="default-copy">原画配置</option>
+                </select>
+            </div>
+            <div class="form-actions">
+                <button onclick="addBatchStreams()" class="action-btn primary">添加</button>
+                <button onclick="hideBatchAddForm()" class="action-btn secondary">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 转码配置模态框 -->
+    <div id="configPanel" class="modal">
+        <div class="modal-content">
+            <h2>转码配置管理</h2>
+            <div class="form-group">
+                <label>配置名称:</label>
+                <input type="text" id="configName" placeholder="例如：高清配置">
+            </div>
+            <div class="form-group">
+                <label>视频编码:</label>
+                <select id="videoCodec">
+                    <option value="copy">直接复制</option>
+                    <option value="h264">H.264</option>
+                    <option value="h265">H.265</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>视频码率:</label>
+                <input type="text" id="videoBitrate" placeholder="例如：2000k">
+            </div>
+            <div class="form-group">
+                <label>视频尺寸:</label>
+                <select id="videoSize">
+                    <option value="copy">保持原始尺寸</option>
+                    <option value="1920x1080">1920x1080</option>
+                    <option value="1280x720">1280x720</option>
+                    <option value="854x480">854x480</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>帧率:</label>
+                <select id="framerate">
+                    <option value="copy">保持原始帧率</option>
+                    <option value="60">60</option>
+                    <option value="30">30</option>
+                    <option value="25">25</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>音频编码:</label>
+                <select id="audioCodec">
+                    <option value="copy">直接复制</option>
+                    <option value="aac">AAC</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>音频码率:</label>
+                <input type="text" id="audioBitrate" placeholder="例如：128k">
+            </div>
+            <div class="form-actions">
+                <button onclick="saveConfig()" class="action-btn primary">保存配置</button>
+                <button onclick="document.getElementById('configPanel').style.display='none'" class="action-btn secondary">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/config.js"></script>
+    <script src="/static/js/stream.js"></script>
+    <script src="/static/js/utils.js"></script>
+</body>
+</html> 
