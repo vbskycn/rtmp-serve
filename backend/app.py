@@ -7,13 +7,16 @@ import time
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
-from backend.models import Session, Stream, User
+from backend.models import Session, Stream, User, Base, engine
 import psutil
 from functools import wraps, lru_cache
 from flask import session
 from backend.logging_config import setup_logging
 import secrets
 from backend.config import Config
+
+# 确保数据库和表已创建
+Base.metadata.create_all(engine)
 
 app = Flask(__name__)
 CORS(app)
@@ -46,7 +49,7 @@ class StreamManager:
         self.streams = {}
         self.session = Session()
         self._cache = {}
-        self._cache_timeout = 300  # 5分钟缓���
+        self._cache_timeout = 300  # 5分钟缓存
         
         self.start_health_check_thread()
         
@@ -305,7 +308,7 @@ class StreamManager:
             except Exception as e:
                 return {
                     'status': 'warning',
-                    'message': '无法获取流信息',
+                    'message': '无��获取流信息',
                     'error': str(e)
                 }
         
@@ -606,8 +609,28 @@ def log_response(response):
     return response
 
 @app.route('/api/stats')
-def get_stats():
-    return jsonify(stream_manager.get_system_stats())
+def get_system_stats():
+    try:
+        cpu_percent = psutil.cpu_percent(interval=1)
+        memory = psutil.virtual_memory()
+        network = psutil.net_io_counters()
+        
+        return jsonify({
+            'cpu_percent': cpu_percent,
+            'memory_percent': memory.percent,
+            'memory_used': memory.used,
+            'memory_total': memory.total,
+            'network_speed': (network.bytes_sent + network.bytes_recv) / 1024 / 1024  # MB/s
+        })
+    except Exception as e:
+        logging.error(f"Error getting system stats: {e}")
+        return jsonify({
+            'cpu_percent': 0,
+            'memory_percent': 0,
+            'memory_used': 0,
+            'memory_total': 0,
+            'network_speed': 0
+        })
 
 @app.route('/help')
 @login_required

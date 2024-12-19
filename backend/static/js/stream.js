@@ -42,7 +42,7 @@ function closeModal(modal) {
 
 // 显示配置面板
 function showConfigPanel() {
-    debug('显示配置面��');
+    debug('显示配置面����');
     const formHtml = `
         <div class="modal-content">
             <div class="modal-header">
@@ -469,7 +469,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // 批量操作按钮
+    // ���量操作按钮
     document.querySelectorAll('.panel-section button[data-action]').forEach(btn => {
         btn.addEventListener('click', function(e) {
             e.preventDefault();
@@ -560,4 +560,82 @@ function submitAddStream() {
         alert(error.message || '添加失败');
     });
 }
+
+// 显示添加表单
+function showAddForm() {
+    debug('显示添加表单');
+    const formHtml = `
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>添加新流</h2>
+                <span class="close" onclick="closeModal(this.closest('.modal'))">&times;</span>
+            </div>
+            <form id="addStreamForm">
+                <div class="form-group">
+                    <label>名称：</label>
+                    <input type="text" id="streamName" required>
+                </div>
+                <div class="form-group">
+                    <label>源地址：</label>
+                    <input type="text" id="sourceUrl" required>
+                </div>
+                <div class="form-group">
+                    <label>推流密钥：</label>
+                    <input type="text" id="streamKey" required>
+                </div>
+                <div class="form-group">
+                    <label>输出类型：</label>
+                    <select id="outputUrlType" onchange="updateOutputUrl()">
+                        <option value="local">本地</option>
+                        <option value="remote">远程</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>输出地址：</label>
+                    <input type="text" id="outputUrl" readonly>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="action-btn primary" onclick="submitAddStream()">添加</button>
+                    <button type="button" class="action-btn" onclick="closeModal(this.closest('.modal'))">取消</button>
+                </div>
+            </form>
+        </div>
+    `;
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = formHtml;
+    document.body.appendChild(modal);
+    updateOutputUrl();
+}
+
+// 更新系统状态
+async function updateSystemStats() {
+    try {
+        const response = await fetch('/api/stats');
+        const stats = await response.json();
+        
+        // 更新CPU和内存使用率
+        document.getElementById('cpuUsage').textContent = `${stats.cpu_percent}%`;
+        document.getElementById('memoryUsage').textContent = `${stats.memory_percent}%`;
+        document.getElementById('networkUsage').textContent = `${stats.network_speed} MB/s`;
+        
+        // 更新图表
+        if (window.cpuChart) {
+            window.cpuChart.data.datasets[0].data.push(stats.cpu_percent);
+            window.cpuChart.data.datasets[0].data = window.cpuChart.data.datasets[0].data.slice(-20);
+            window.cpuChart.update();
+        }
+        
+        if (window.memoryChart) {
+            window.memoryChart.data.datasets[0].data.push(stats.memory_percent);
+            window.memoryChart.data.datasets[0].data = window.memoryChart.data.datasets[0].data.slice(-20);
+            window.memoryChart.update();
+        }
+    } catch (error) {
+        console.error('Failed to update system stats:', error);
+    }
+}
+
+// 定期更新系统状态
+setInterval(updateSystemStats, 2000);
 </rewritten_file> 
