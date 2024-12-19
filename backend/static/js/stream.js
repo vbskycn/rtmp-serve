@@ -42,7 +42,7 @@ function closeModal(modal) {
 
 // 显示配置面板
 function showConfigPanel() {
-    debug('显示配置面����');
+    debug('显示配置面');
     const formHtml = `
         <div class="modal-content">
             <div class="modal-header">
@@ -266,87 +266,112 @@ function updateStreamTable() {
 }
 
 // 启动流
-async function startStream(id) {
-    try {
-        showLoading();
-        const response = await fetch(`/api/streams/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'start' })
-        });
-        
-        const data = await response.json();
+function startStream(id) {
+    if (!confirm('确定要启动这个流吗？')) {
+        return;
+    }
+    
+    showLoading();
+    fetch(`/api/streams/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start' })
+    })
+    .then(response => response.json())
+    .then(data => {
+        hideLoading();
         if (data.status === 'success') {
-            await refreshStreamList();
             showSuccess('启动成功');
+            refreshStreamList();
         } else {
             throw new Error(data.message || '启动失败');
         }
-    } catch (error) {
-        console.error('Failed to start stream:', error);
-        alert(error.message || '启动失败');
-    } finally {
+    })
+    .catch(error => {
         hideLoading();
-    }
+        handleError(error);
+    });
 }
 
 // 停止流
-async function stopStream(id) {
+function stopStream(id) {
     if (!confirm('确定要停止这个流吗？')) {
         return;
     }
     
-    try {
-        showLoading();
-        const response = await fetch(`/api/streams/${id}`, {
-            method: 'DELETE'
-        });
-        
-        const data = await response.json();
+    showLoading();
+    fetch(`/api/streams/${id}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        hideLoading();
         if (data.status === 'success') {
-            await refreshStreamList();
             showSuccess('停止成功');
+            refreshStreamList();
         } else {
             throw new Error(data.message || '停止失败');
         }
-    } catch (error) {
-        console.error('Failed to stop stream:', error);
-        alert(error.message || '停止失败');
-    } finally {
+    })
+    .catch(error => {
         hideLoading();
+        handleError(error);
+    });
+}
+
+// 删除流
+function deleteStream(id) {
+    if (!confirm('确定要删除这个流吗？此操作不可恢复！')) {
+        return;
     }
+    
+    showLoading();
+    fetch(`/api/streams/${id}`, {
+        method: 'DELETE',
+        headers: { 'X-Delete-Permanent': 'true' }
+    })
+    .then(response => response.json())
+    .then(data => {
+        hideLoading();
+        if (data.status === 'success') {
+            showSuccess('删除成功');
+            refreshStreamList();
+        } else {
+            throw new Error(data.message || '删除失败');
+        }
+    })
+    .catch(error => {
+        hideLoading();
+        handleError(error);
+    });
 }
 
 // 搜索流
 function searchStreams(keyword) {
-    const tbody = document.getElementById('streamTableBody');
-    const rows = tbody.getElementsByTagName('tr');
-    
+    const rows = document.querySelectorAll('#streamTableBody tr');
     keyword = keyword.toLowerCase();
-    for (let row of rows) {
+    
+    rows.forEach(row => {
         const text = row.textContent.toLowerCase();
         row.style.display = text.includes(keyword) ? '' : 'none';
-    }
+    });
 }
 
 // 筛选流
 function filterStreams(status) {
-    const tbody = document.getElementById('streamTableBody');
-    const rows = tbody.getElementsByTagName('tr');
-    
-    for (let row of rows) {
+    const rows = document.querySelectorAll('#streamTableBody tr');
+    rows.forEach(row => {
         if (status === 'all') {
             row.style.display = '';
         } else {
             const statusCell = row.querySelector('td:nth-child(7)');
-            const hasStatus = statusCell.textContent.toLowerCase().includes(status);
-            row.style.display = hasStatus ? '' : 'none';
+            row.style.display = statusCell.textContent.toLowerCase().includes(status) ? '' : 'none';
         }
-    }
+    });
     
     // 更新筛选按钮状态
     document.querySelectorAll('.filter-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.getAttribute('data-filter') === status);
+        btn.classList.toggle('active', btn.dataset.filter === status);
     });
 }
 
@@ -354,43 +379,53 @@ function filterStreams(status) {
 function batchAction(action) {
     const selectedStreams = Array.from(document.querySelectorAll('.stream-select:checked'))
         .map(checkbox => checkbox.value);
-        
+    
     if (selectedStreams.length === 0) {
-        alert('请选择要操作的流');
+        alert('请先选择要操作的流');
         return;
     }
     
-    const actions = {
-        start: '启动',
-        stop: '停止',
-        delete: '删除'
+    const actionMap = {
+        'start': '启动',
+        'stop': '停止',
+        'delete': '删除'
     };
     
-    if (!confirm(`确定要${actions[action]}选中的 ${selectedStreams.length} 个流吗？`)) {
+    if (!confirm(`确定要${actionMap[action]}选中的 ${selectedStreams.length} 个流吗？`)) {
         return;
     }
     
-    const promises = selectedStreams.map(streamId => {
-        const url = `/api/streams/${streamId}`;
-        const method = action === 'delete' ? 'DELETE' : 'PUT';
-        const body = action === 'start' ? JSON.stringify({ action: 'start' }) : null;
-        
-        return fetch(url, { 
-            method, 
-            headers: { 'Content-Type': 'application/json' },
-            body 
-        })
-        .then(response => response.json())
-        .then(result => ({ streamId, result }));
+    showLoading();
+    Promise.all(selectedStreams.map(id => {
+        switch(action) {
+            case 'start':
+                return fetch(`/api/streams/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'start' })
+                });
+            case 'stop':
+                return fetch(`/api/streams/${id}`, {
+                    method: 'DELETE'
+                });
+            case 'delete':
+                return fetch(`/api/streams/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'X-Delete-Permanent': 'true' }
+                });
+        }
+    }))
+    .then(responses => Promise.all(responses.map(r => r.json())))
+    .then(results => {
+        hideLoading();
+        const successCount = results.filter(r => r.status === 'success').length;
+        showSuccess(`批量${actionMap[action]}完成，${successCount}/${selectedStreams.length} 个操作成功`);
+        refreshStreamList();
+    })
+    .catch(error => {
+        hideLoading();
+        handleError(error);
     });
-    
-    Promise.all(promises)
-        .then(results => {
-            const success = results.filter(r => r.result.status === 'success').length;
-            alert(`操作完成：${success}/${selectedStreams.length} 个操作成功`);
-            refreshStreamList();
-        })
-        .catch(handleError);
 }
 
 // 导出配置
@@ -469,7 +504,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // ���量操作按钮
+    // 批量操作按钮
     document.querySelectorAll('.panel-section button[data-action]').forEach(btn => {
         btn.addEventListener('click', function(e) {
             e.preventDefault();
@@ -524,7 +559,7 @@ function showSuccess(message) {
     alert(message);
 }
 
-// 提交添加流表单
+// 提交添���流表单
 function submitAddStream() {
     const streamKey = document.getElementById('streamKey').value;
     if (!streamKey) {

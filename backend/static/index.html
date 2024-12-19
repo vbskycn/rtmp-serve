@@ -34,9 +34,9 @@
             </div>
             <div class="user-info">
                 <span id="currentUser">管理员</span>
-                <button onclick="window.location.href='/api/logout'" class="logout-btn">
+                <a href="/api/logout" class="logout-btn">
                     <i class="fas fa-sign-out-alt"></i> 退出
-                </button>
+                </a>
             </div>
             <div class="nav-links">
                 <a href="/help" class="nav-link">
@@ -134,12 +134,12 @@
                     <div class="list-header">
                         <h2>流列表</h2>
                         <div class="list-actions">
-                            <select id="pageSize" onchange="changePageSize(this.value)">
+                            <select id="pageSize">
                                 <option value="10">10条/页</option>
                                 <option value="20">20条/页</option>
                                 <option value="50">50条/页</option>
                             </select>
-                            <button onclick="refreshStreamList()" class="refresh-btn">
+                            <button class="refresh-btn">
                                 <i class="fas fa-sync"></i> 刷新
                             </button>
                         </div>
@@ -149,9 +149,9 @@
                             <thead>
                                 <tr>
                                     <th class="batch-select">
-                                        <input type="checkbox" onclick="toggleAllStreams(this)">
+                                        <input type="checkbox" id="selectAll">
                                     </th>
-                                    <th onclick="sortTable('name')">名称 <i class="fas fa-sort"></i></th>
+                                    <th>名称</th>
                                     <th>源地址</th>
                                     <th>推流地址</th>
                                     <th>播放地址</th>
@@ -161,66 +161,28 @@
                                 </tr>
                             </thead>
                             <tbody id="streamTableBody">
+                                <!-- 流列表将通过 JavaScript 动态填充 -->
                             </tbody>
                         </table>
                     </div>
                     <!-- 添加分页控件 -->
                     <div class="pagination">
-                        <button onclick="changePage('prev')" class="page-btn"><i class="fas fa-chevron-left"></i></button>
+                        <button class="page-btn prev-btn">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
                         <span id="pageInfo">第 1 页</span>
-                        <button onclick="changePage('next')" class="page-btn"><i class="fas fa-chevron-right"></i></button>
-                    </div>
-                </div>
-
-                <!-- 添加监控图表 -->
-                <div class="charts-container">
-                    <div class="chart-box">
-                        <h3>CPU使用率趋势</h3>
-                        <canvas id="cpuChart"></canvas>
-                    </div>
-                    <div class="chart-box">
-                        <h3>内存使用率趋势</h3>
-                        <canvas id="memoryChart"></canvas>
+                        <button class="page-btn next-btn">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- 流详情模态框 -->
-    <div id="streamDetailModal" class="modal">
-        <div class="modal-content">
-            <h2>流详情</h2>
-            <div class="stream-metrics">
-                <div class="metric-group">
-                    <h3>基本信息</h3>
-                    <div id="basicInfo"></div>
-                </div>
-                <div class="metric-group">
-                    <h3>性能指标</h3>
-                    <div id="performanceMetrics"></div>
-                </div>
-                <div class="metric-group">
-                    <h3>错误日志</h3>
-                    <div id="errorLogs"></div>
-                </div>
-            </div>
-            <div class="preview-container">
-                <h3>预览</h3>
-                <div id="streamPreview"></div>
-            </div>
-            <div class="modal-actions">
-                <button onclick="closeStreamDetail()" class="action-btn">关闭</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 其他模态框保持不变 -->
-    <!-- ... -->
-
-    <script src="/static/js/config.js"></script>
-    <script src="/static/js/stream.js"></script>
+    <!-- 加载 JavaScript 文件 -->
     <script src="/static/js/utils.js"></script>
+    <script src="/static/js/stream.js"></script>
     <script src="/static/js/charts.js"></script>
 </body>
 </html> 
