@@ -4,21 +4,18 @@ from sqlalchemy.orm import sessionmaker
 import os
 from datetime import datetime
 
-# 确保数据目录存在并设置正确权限
+# 确保数据目录存在
 def ensure_db_dir():
     db_dir = '/app/data'
     if not os.path.exists(db_dir):
-        os.makedirs(db_dir, mode=0o777)
-    # 确保目录有正确的权限
-    os.chmod(db_dir, 0o777)
-    # 如果数据库文件存在，确保它也有正确的权限
-    db_file = os.path.join(db_dir, 'streams.db')
-    if os.path.exists(db_file):
-        os.chmod(db_file, 0o666)
+        try:
+            os.makedirs(db_dir)
+        except Exception as e:
+            print(f"Warning: Could not create directory {db_dir}: {e}")
 
 ensure_db_dir()
 
-# 创建数据库引擎，使用相对路径
+# 创建数据库引擎
 engine = create_engine('sqlite:////app/data/streams.db', 
     connect_args={
         'check_same_thread': False,
