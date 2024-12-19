@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 import os
 from backend.models import Session, Stream
 import psutil
-from functools import wraps
+from functools import wraps, lru_cache
 from flask import session
 from backend.logging_config import setup_logging
 import secrets
@@ -265,7 +265,7 @@ class StreamManager:
                 stream.audio_bitrate = stream_data.get('audioBitrate', stream.audio_bitrate)
                 self.session.commit()
                 
-                # 使用新的配置重新启动流
+                # 使用新的配置重���启动流
                 return self.add_stream(stream_data)
             return False
         except Exception as e:
@@ -420,7 +420,7 @@ class StreamManager:
 
 stream_manager = StreamManager()
 
-# 录装饰器
+# 录装���器
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
