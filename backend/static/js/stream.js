@@ -31,12 +31,10 @@ function hideLoading() {
 }
 
 // 关闭模态框
-function closeModal(modal) {
-    if (typeof modal === 'string') {
-        modal = document.querySelector(modal);
-    }
-    if (modal && modal.parentNode) {
-        modal.parentNode.removeChild(modal);
+function closeModal() {
+    const modal = document.querySelector('.modal');
+    if (modal) {
+        modal.remove();
     }
 }
 
@@ -559,7 +557,7 @@ function showSuccess(message) {
     alert(message);
 }
 
-// 提交添���流表单
+// 提交添加流表单
 function submitAddStream() {
     const streamKey = document.getElementById('streamKey').value;
     if (!streamKey) {
