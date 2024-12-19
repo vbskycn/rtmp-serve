@@ -11,8 +11,8 @@ services:
     ports:
       - "10088:10088"
     volumes:
-      - ./data:/app/data:rw
-      - ./logs:/app/logs:rw
+      - ./data:/app/data
+      - ./logs:/app/logs
       - ./backend:/app/backend:ro
     environment:
       - PORT=10088
@@ -30,19 +30,19 @@ services:
       - srs
     restart: unless-stopped
     working_dir: /app
+    user: root
     command: >
       bash -c "
-        chmod -R 777 /app/data &&
-        touch /app/data/streams.db &&
-        chmod 666 /app/data/streams.db &&
-        flask run --host=0.0.0.0 --port=10088
+        mkdir -p /app/data /app/logs &&
+        chown -R nobody:nogroup /app/data /app/logs &&
+        chmod -R 777 /app/data /app/logs &&
+        gosu nobody flask run --host=0.0.0.0 --port=10088
       "
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-    user: nobody
 
   srs:
     image: ossrs/srs:4
