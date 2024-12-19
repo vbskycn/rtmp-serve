@@ -30,13 +30,12 @@ services:
       - srs
     restart: unless-stopped
     working_dir: /app
-    user: root
     command: >
       bash -c "
         mkdir -p /app/data /app/logs &&
-        chown -R nobody:nogroup /app/data /app/logs &&
+        chown -R www-data:www-data /app/data /app/logs &&
         chmod -R 777 /app/data /app/logs &&
-        gosu nobody flask run --host=0.0.0.0 --port=10088
+        su www-data -s /bin/bash -c 'flask run --host=0.0.0.0 --port=10088'
       "
     logging:
       driver: "json-file"

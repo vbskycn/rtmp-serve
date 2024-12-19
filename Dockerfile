@@ -15,7 +15,6 @@ RUN apt-get update && apt-get install -y \
     procps \
     vim \
     sqlite3 \
-    gosu \
     && if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
        apt-get install -y --no-install-recommends \
        libnss3 \
@@ -38,8 +37,11 @@ RUN pip install --no-cache-dir flask-debugtoolbar
 COPY backend/ backend/
 COPY conf/ conf/
 
-# 创建必要的目录
-RUN mkdir -p /app/data/sessions /app/logs
+# 创建必要的目录并设置权限
+RUN mkdir -p /app/data/sessions /app/logs \
+    && chown -R www-data:www-data /app \
+    && chmod -R 755 /app \
+    && chmod -R 777 /app/data /app/logs
 
 # 设置环境变量
 ENV PYTHONPATH=/app
@@ -47,9 +49,8 @@ ENV FLASK_APP=backend/app.py
 ENV FLASK_ENV=development
 ENV FLASK_DEBUG=1
 
-# 添加启动脚本
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# 切换到非 root 用户
+USER www-data
 
-ENTRYPOINT ["docker-entrypoint.sh"]
+# 启动命令
 CMD ["flask", "run", "--host=0.0.0.0", "--port=10088"] 
