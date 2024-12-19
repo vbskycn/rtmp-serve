@@ -1,33 +1,33 @@
-version: '3'
+version: '3.8'
+
 services:
+  rtmp-server:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - PORT=5000
+      - HOST=0.0.0.0
+      - DEBUG=False
+      - DB_URL=sqlite:////app/data/streams.db
+      - LOG_LEVEL=INFO
+      - REMOTE_RTMP_URL=rtmp://ali.push.yximgs.com/live/
+      - LOCAL_RTMP_URL=rtmp://srs:1935/live/
+    depends_on:
+      - srs
+    restart: unless-stopped
+
   srs:
     image: ossrs/srs:4
     ports:
       - "1935:1935"  # RTMP
+      - "1985:1985"  # HTTP API
       - "8080:8080"  # HTTP-FLV
-      - "1985:1985"  # API
     volumes:
       - ./conf/srs.conf:/usr/local/srs/conf/srs.conf
-    restart: always
-
-  rtmp-server:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-    ports:
-      - "10088:10088"
-    volumes:
-      - ./:/app
-      - ./logs:/app/logs
-      - ./data:/app/data
-    environment:
-      - PORT=10088
-      - HOST=0.0.0.0
-      - DEBUG=True
-      - PYTHONUNBUFFERED=1
-      - PYTHONPATH=/app
-    depends_on:
-      - srs
-    restart: always
-    working_dir: /app
-    command: ["gunicorn", "--log-level", "debug", "-w", "4", "-b", "0.0.0.0:10088", "backend.app:app"]
+    restart: unless-stopped
