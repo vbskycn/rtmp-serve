@@ -34,7 +34,7 @@ app.config.update(
     SESSION_COOKIE_SECURE=False,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_NAME='rtmp_session',  # 自定义会话cookie名称
-    SESSION_TYPE='filesystem',  # 使用文件系统存储会话
+    SESSION_TYPE='filesystem',  # 使用文���系统存储会话
     SESSION_FILE_DIR='data/sessions',  # 会话文件存储目录
     SESSION_FILE_THRESHOLD=500  # 会话文件数量阈值
 )
@@ -265,7 +265,7 @@ class StreamManager:
                 stream.audio_bitrate = stream_data.get('audioBitrate', stream.audio_bitrate)
                 self.session.commit()
                 
-                # 使用新的配置重���启动流
+                # 使用新的配置重新启动流
                 return self.add_stream(stream_data)
             return False
         except Exception as e:
@@ -420,7 +420,7 @@ class StreamManager:
 
 stream_manager = StreamManager()
 
-# 录装���器
+# 录装器
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -585,6 +585,10 @@ def health_check():
         'status': 'healthy',
         'timestamp': datetime.now().isoformat()
     })
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory('static', 'favicon.ico')
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
