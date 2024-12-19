@@ -250,7 +250,7 @@ async function stopStream(id) {
         const data = await response.json();
         if (data.status === 'success') {
             await refreshStreamList();
-            showSuccess('停止成功');
+            showSuccess('停止���功');
         } else {
             throw new Error(data.message || '停止失败');
         }
@@ -295,7 +295,7 @@ function filterStreams(status) {
     });
 }
 
-// 批量操作
+// 批���操作
 function batchAction(action) {
     const selectedStreams = Array.from(document.querySelectorAll('.stream-select:checked'))
         .map(checkbox => checkbox.value);
@@ -379,51 +379,25 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM加载完成，开始初始化...');
     
     // 添加流按钮
-    const addStreamBtn = document.querySelector('button[onclick="showAddForm()"]');
-    if (addStreamBtn) {
-        addStreamBtn.removeAttribute('onclick');
-        addStreamBtn.addEventListener('click', showAddForm);
-    }
+    document.getElementById('addStreamBtn').addEventListener('click', showAddForm);
     
     // 批量添加按钮
-    const batchAddBtn = document.querySelector('button[onclick="showBatchAddForm()"]');
-    if (batchAddBtn) {
-        batchAddBtn.removeAttribute('onclick');
-        batchAddBtn.addEventListener('click', showBatchAddForm);
-    }
+    document.getElementById('batchAddBtn').addEventListener('click', showBatchAddForm);
     
     // 转码配置按钮
-    const configBtn = document.querySelector('button[onclick="showConfigPanel()"]');
-    if (configBtn) {
-        configBtn.removeAttribute('onclick');
-        configBtn.addEventListener('click', showConfigPanel);
-    }
+    document.getElementById('configBtn').addEventListener('click', showConfigPanel);
     
     // 导出配置按钮
-    const exportBtn = document.querySelector('button[onclick="exportStreams()"]');
-    if (exportBtn) {
-        exportBtn.removeAttribute('onclick');
-        exportBtn.addEventListener('click', exportStreams);
-    }
+    document.getElementById('exportBtn').addEventListener('click', exportStreams);
     
     // 批量操作按钮
-    document.querySelectorAll('.panel-section button').forEach(btn => {
-        const action = btn.getAttribute('onclick');
-        if (action && action.startsWith('batchAction')) {
-            const actionType = action.match(/'(\w+)'/)[1];
-            btn.removeAttribute('onclick');
-            btn.addEventListener('click', () => batchAction(actionType));
-        }
+    document.querySelectorAll('.panel-section button[data-action]').forEach(btn => {
+        btn.addEventListener('click', () => batchAction(btn.dataset.action));
     });
     
     // 筛选按钮
     document.querySelectorAll('.filter-btn').forEach(btn => {
-        const filter = btn.getAttribute('onclick');
-        if (filter && filter.startsWith('filterStreams')) {
-            const filterType = filter.match(/'(\w+)'/)[1];
-            btn.removeAttribute('onclick');
-            btn.addEventListener('click', () => filterStreams(filterType));
-        }
+        btn.addEventListener('click', () => filterStreams(btn.dataset.filter));
     });
     
     // 搜索输入框
@@ -435,7 +409,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // 刷新按钮
     const refreshBtn = document.querySelector('.refresh-btn');
     if (refreshBtn) {
-        refreshBtn.removeAttribute('onclick');
         refreshBtn.addEventListener('click', refreshStreamList);
     }
     
