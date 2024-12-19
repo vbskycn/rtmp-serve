@@ -13,7 +13,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-      - ./backend:/app/backend:ro
     environment:
       - PORT=10088
       - HOST=0.0.0.0
