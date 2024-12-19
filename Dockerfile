@@ -5,7 +5,7 @@ FROM --platform=$TARGETPLATFORM python:3.8-slim
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 
-# 安装系统依赖（根据架构选择不同的包）
+# 安装系统依赖
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libpq-dev \
@@ -23,11 +23,8 @@ RUN apt-get update && apt-get install -y \
 # 设置工作目录
 WORKDIR /app
 
-# 复制项目文件
-COPY . .
-
-# 创建必要的目录
-RUN mkdir -p data/sessions logs
+# 先复制依赖文件
+COPY requirements.txt .
 
 # 安装 Python 依赖
 RUN pip install --no-cache-dir -r requirements.txt
@@ -35,14 +32,21 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 安装调试工具
 RUN pip install --no-cache-dir flask-debugtoolbar
 
+# 复制项目文件
+COPY backend/ backend/
+COPY conf/ conf/
+
+# 创建必要的目录
+RUN mkdir -p data/sessions logs
+
 # 设置数据目录权限
-RUN chmod -R 777 /app/data /app/logs
+RUN chmod -R 777 data logs
 
 # 设置环境变量
 ENV PYTHONPATH=/app
-ENV FLASK_APP=backend.app
+ENV FLASK_APP=backend/app.py
 ENV FLASK_ENV=development
 ENV FLASK_DEBUG=1
 
 # 启动命令
-CMD ["python", "-m", "flask", "run", "--host=0.0.0.0", "--port=5000"] 
+CMD ["flask", "run", "--host=0.0.0.0", "--port=10088"] 

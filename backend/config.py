@@ -1,12 +1,13 @@
 import os
 from dotenv import load_dotenv
 
+load_dotenv()
+
 class Config:
-    def __init__(self):
-        load_dotenv()
-        self.PORT = int(os.getenv('PORT', 10088))
-        self.HOST = os.getenv('HOST', '0.0.0.0')
-        self.DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
-        self.DB_URL = os.getenv('DB_URL', 'sqlite:///streams.db')
-        self.MAX_RETRIES = int(os.getenv('MAX_RETRIES', 3))
-        self.FFMPEG_PATH = os.getenv('FFMPEG_PATH', 'ffmpeg') 
+    PORT = int(os.getenv('PORT', 10088))
+    HOST = os.getenv('HOST', '0.0.0.0')
+    DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
+    DB_URL = os.getenv('DB_URL', 'sqlite:///data/streams.db')
+    LOG_LEVEL = os.getenv('LOG_LEVEL', 'DEBUG')
+    REMOTE_RTMP_URL = os.getenv('REMOTE_RTMP_URL', 'rtmp://ali.push.yximgs.com/live/')
+    LOCAL_RTMP_URL = os.getenv('LOCAL_RTMP_URL', 'rtmp://srs:1935/live/')

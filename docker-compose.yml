@@ -18,18 +18,19 @@ services:
       - PORT=10088
       - HOST=0.0.0.0
       - DEBUG=True
-      - DB_URL=sqlite:////app/data/streams.db
+      - DB_URL=sqlite:///data/streams.db
       - LOG_LEVEL=DEBUG
       - REMOTE_RTMP_URL=rtmp://ali.push.yximgs.com/live/
       - LOCAL_RTMP_URL=rtmp://srs:1935/live/
       - PYTHONUNBUFFERED=1
+      - FLASK_APP=backend/app.py
       - FLASK_ENV=development
       - FLASK_DEBUG=1
     depends_on:
       - srs
     restart: unless-stopped
-    command: >
-      sh -c "python -m flask run --host=0.0.0.0 --port=10088"
+    working_dir: /app
+    command: flask run --host=0.0.0.0 --port=10088
     logging:
       driver: "json-file"
       options:
