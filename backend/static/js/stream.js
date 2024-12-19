@@ -4,6 +4,11 @@ const LOCAL_RTMP_URL = 'rtmp://localhost:1935/live/';
 const REMOTE_PULL_URL = 'http://ali.hlspull.yximgs.com/live/';
 const LOCAL_PULL_URL = 'http://localhost:8080/live/';
 
+// 全局变量
+let currentPage = 1;
+let pageSize = 10;
+let streams = [];
+
 // 添加调试函数
 function debug(message) {
     console.log(`[Debug] ${message}`);
@@ -281,4 +286,127 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // 自动刷新状态
 setInterval(refreshStreamList, 30000);
+
+// 初始化事件监听
+function initEventListeners() {
+    // 添加流按钮
+    document.querySelector('button[onclick="showAddForm()"]').addEventListener('click', showAddForm);
+    // 批量添加按钮
+    document.querySelector('button[onclick="showBatchAddForm()"]').addEventListener('click', showBatchAddForm);
+    // 筛选按钮
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => filterStreams(btn.getAttribute('data-filter')));
+    });
+    // 搜索输入框
+    document.getElementById('searchInput').addEventListener('keyup', (e) => searchStreams(e.target.value));
+}
+
+// 刷新流列表
+async function refreshStreamList() {
+    try {
+        const response = await fetch('/api/streams');
+        streams = await response.json();
+        updateStreamTable();
+        updateStats();
+    } catch (error) {
+        console.error('Failed to fetch streams:', error);
+        showError('获取流列表失败');
+    }
+}
+
+// 更新流表格
+function updateStreamTable() {
+    const tbody = document.getElementById('streamTableBody');
+    tbody.innerHTML = '';
+    
+    const filteredStreams = filterAndSearchStreams();
+    const paginatedStreams = paginateStreams(filteredStreams);
+    
+    paginatedStreams.forEach(stream => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><input type="checkbox" value="${stream.id}"></td>
+            <td>${stream.name}</td>
+            <td>${stream.source_url}</td>
+            <td>${stream.output_url}${stream.key}</td>
+            <td>${getPlayUrl(stream)}</td>
+            <td>${getCodecInfo(stream)}</td>
+            <td>${getStatusBadge(stream.status)}</td>
+            <td>${getActionButtons(stream)}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+    
+    updatePagination(filteredStreams.length);
+}
+
+// 添加流
+async function addStream(data) {
+    try {
+        const response = await fetch('/api/streams', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+        
+        if (!response.ok) {
+            throw new Error('添加流失败');
+        }
+        
+        await refreshStreamList();
+        showSuccess('添加流成功');
+    } catch (error) {
+        console.error('Failed to add stream:', error);
+        showError(error.message);
+    }
+}
+
+// 删除流
+async function deleteStream(id) {
+    if (!confirm('确定要删除这个流吗？')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/streams/${id}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            throw new Error('删除流失败');
+        }
+        
+        await refreshStreamList();
+        showSuccess('删除流成功');
+    } catch (error) {
+        console.error('Failed to delete stream:', error);
+        showError(error.message);
+    }
+}
+
+// 更新统计信息
+function updateStats() {
+    const stats = {
+        running: streams.filter(s => s.status === 'running').length,
+        error: streams.filter(s => s.status === 'error').length,
+        stopped: streams.filter(s => s.status === 'stopped').length
+    };
+    
+    document.getElementById('runningStreams').textContent = stats.running;
+    document.getElementById('errorStreams').textContent = stats.error;
+    document.getElementById('stoppedStreams').textContent = stats.stopped;
+}
+
+// 添加错误提示功能
+function showError(message) {
+    // 实现错误提示
+    alert(message);
+}
+
+function showSuccess(message) {
+    // 实现成功提示
+    alert(message);
+}
 </rewritten_file> 
