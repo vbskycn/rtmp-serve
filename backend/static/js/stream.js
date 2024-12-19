@@ -14,69 +14,119 @@ function debug(message) {
     console.log(`[Debug] ${message}`);
 }
 
-// 显示/隐藏表单
-function showAddForm() {
-    debug('显示添加表单');
+// 显示加载中
+function showLoading() {
+    const loading = document.createElement('div');
+    loading.className = 'loading-overlay';
+    loading.innerHTML = '<div class="loading-spinner"></div>';
+    document.body.appendChild(loading);
+}
+
+// 隐藏加载中
+function hideLoading() {
+    const loading = document.querySelector('.loading-overlay');
+    if (loading) {
+        loading.remove();
+    }
+}
+
+// 关闭模态框
+function closeModal(modal) {
+    if (typeof modal === 'string') {
+        modal = document.querySelector(modal);
+    }
+    if (modal && modal.parentNode) {
+        modal.parentNode.removeChild(modal);
+    }
+}
+
+// 显示配置面板
+function showConfigPanel() {
+    debug('显示配置面��');
     const formHtml = `
         <div class="modal-content">
             <div class="modal-header">
-                <h2>添加新流</h2>
+                <h2>转码配置</h2>
                 <span class="close" onclick="closeModal(this.closest('.modal'))">&times;</span>
             </div>
-            <form id="addStreamForm">
+            <div class="config-form">
                 <div class="form-group">
-                    <label>名称：</label>
-                    <input type="text" id="streamName" required>
+                    <label>配置名称：</label>
+                    <input type="text" id="configName" required>
                 </div>
                 <div class="form-group">
-                    <label>源地址：</label>
-                    <input type="text" id="sourceUrl" required>
-                </div>
-                <div class="form-group">
-                    <label>推流密钥：</label>
-                    <input type="text" id="streamKey" required>
-                </div>
-                <div class="form-group">
-                    <label>输出类型：</label>
-                    <select id="outputUrlType" onchange="updateOutputUrl()">
-                        <option value="local">本地</option>
-                        <option value="remote">远程</option>
+                    <label>视频编码：</label>
+                    <select id="videoCodec">
+                        <option value="copy">直接复制</option>
+                        <option value="h264">H.264</option>
+                        <option value="h265">H.265</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>输出地址：</label>
-                    <input type="text" id="outputUrl" readonly>
+                    <label>视频码率：</label>
+                    <input type="text" id="videoBitrate" placeholder="例如：2000k">
+                </div>
+                <div class="form-group">
+                    <label>音频编码：</label>
+                    <select id="audioCodec">
+                        <option value="copy">直接复制</option>
+                        <option value="aac">AAC</option>
+                        <option value="mp3">MP3</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>音频码率：</label>
+                    <input type="text" id="audioBitrate" placeholder="例如：128k">
                 </div>
                 <div class="modal-actions">
-                    <button type="button" class="action-btn primary" onclick="submitAddStream()">添加</button>
+                    <button type="button" class="action-btn primary" onclick="saveConfig()">保存</button>
                     <button type="button" class="action-btn" onclick="closeModal(this.closest('.modal'))">取消</button>
                 </div>
-            </form>
+            </div>
         </div>
     `;
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.innerHTML = formHtml;
     document.body.appendChild(modal);
-    updateOutputUrl();
 }
 
-function hideAddForm() {
-    document.getElementById('addStreamForm').style.display = 'none';
-}
-
+// 显示批量添加表单
 function showBatchAddForm() {
-    document.getElementById('batchAddForm').style.display = 'block';
-    updateStreamConfigSelect();
-}
-
-function hideBatchAddForm() {
-    document.getElementById('batchAddForm').style.display = 'none';
-}
-
-function showConfigPanel() {
-    const panel = document.getElementById('configPanel');
-    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    debug('显示批量添加表单');
+    const formHtml = `
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>批量添加流</h2>
+                <span class="close" onclick="closeModal(this.closest('.modal'))">&times;</span>
+            </div>
+            <div class="batch-form">
+                <div class="form-group">
+                    <label>源地址列表（每行一个）：</label>
+                    <textarea id="batchSourceUrls" rows="10" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label>输出类型：</label>
+                    <select id="batchOutputUrlType" onchange="updateBatchOutputUrl()">
+                        <option value="local">本地</option>
+                        <option value="remote">远程</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>转码配置：</label>
+                    <select id="batchStreamConfig"></select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="action-btn primary" onclick="addBatchStreams()">添加</button>
+                    <button type="button" class="action-btn" onclick="closeModal(this.closest('.modal'))">取消</button>
+                </div>
+            </div>
+        </div>
+    `;
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = formHtml;
+    document.body.appendChild(modal);
 }
 
 // 更新输出地址
@@ -337,7 +387,7 @@ function batchAction(action) {
     Promise.all(promises)
         .then(results => {
             const success = results.filter(r => r.result.status === 'success').length;
-            alert(`操作完成：${success}/${selectedStreams.length} 个���操作成功`);
+            alert(`操作完成：${success}/${selectedStreams.length} 个操作成功`);
             refreshStreamList();
         })
         .catch(handleError);
@@ -384,50 +434,76 @@ document.addEventListener('DOMContentLoaded', function() {
     debug('页面加载完成，开始初始化...');
     
     // 添加流按钮
-    document.getElementById('addStreamBtn').addEventListener('click', showAddForm);
+    const addBtn = document.getElementById('addStreamBtn');
+    if (addBtn) {
+        addBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            showAddForm();
+        });
+    }
     
     // 批量添加按钮
-    document.getElementById('batchAddBtn').addEventListener('click', showBatchAddForm);
+    const batchAddBtn = document.getElementById('batchAddBtn');
+    if (batchAddBtn) {
+        batchAddBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            showBatchAddForm();
+        });
+    }
     
     // 转码配置按钮
-    document.getElementById('configBtn').addEventListener('click', showConfigPanel);
+    const configBtn = document.getElementById('configBtn');
+    if (configBtn) {
+        configBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            showConfigPanel();
+        });
+    }
     
     // 导出配置按钮
-    document.getElementById('exportBtn').addEventListener('click', exportStreams);
+    const exportBtn = document.getElementById('exportBtn');
+    if (exportBtn) {
+        exportBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            exportStreams();
+        });
+    }
     
     // 批量操作按钮
     document.querySelectorAll('.panel-section button[data-action]').forEach(btn => {
-        btn.addEventListener('click', () => batchAction(btn.dataset.action));
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            batchAction(this.dataset.action);
+        });
     });
     
     // 筛选按钮
     document.querySelectorAll('.filter-btn').forEach(btn => {
-        btn.addEventListener('click', () => filterStreams(btn.dataset.filter));
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            filterStreams(this.dataset.filter);
+        });
     });
     
     // 搜索输入框
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
-        searchInput.addEventListener('input', (e) => searchStreams(e.target.value));
+        searchInput.addEventListener('input', function(e) {
+            searchStreams(e.target.value);
+        });
     }
     
     // 刷新按钮
     const refreshBtn = document.querySelector('.refresh-btn');
     if (refreshBtn) {
-        refreshBtn.addEventListener('click', refreshStreamList);
-    }
-    
-    // 页面��小选择
-    const pageSizeSelect = document.getElementById('pageSize');
-    if (pageSizeSelect) {
-        pageSizeSelect.addEventListener('change', (e) => changePageSize(e.target.value));
+        refreshBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            refreshStreamList();
+        });
     }
     
     // 初始化数据
     refreshStreamList();
-    
-    // 设置定时刷新（每30秒）
-    setInterval(refreshStreamList, 30000);
     
     debug('初始化完成');
 });
