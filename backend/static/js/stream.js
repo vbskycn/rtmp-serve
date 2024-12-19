@@ -16,43 +16,48 @@ function debug(message) {
 
 // 显示/隐藏表单
 function showAddForm() {
-    console.log('显示添加表单');
+    debug('显示添加表单');
     const formHtml = `
-        <div class="modal-header">
-            <h2>添加新流</h2>
-            <button class="close-btn" onclick="closeModal(this)">&times;</button>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>添加新流</h2>
+                <span class="close" onclick="closeModal(this.closest('.modal'))">&times;</span>
+            </div>
+            <form id="addStreamForm">
+                <div class="form-group">
+                    <label>名称：</label>
+                    <input type="text" id="streamName" required>
+                </div>
+                <div class="form-group">
+                    <label>源地址：</label>
+                    <input type="text" id="sourceUrl" required>
+                </div>
+                <div class="form-group">
+                    <label>推流密钥：</label>
+                    <input type="text" id="streamKey" required>
+                </div>
+                <div class="form-group">
+                    <label>输出类型：</label>
+                    <select id="outputUrlType" onchange="updateOutputUrl()">
+                        <option value="local">本地</option>
+                        <option value="remote">远程</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>输出地址：</label>
+                    <input type="text" id="outputUrl" readonly>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="action-btn primary" onclick="submitAddStream()">添加</button>
+                    <button type="button" class="action-btn" onclick="closeModal(this.closest('.modal'))">取消</button>
+                </div>
+            </form>
         </div>
-        <form id="addStreamForm" onsubmit="return false;">
-            <div class="form-group">
-                <label>名称：</label>
-                <input type="text" id="streamName" required>
-            </div>
-            <div class="form-group">
-                <label>源地址：</label>
-                <input type="text" id="sourceUrl" required>
-            </div>
-            <div class="form-group">
-                <label>推流密钥：</label>
-                <input type="text" id="streamKey" required>
-            </div>
-            <div class="form-group">
-                <label>输出类型：</label>
-                <select id="outputUrlType" onchange="updateOutputUrl()">
-                    <option value="local">本地</option>
-                    <option value="remote">远程</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>输出地址：</label>
-                <input type="text" id="outputUrl" readonly>
-            </div>
-            <div class="modal-actions">
-                <button type="submit" class="action-btn primary" onclick="addStream()">添加</button>
-                <button type="button" class="action-btn" onclick="closeModal(this)">取消</button>
-            </div>
-        </form>
     `;
-    showModal(formHtml);
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = formHtml;
+    document.body.appendChild(modal);
     updateOutputUrl();
 }
 
@@ -250,7 +255,7 @@ async function stopStream(id) {
         const data = await response.json();
         if (data.status === 'success') {
             await refreshStreamList();
-            showSuccess('停止���功');
+            showSuccess('停止成功');
         } else {
             throw new Error(data.message || '停止失败');
         }
@@ -295,7 +300,7 @@ function filterStreams(status) {
     });
 }
 
-// 批���操作
+// 批量操作
 function batchAction(action) {
     const selectedStreams = Array.from(document.querySelectorAll('.stream-select:checked'))
         .map(checkbox => checkbox.value);
@@ -332,7 +337,7 @@ function batchAction(action) {
     Promise.all(promises)
         .then(results => {
             const success = results.filter(r => r.result.status === 'success').length;
-            alert(`操作完成：${success}/${selectedStreams.length} 个流操作成功`);
+            alert(`操作完成：${success}/${selectedStreams.length} 个���操作成功`);
             refreshStreamList();
         })
         .catch(handleError);
@@ -376,7 +381,7 @@ function getStatusText(status) {
 
 // 页面加载时初始化
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOM加载完成，开始初始化...');
+    debug('页面加载完成，开始初始化...');
     
     // 添加流按钮
     document.getElementById('addStreamBtn').addEventListener('click', showAddForm);
@@ -412,7 +417,7 @@ document.addEventListener('DOMContentLoaded', function() {
         refreshBtn.addEventListener('click', refreshStreamList);
     }
     
-    // 页面大小选择
+    // 页面��小选择
     const pageSizeSelect = document.getElementById('pageSize');
     if (pageSizeSelect) {
         pageSizeSelect.addEventListener('change', (e) => changePageSize(e.target.value));
@@ -424,7 +429,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // 设置定时刷新（每30秒）
     setInterval(refreshStreamList, 30000);
     
-    console.log('初始化完成');
+    debug('初始化完成');
 });
 
 // 添加调试功能
@@ -441,5 +446,42 @@ function handleError(error) {
 // 成功提示
 function showSuccess(message) {
     alert(message);
+}
+
+// 提交添加流表单
+function submitAddStream() {
+    const streamKey = document.getElementById('streamKey').value;
+    if (!streamKey) {
+        alert('请输入推流密钥');
+        return;
+    }
+    
+    const data = {
+        id: streamKey,
+        name: document.getElementById('streamName').value || streamKey,
+        sourceUrl: document.getElementById('sourceUrl').value,
+        outputUrl: document.getElementById('outputUrl').value,
+        key: streamKey
+    };
+    
+    fetch('/api/streams', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.status === 'success') {
+            closeModal(document.querySelector('.modal'));
+            refreshStreamList();
+            showSuccess('添加成功');
+        } else {
+            throw new Error(result.message || '添加失败');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert(error.message || '添加失败');
+    });
 }
 </rewritten_file> 
