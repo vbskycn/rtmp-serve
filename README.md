@@ -9,12 +9,15 @@
 * 灵活的转码配置
 
 ## 系统要求
+* Ubuntu 20.04/22.04 LTS
 * Python 3.8+
 * FFmpeg
+* Nginx (可选，用于反向代理)
+* SRS (可选，用于本地转推)
 
-## 安装部署
+## 快速部署指南
 
-### 1. 安装 FFmpeg
+### 1. 安装系统依赖
 
 <pre><code>sudo apt update
 sudo apt install ffmpeg

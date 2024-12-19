@@ -13,6 +13,9 @@ from functools import wraps
 from flask import session
 from backend.logging_config import setup_logging
 import secrets
+from functools import lru_cache
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
 CORS(app)
@@ -39,10 +42,44 @@ app.config.update(
     SESSION_FILE_THRESHOLD=500  # 会话文件数量阈值
 )
 
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
+
 class StreamManager:
     def __init__(self):
         self.streams = {}
         self.session = Session()
+        self._cache = {}
+        self._cache_timeout = 300  # 5分钟缓存
+        
+        self.start_health_check_thread()
+        
+    @lru_cache(maxsize=100)
+    def get_stream_config(self, stream_id):
+        """获取流配置（使用LRU缓存）"""
+        return self.session.query(Stream).filter_by(id=stream_id).first()
+        
+    def _cache_stream_status(self, stream_id, status):
+        """缓存流状态"""
+        self._cache[f"status_{stream_id}"] = {
+            'data': status,
+            'timestamp': datetime.now()
+        }
+        
+    def _get_cached_status(self, stream_id):
+        """获取缓存的状态"""
+        cache_data = self._cache.get(f"status_{stream_id}")
+        if not cache_data:
+            return None
+            
+        if datetime.now() - cache_data['timestamp'] > timedelta(seconds=self._cache_timeout):
+            del self._cache[f"status_{stream_id}"]
+            return None
+            
+        return cache_data['data']
         
     def add_stream(self, stream_data):
         stream_id = stream_data['id']
@@ -137,7 +174,7 @@ class StreamManager:
                 try:
                     process.wait(timeout=5)  # 等待进程结束
                 except subprocess.TimeoutExpired:
-                    # 如果超时，强制结束
+                    # 如果超时，强��结束
                     process.kill()
                     process.wait()
                 
@@ -324,6 +361,72 @@ class StreamManager:
                 return False
         return False
 
+    def get_stream_metrics(self, stream_id):
+        """获取流的详细指标"""
+        if stream_id not in self.streams:
+            raise StreamNotFoundError()
+            
+        stream = self.streams[stream_id]
+        process = stream['process']
+        
+        try:
+            # 获取进程资源使用情况
+            process_info = psutil.Process(process.pid)
+            
+            return {
+                'cpu_percent': process_info.cpu_percent(),
+                'memory_percent': process_info.memory_percent(),
+                'io_counters': process_info.io_counters()._asdict(),
+                'uptime': str(datetime.now() - stream['start_time']),
+                'frame_stats': self._get_frame_stats(stream),
+                'network_stats': self._get_network_stats(stream)
+            }
+        except Exception as e:
+            logging.error(f"Error getting metrics for stream {stream_id}: {str(e)}")
+            raise StreamOperationError(f"获取流指标失败: {str(e)}")
+            
+    def _get_frame_stats(self, stream):
+        """获取帧统计信息"""
+        try:
+            ffprobe_cmd = [
+                'ffprobe',
+                '-v', 'quiet',
+                '-print_format', 'json',
+                '-show_frames',
+                '-read_intervals', '%+5',  # 只读取前5秒
+                stream['config']['outputUrl'] + stream['config']['key']
+            ]
+            result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
+            return json.loads(result.stdout)
+        except Exception:
+            return None
+
+    def start_health_check_thread(self):
+        """启动健康检查线程"""
+        import threading
+        
+        def health_check_loop():
+            while True:
+                try:
+                    self.check_all_streams_health()
+                    time.sleep(30)  # 每30秒检查一次
+                except Exception as e:
+                    logging.error(f"Health check error: {str(e)}")
+                    
+        thread = threading.Thread(target=health_check_loop, daemon=True)
+        thread.start()
+        
+    def check_all_streams_health(self):
+        """检查所有流的健康状态"""
+        for stream_id in list(self.streams.keys()):
+            try:
+                status = self.get_stream_status(stream_id)
+                if status['status'] == 'error':
+                    logging.warning(f"Stream {stream_id} is unhealthy, attempting restart")
+                    self.restart_stream(stream_id)
+            except Exception as e:
+                logging.error(f"Error checking stream {stream_id}: {str(e)}")
+
 stream_manager = StreamManager()
 
 # 登录装饰器
@@ -367,6 +470,7 @@ def index():
     return send_from_directory('static', 'index.html')
 
 @app.route('/api/streams', methods=['POST'])
+@limiter.limit("20 per minute")  # 限制每分钟最多20个请求
 @login_required
 def add_stream():
     data = request.json
@@ -374,16 +478,50 @@ def add_stream():
         return jsonify({'status': 'success', 'message': '推流已启动'})
     return jsonify({'status': 'error', 'message': '启动推流失败'})
 
+# 添加自定义异常类
+class StreamError(Exception):
+    pass
+
+class StreamNotFoundError(StreamError):
+    pass
+
+class StreamOperationError(StreamError):
+    pass
+
+# 优化错误处理装饰器
+def handle_stream_errors(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except StreamNotFoundError:
+            return jsonify({
+                'status': 'error',
+                'code': 'STREAM_NOT_FOUND',
+                'message': '未找到指定的流'
+            }), 404
+        except StreamOperationError as e:
+            return jsonify({
+                'status': 'error',
+                'code': 'OPERATION_FAILED',
+                'message': str(e)
+            }), 400
+        except Exception as e:
+            logging.error(f"Unexpected error: {str(e)}", exc_info=True)
+            return jsonify({
+                'status': 'error',
+                'code': 'INTERNAL_ERROR',
+                'message': '服务器内部错误'
+            }), 500
+    return decorated_function
+
 @app.route('/api/streams/<stream_id>', methods=['DELETE'])
 @login_required
+@handle_stream_errors
 def stop_stream(stream_id):
-    try:
-        if stream_manager.stop_stream(stream_id):
-            return jsonify({'status': 'success', 'message': '推流已停止'})
-        return jsonify({'status': 'error', 'message': '停止推流失败：流不存在或已停止'})
-    except Exception as e:
-        logging.error(f"Error in stop_stream endpoint: {str(e)}", exc_info=True)
-        return jsonify({'status': 'error', 'message': f'停止推流失败：{str(e)}'})
+    if not stream_manager.stop_stream(stream_id):
+        raise StreamOperationError('停止推流失败')
+    return jsonify({'status': 'success', 'message': '推流已停止'})
 
 @app.route('/api/streams/<stream_id>/status', methods=['GET'])
 def get_stream_status(stream_id):
@@ -445,6 +583,11 @@ def log_response(response):
 @app.route('/api/stats')
 def get_stats():
     return jsonify(stream_manager.get_system_stats())
+
+@app.route('/help')
+@login_required
+def help_page():
+    return send_from_directory('static', 'help.html')
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
