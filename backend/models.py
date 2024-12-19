@@ -4,14 +4,30 @@ from sqlalchemy.orm import sessionmaker
 import os
 from datetime import datetime
 
-# 确保数据目录存在
-os.makedirs('/app/data', exist_ok=True)
+# 确保数据目录存在并设置正确权限
+def ensure_db_dir():
+    db_dir = '/app/data'
+    if not os.path.exists(db_dir):
+        os.makedirs(db_dir, mode=0o777)
+    # 确保目录有正确的权限
+    os.chmod(db_dir, 0o777)
+    # 如果数据库文件存在，确保它也有正确的权限
+    db_file = os.path.join(db_dir, 'streams.db')
+    if os.path.exists(db_file):
+        os.chmod(db_file, 0o666)
 
-# 创建数据库引擎，使用绝对路径
-engine = create_engine('sqlite:////app/data/streams.db', connect_args={
-    'check_same_thread': False,
-    'timeout': 30
-})
+ensure_db_dir()
+
+# 创建数据库引擎，使用相对路径
+engine = create_engine('sqlite:////app/data/streams.db', 
+    connect_args={
+        'check_same_thread': False,
+        'timeout': 30
+    },
+    # 添加 echo 用于调试
+    echo=True
+)
+
 Session = sessionmaker(bind=engine)
 Base = declarative_base()
 
@@ -48,5 +64,7 @@ class Stream(Base):
         }
 
 # 创建数据库表
-if not os.path.exists('/app/data/streams.db'):
-    Base.metadata.create_all(engine) 
+try:
+    Base.metadata.create_all(engine)
+except Exception as e:
+    print(f"Error creating database: {e}") 

@@ -40,7 +40,10 @@ COPY conf/ conf/
 # 创建必要的目录并设置权限
 RUN mkdir -p /app/data/sessions /app/logs \
     && chown -R nobody:nogroup /app \
-    && chmod -R 777 /app/data /app/logs
+    && chmod -R 777 /app/data /app/logs \
+    && touch /app/data/streams.db \
+    && chmod 666 /app/data/streams.db \
+    && chown nobody:nogroup /app/data/streams.db
 
 # 设置环境变量
 ENV PYTHONPATH=/app
