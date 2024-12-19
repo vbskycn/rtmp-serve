@@ -169,56 +169,130 @@ function addBatchStreams() {
 }
 
 // 刷新流列表
-function refreshStreamList() {
-    fetch('/api/streams')
-        .then(response => response.json())
-        .then(streams => {
-            const tbody = document.getElementById('streamTableBody');
-            tbody.innerHTML = '';
-            streams.forEach(stream => {
-                const playUrl = `${stream.outputUrl === REMOTE_PUSH_URL ? 
-                    REMOTE_PULL_URL : LOCAL_PULL_URL}${stream.key}.flv`;
-                
-                const row = `
-                    <tr>
-                        <td>
-                            <input type="checkbox" class="stream-select" value="${stream.id}">
-                        </td>
-                        <td>${stream.name || stream.id}</td>
-                        <td>
-                            ${stream.sourceUrl}
-                            <button class="copy-btn" onclick="copyToClipboard('${stream.sourceUrl}')">复制</button>
-                        </td>
-                        <td>
-                            ${stream.outputUrl}${stream.key}
-                            <button class="copy-btn" onclick="copyToClipboard('${stream.outputUrl}${stream.key}')">复制</button>
-                        </td>
-                        <td>
-                            <button class="copy-btn" onclick="copyToClipboard('${playUrl}')">复制播放地址</button>
-                        </td>
-                        <td>
-                            <select onchange="updateStreamConfig('${stream.id}', this.value)">
-                                <option value="default-copy" ${(!stream.configId || stream.configId === 'default-copy') ? 'selected' : ''}>
-                                    原画配置
-                                </option>
-                                ${configs.filter(c => c.id !== 'default-copy').map(config => `
-                                    <option value="${config.id}" ${stream.configId === config.id ? 'selected' : ''}>
-                                        ${config.name}
-                                    </option>
-                                `).join('')}
-                            </select>
-                        </td>
-                        <td class="status-${stream.status || 'stopped'}">${getStatusText(stream.status)}</td>
-                        <td>
-                            <button class="action-btn edit-btn" onclick="editStream('${stream.id}')">编辑</button>
-                            <button class="action-btn delete-btn" onclick="deleteStream('${stream.id}')">删除</button>
-                        </td>
-                    </tr>
-                `;
-                tbody.insertAdjacentHTML('beforeend', row);
-            });
-        })
-        .catch(handleError);
+async function refreshStreamList() {
+    try {
+        showLoading();
+        const response = await fetch('/api/streams');
+        const data = await response.json();
+        streams = data;
+        updateStreamTable();
+        updateStats();
+        hideLoading();
+    } catch (error) {
+        console.error('Failed to refresh streams:', error);
+        hideLoading();
+        alert('获取流列表失败');
+    }
+}
+
+// 更新流表格
+function updateStreamTable() {
+    const tbody = document.getElementById('streamTableBody');
+    if (!tbody) {
+        console.error('找不到流表格体元素');
+        return;
+    }
+    
+    tbody.innerHTML = '';
+    streams.forEach(stream => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><input type="checkbox" class="stream-select" value="${stream.id}"></td>
+            <td>${stream.name}</td>
+            <td>${stream.source_url}</td>
+            <td>${stream.output_url}</td>
+            <td>${getPlayUrl(stream)}</td>
+            <td>${getCodecInfo(stream)}</td>
+            <td>${getStatusBadge(stream.status || 'stopped')}</td>
+            <td>${getActionButtons(stream)}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+// 启动流
+async function startStream(id) {
+    try {
+        showLoading();
+        const response = await fetch(`/api/streams/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'start' })
+        });
+        
+        const data = await response.json();
+        if (data.status === 'success') {
+            await refreshStreamList();
+            showSuccess('启动成功');
+        } else {
+            throw new Error(data.message || '启动失败');
+        }
+    } catch (error) {
+        console.error('Failed to start stream:', error);
+        alert(error.message || '启动失败');
+    } finally {
+        hideLoading();
+    }
+}
+
+// 停止流
+async function stopStream(id) {
+    if (!confirm('确定要停止这个流吗？')) {
+        return;
+    }
+    
+    try {
+        showLoading();
+        const response = await fetch(`/api/streams/${id}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        if (data.status === 'success') {
+            await refreshStreamList();
+            showSuccess('停止成功');
+        } else {
+            throw new Error(data.message || '停止失败');
+        }
+    } catch (error) {
+        console.error('Failed to stop stream:', error);
+        alert(error.message || '停止失败');
+    } finally {
+        hideLoading();
+    }
+}
+
+// 搜索流
+function searchStreams(keyword) {
+    const tbody = document.getElementById('streamTableBody');
+    const rows = tbody.getElementsByTagName('tr');
+    
+    keyword = keyword.toLowerCase();
+    for (let row of rows) {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(keyword) ? '' : 'none';
+    }
+}
+
+// 筛选流
+function filterStreams(status) {
+    const tbody = document.getElementById('streamTableBody');
+    const rows = tbody.getElementsByTagName('tr');
+    
+    for (let row of rows) {
+        if (status === 'all') {
+            row.style.display = '';
+        } else {
+            const statusCell = row.querySelector('td:nth-child(7)');
+            const hasStatus = statusCell.textContent.toLowerCase().includes(status);
+            row.style.display = hasStatus ? '' : 'none';
+        }
+    }
+    
+    // 更新筛选按钮状态
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-filter') === status);
+    });
 }
 
 // 批量操作
@@ -304,140 +378,95 @@ function getStatusText(status) {
 document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM加载完成，开始初始化...');
     
-    // 直接绑定事件，不使用 onclick 属性
-    document.querySelector('button.action-btn.primary').addEventListener('click', showAddForm);
-    document.querySelector('button.action-btn.secondary').addEventListener('click', showBatchAddForm);
+    // 添加流按钮
+    const addStreamBtn = document.querySelector('button[onclick="showAddForm()"]');
+    if (addStreamBtn) {
+        addStreamBtn.removeAttribute('onclick');
+        addStreamBtn.addEventListener('click', showAddForm);
+    }
+    
+    // 批量添加按钮
+    const batchAddBtn = document.querySelector('button[onclick="showBatchAddForm()"]');
+    if (batchAddBtn) {
+        batchAddBtn.removeAttribute('onclick');
+        batchAddBtn.addEventListener('click', showBatchAddForm);
+    }
+    
+    // 转码配置按钮
+    const configBtn = document.querySelector('button[onclick="showConfigPanel()"]');
+    if (configBtn) {
+        configBtn.removeAttribute('onclick');
+        configBtn.addEventListener('click', showConfigPanel);
+    }
+    
+    // 导出配置按钮
+    const exportBtn = document.querySelector('button[onclick="exportStreams()"]');
+    if (exportBtn) {
+        exportBtn.removeAttribute('onclick');
+        exportBtn.addEventListener('click', exportStreams);
+    }
+    
+    // 批量操作按钮
+    document.querySelectorAll('.panel-section button').forEach(btn => {
+        const action = btn.getAttribute('onclick');
+        if (action && action.startsWith('batchAction')) {
+            const actionType = action.match(/'(\w+)'/)[1];
+            btn.removeAttribute('onclick');
+            btn.addEventListener('click', () => batchAction(actionType));
+        }
+    });
     
     // 筛选按钮
     document.querySelectorAll('.filter-btn').forEach(btn => {
-        btn.addEventListener('click', () => filterStreams(btn.dataset.filter));
+        const filter = btn.getAttribute('onclick');
+        if (filter && filter.startsWith('filterStreams')) {
+            const filterType = filter.match(/'(\w+)'/)[1];
+            btn.removeAttribute('onclick');
+            btn.addEventListener('click', () => filterStreams(filterType));
+        }
     });
     
     // 搜索输入框
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
-        searchInput.addEventListener('keyup', (e) => searchStreams(e.target.value));
+        searchInput.addEventListener('input', (e) => searchStreams(e.target.value));
     }
     
     // 刷新按钮
-    document.querySelector('.refresh-btn').addEventListener('click', refreshStreamList);
+    const refreshBtn = document.querySelector('.refresh-btn');
+    if (refreshBtn) {
+        refreshBtn.removeAttribute('onclick');
+        refreshBtn.addEventListener('click', refreshStreamList);
+    }
     
     // 页面大小选择
-    document.getElementById('pageSize').addEventListener('change', (e) => changePageSize(e.target.value));
+    const pageSizeSelect = document.getElementById('pageSize');
+    if (pageSizeSelect) {
+        pageSizeSelect.addEventListener('change', (e) => changePageSize(e.target.value));
+    }
     
     // 初始化数据
     refreshStreamList();
     
-    // 设置定时刷新
+    // 设置定时刷新（每30秒）
     setInterval(refreshStreamList, 30000);
+    
+    console.log('初始化完成');
 });
 
-// 刷新流列表
-async function refreshStreamList() {
-    try {
-        const response = await fetch('/api/streams');
-        streams = await response.json();
-        updateStreamTable();
-        updateStats();
-    } catch (error) {
-        console.error('Failed to fetch streams:', error);
-        showError('获取流列表失败');
-    }
+// 添加调试功能
+function debug(...args) {
+    console.log('[Debug]', ...args);
 }
 
-// 更新流表格
-function updateStreamTable() {
-    const tbody = document.getElementById('streamTableBody');
-    tbody.innerHTML = '';
-    
-    const filteredStreams = filterAndSearchStreams();
-    const paginatedStreams = paginateStreams(filteredStreams);
-    
-    paginatedStreams.forEach(stream => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td><input type="checkbox" value="${stream.id}"></td>
-            <td>${stream.name}</td>
-            <td>${stream.source_url}</td>
-            <td>${stream.output_url}${stream.key}</td>
-            <td>${getPlayUrl(stream)}</td>
-            <td>${getCodecInfo(stream)}</td>
-            <td>${getStatusBadge(stream.status)}</td>
-            <td>${getActionButtons(stream)}</td>
-        `;
-        tbody.appendChild(tr);
-    });
-    
-    updatePagination(filteredStreams.length);
+// 错误处理
+function handleError(error) {
+    console.error('[Error]', error);
+    alert(error.message || '操作失败');
 }
 
-// 添加流
-async function addStream(data) {
-    try {
-        const response = await fetch('/api/streams', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(data)
-        });
-        
-        if (!response.ok) {
-            throw new Error('添加流失败');
-        }
-        
-        await refreshStreamList();
-        showSuccess('添加流成功');
-    } catch (error) {
-        console.error('Failed to add stream:', error);
-        showError(error.message);
-    }
-}
-
-// 删除流
-async function deleteStream(id) {
-    if (!confirm('确定要删除这个流吗？')) {
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/streams/${id}`, {
-            method: 'DELETE'
-        });
-        
-        if (!response.ok) {
-            throw new Error('删除流失败');
-        }
-        
-        await refreshStreamList();
-        showSuccess('删除流成功');
-    } catch (error) {
-        console.error('Failed to delete stream:', error);
-        showError(error.message);
-    }
-}
-
-// 更新统计信息
-function updateStats() {
-    const stats = {
-        running: streams.filter(s => s.status === 'running').length,
-        error: streams.filter(s => s.status === 'error').length,
-        stopped: streams.filter(s => s.status === 'stopped').length
-    };
-    
-    document.getElementById('runningStreams').textContent = stats.running;
-    document.getElementById('errorStreams').textContent = stats.error;
-    document.getElementById('stoppedStreams').textContent = stats.stopped;
-}
-
-// 添加错误提示功能
-function showError(message) {
-    // 实现错误提示
-    alert(message);
-}
-
+// 成功提示
 function showSuccess(message) {
-    // 实现成功提示
     alert(message);
 }
 </rewritten_file> 
