@@ -22,6 +22,9 @@ services:
       - LOG_LEVEL=DEBUG
       - REMOTE_RTMP_URL=rtmp://ali.push.yximgs.com/live/
       - LOCAL_RTMP_URL=rtmp://srs:1935/live/
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - SECRET_KEY=${SECRET_KEY:-default-secret-key}
       - PYTHONUNBUFFERED=1
       - FLASK_APP=backend/app.py
       - FLASK_ENV=development

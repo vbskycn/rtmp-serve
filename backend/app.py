@@ -7,12 +7,13 @@ import time
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
-from backend.models import Session, Stream
+from backend.models import Session, Stream, User
 import psutil
 from functools import wraps, lru_cache
 from flask import session
 from backend.logging_config import setup_logging
 import secrets
+from backend.config import Config
 
 app = Flask(__name__)
 CORS(app)
@@ -34,9 +35,10 @@ app.config.update(
     SESSION_COOKIE_SECURE=False,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_NAME='rtmp_session',  # 自定义会话cookie名称
-    SESSION_TYPE='filesystem',  # 使用文���系统存储会话
+    SESSION_TYPE='filesystem',  # 使用文件系统存储会话
     SESSION_FILE_DIR='data/sessions',  # 会话文件存储目录
-    SESSION_FILE_THRESHOLD=500  # 会话文件数量阈值
+    SESSION_FILE_THRESHOLD=500,  # 会话文件数量阈值
+    SESSION_REFRESH_EACH_REQUEST=True
 )
 
 class StreamManager:
@@ -44,7 +46,7 @@ class StreamManager:
         self.streams = {}
         self.session = Session()
         self._cache = {}
-        self._cache_timeout = 300  # 5分钟缓存
+        self._cache_timeout = 300  # 5分钟缓���
         
         self.start_health_check_thread()
         
@@ -442,12 +444,45 @@ def login():
     username = data.get('username')
     password = data.get('password')
     
-    if username == 'admin' and password == 'admin':
-        session.permanent = True  # 设置为永久会话
-        session['logged_in'] = True
-        session['username'] = username
-        return jsonify({'status': 'success', 'message': '登录成功'})
-    return jsonify({'status': 'error', 'message': '用户名或密码错误'})
+    session_db = Session()
+    try:
+        user = session_db.query(User).filter_by(username=username).first()
+        
+        if user and user.check_password(password):
+            # 更新最后登录时间
+            user.last_login = datetime.now()
+            session_db.commit()
+            
+            # 设置会话
+            session.permanent = True
+            session['logged_in'] = True
+            session['user_id'] = user.id
+            session['username'] = user.username
+            session['is_admin'] = user.is_admin
+            
+            return jsonify({
+                'status': 'success',
+                'message': '登录成功',
+                'data': {
+                    'username': user.username,
+                    'is_admin': user.is_admin,
+                    'token': secrets.token_hex(16)
+                }
+            })
+            
+        return jsonify({
+            'status': 'error',
+            'message': '用户名或密码错误'
+        }), 401
+        
+    except Exception as e:
+        logging.error(f"Login error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': '登录失败，请稍后重试'
+        }), 500
+    finally:
+        session_db.close()
 
 @app.route('/api/logout')
 def logout():
@@ -589,6 +624,112 @@ def health_check():
 @app.route('/favicon.ico')
 def favicon():
     return send_from_directory('static', 'favicon.ico')
+
+# 添加用户管理接口
+@app.route('/api/users', methods=['GET'])
+@login_required
+def get_users():
+    if not session.get('is_admin'):
+        return jsonify({
+            'status': 'error',
+            'message': '无权限访问'
+        }), 403
+        
+    session_db = Session()
+    try:
+        users = session_db.query(User).all()
+        return jsonify([user.to_dict() for user in users])
+    finally:
+        session_db.close()
+
+@app.route('/api/users', methods=['POST'])
+@login_required
+def create_user():
+    if not session.get('is_admin'):
+        return jsonify({
+            'status': 'error',
+            'message': '无权限操作'
+        }), 403
+        
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    is_admin = data.get('is_admin', False)
+    
+    if not username or not password:
+        return jsonify({
+            'status': 'error',
+            'message': '用户名和密码不能为空'
+        }), 400
+        
+    session_db = Session()
+    try:
+        # 检查用户名是否已存在
+        if session_db.query(User).filter_by(username=username).first():
+            return jsonify({
+                'status': 'error',
+                'message': '用户名已存在'
+            }), 400
+            
+        user = User(username=username, is_admin=is_admin)
+        user.set_password(password)
+        session_db.add(user)
+        session_db.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': '用户创建成功',
+            'data': user.to_dict()
+        })
+    except Exception as e:
+        session_db.rollback()
+        logging.error(f"Create user error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': '创建用户失败'
+        }), 500
+    finally:
+        session_db.close()
+
+@app.route('/api/users/<int:user_id>', methods=['PUT'])
+@login_required
+def update_user(user_id):
+    if not session.get('is_admin'):
+        return jsonify({
+            'status': 'error',
+            'message': '无权限操作'
+        }), 403
+        
+    data = request.json
+    session_db = Session()
+    try:
+        user = session_db.query(User).get(user_id)
+        if not user:
+            return jsonify({
+                'status': 'error',
+                'message': '用户不存在'
+            }), 404
+            
+        if 'password' in data:
+            user.set_password(data['password'])
+        if 'is_admin' in data:
+            user.is_admin = data['is_admin']
+            
+        session_db.commit()
+        return jsonify({
+            'status': 'success',
+            'message': '用户更新成功',
+            'data': user.to_dict()
+        })
+    except Exception as e:
+        session_db.rollback()
+        logging.error(f"Update user error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': '更新用户失败'
+        }), 500
+    finally:
+        session_db.close()
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))

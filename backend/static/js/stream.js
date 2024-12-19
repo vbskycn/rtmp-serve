@@ -16,14 +16,44 @@ function debug(message) {
 
 // 显示/隐藏表单
 function showAddForm() {
-    debug('显示添加表单');
-    const form = document.getElementById('addStreamForm');
-    if (!form) {
-        console.error('找不到添加表单元素');
-        return;
-    }
-    form.style.display = 'block';
-    updateStreamConfigSelect();
+    console.log('显示添加表单');
+    const formHtml = `
+        <div class="modal-header">
+            <h2>添加新流</h2>
+            <button class="close-btn" onclick="closeModal(this)">&times;</button>
+        </div>
+        <form id="addStreamForm" onsubmit="return false;">
+            <div class="form-group">
+                <label>名称：</label>
+                <input type="text" id="streamName" required>
+            </div>
+            <div class="form-group">
+                <label>源地址：</label>
+                <input type="text" id="sourceUrl" required>
+            </div>
+            <div class="form-group">
+                <label>推流密钥：</label>
+                <input type="text" id="streamKey" required>
+            </div>
+            <div class="form-group">
+                <label>输出类型：</label>
+                <select id="outputUrlType" onchange="updateOutputUrl()">
+                    <option value="local">本地</option>
+                    <option value="remote">远程</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>输出地址：</label>
+                <input type="text" id="outputUrl" readonly>
+            </div>
+            <div class="modal-actions">
+                <button type="submit" class="action-btn primary" onclick="addStream()">添加</button>
+                <button type="button" class="action-btn" onclick="closeModal(this)">取消</button>
+            </div>
+        </form>
+    `;
+    showModal(formHtml);
+    updateOutputUrl();
 }
 
 function hideAddForm() {
@@ -272,59 +302,35 @@ function getStatusText(status) {
 
 // 页面加载时初始化
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOM加载完成，初始化事件监听');
-    initEventListeners();
-    refreshStreamList();
-});
-
-// 自动刷新状态
-setInterval(refreshStreamList, 30000);
-
-// 初始化事件监听
-function initEventListeners() {
-    // 添加流按钮
-    const addBtn = document.querySelector('button[onclick="showAddForm()"]');
-    if (addBtn) {
-        addBtn.onclick = function(e) {
-            e.preventDefault();
-            showAddForm();
-        };
-    }
-
-    // 批量添加按钮
-    const batchAddBtn = document.querySelector('button[onclick="showBatchAddForm()"]');
-    if (batchAddBtn) {
-        batchAddBtn.onclick = function(e) {
-            e.preventDefault();
-            showBatchAddForm();
-        };
-    }
-
-    // 配置按钮
-    const configBtn = document.querySelector('button[onclick="showConfigPanel()"]');
-    if (configBtn) {
-        configBtn.onclick = function(e) {
-            e.preventDefault();
-            showConfigPanel();
-        };
-    }
-
+    console.log('DOM加载完成，开始初始化...');
+    
+    // 直接绑定事件，不使用 onclick 属性
+    document.querySelector('button.action-btn.primary').addEventListener('click', showAddForm);
+    document.querySelector('button.action-btn.secondary').addEventListener('click', showBatchAddForm);
+    
+    // 筛选按钮
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => filterStreams(btn.dataset.filter));
+    });
+    
     // 搜索输入框
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
-        searchInput.onkeyup = function(e) {
-            searchStreams(e.target.value);
-        };
+        searchInput.addEventListener('keyup', (e) => searchStreams(e.target.value));
     }
-
-    // 筛选按钮
-    document.querySelectorAll('.filter-btn').forEach(btn => {
-        btn.onclick = function(e) {
-            e.preventDefault();
-            filterStreams(btn.getAttribute('data-filter'));
-        };
-    });
-}
+    
+    // 刷新按钮
+    document.querySelector('.refresh-btn').addEventListener('click', refreshStreamList);
+    
+    // 页面大小选择
+    document.getElementById('pageSize').addEventListener('change', (e) => changePageSize(e.target.value));
+    
+    // 初始化数据
+    refreshStreamList();
+    
+    // 设置定时刷新
+    setInterval(refreshStreamList, 30000);
+});
 
 // 刷新流列表
 async function refreshStreamList() {
