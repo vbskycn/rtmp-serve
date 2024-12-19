@@ -6,3 +6,4 @@ Werkzeug==2.0.1
 SQLAlchemy==1.4.23
 psutil==5.8.0
 flask-debugtoolbar==0.11.0
+Flask-Limiter==3.5.0  # 添加这一行
