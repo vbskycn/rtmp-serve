@@ -1,7 +1,10 @@
 Flask==2.0.1
-Flask-CORS==4.0.0
-python-dotenv==1.0.0
+Flask-CORS==3.0.10
+python-dotenv==0.19.0
 gunicorn==20.1.0
-Werkzeug==2.0.3
+Werkzeug==2.0.1
 SQLAlchemy==1.4.23
-psutil==5.9.0
+psutil==5.8.0
+flask-limiter==1.4
+flask-debugtoolbar==0.11.0
+# 添加架构无关的纯 Python 包

@@ -5,6 +5,9 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
+        - linux/arm64
     ports:
       - "5000:5000"
     volumes:
@@ -14,20 +17,19 @@ services:
     environment:
       - PORT=5000
       - HOST=0.0.0.0
-      - DEBUG=False
+      - DEBUG=True
       - DB_URL=sqlite:////app/data/streams.db
-      - LOG_LEVEL=INFO
+      - LOG_LEVEL=DEBUG
       - REMOTE_RTMP_URL=rtmp://ali.push.yximgs.com/live/
       - LOCAL_RTMP_URL=rtmp://srs:1935/live/
       - PYTHONUNBUFFERED=1
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
     depends_on:
       - srs
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    command: >
+      sh -c "python -m flask run --host=0.0.0.0 --port=5000"
     logging:
       driver: "json-file"
       options:
@@ -36,10 +38,11 @@ services:
 
   srs:
     image: ossrs/srs:4
+    platform: ${TARGETPLATFORM:-linux/amd64}
     ports:
-      - "1935:1935"  # RTMP
-      - "1985:1985"  # HTTP API
-      - "8080:8080"  # HTTP-FLV
+      - "1935:1935"
+      - "1985:1985"
+      - "8080:8080"
     volumes:
       - ./conf/srs.conf:/usr/local/srs/conf/srs.conf
     restart: unless-stopped
