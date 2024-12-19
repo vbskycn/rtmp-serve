@@ -98,10 +98,35 @@ function showConfirm(message) {
 
 // 显示加载中
 function showLoading() {
-    // 实现加载提示
+    const loading = document.createElement('div');
+    loading.className = 'loading-overlay';
+    loading.innerHTML = '<div class="loading-spinner"></div>';
+    document.body.appendChild(loading);
 }
 
 // 隐藏加载中
 function hideLoading() {
-    // 实现隐藏加载提示
+    const loading = document.querySelector('.loading-overlay');
+    if (loading) {
+        loading.remove();
+    }
+}
+
+// 添加模态框相关函数
+function showModal(content) {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content">
+            ${content}
+        </div>
+    `;
+    document.body.appendChild(modal);
+    return modal;
+}
+
+function closeModal(modal) {
+    if (modal && modal.parentNode) {
+        modal.parentNode.removeChild(modal);
+    }
 } 

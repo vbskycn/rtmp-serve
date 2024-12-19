@@ -271,17 +271,10 @@ function getStatusText(status) {
 }
 
 // 页面加载时初始化
-document.addEventListener('DOMContentLoaded', () => {
-    debug('页面加载完成，开始初始化');
-    try {
-        initConfigs();
-        refreshStreamList();
-        updateOutputUrl();
-        debug('初始化完成');
-    } catch (error) {
-        console.error('初始化失败:', error);
-        alert('页面初始化失败，请刷新重试');
-    }
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM加载完成，初始化事件监听');
+    initEventListeners();
+    refreshStreamList();
 });
 
 // 自动刷新状态
@@ -290,15 +283,47 @@ setInterval(refreshStreamList, 30000);
 // 初始化事件监听
 function initEventListeners() {
     // 添加流按钮
-    document.querySelector('button[onclick="showAddForm()"]').addEventListener('click', showAddForm);
+    const addBtn = document.querySelector('button[onclick="showAddForm()"]');
+    if (addBtn) {
+        addBtn.onclick = function(e) {
+            e.preventDefault();
+            showAddForm();
+        };
+    }
+
     // 批量添加按钮
-    document.querySelector('button[onclick="showBatchAddForm()"]').addEventListener('click', showBatchAddForm);
+    const batchAddBtn = document.querySelector('button[onclick="showBatchAddForm()"]');
+    if (batchAddBtn) {
+        batchAddBtn.onclick = function(e) {
+            e.preventDefault();
+            showBatchAddForm();
+        };
+    }
+
+    // 配置按钮
+    const configBtn = document.querySelector('button[onclick="showConfigPanel()"]');
+    if (configBtn) {
+        configBtn.onclick = function(e) {
+            e.preventDefault();
+            showConfigPanel();
+        };
+    }
+
+    // 搜索输入框
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.onkeyup = function(e) {
+            searchStreams(e.target.value);
+        };
+    }
+
     // 筛选按钮
     document.querySelectorAll('.filter-btn').forEach(btn => {
-        btn.addEventListener('click', () => filterStreams(btn.getAttribute('data-filter')));
+        btn.onclick = function(e) {
+            e.preventDefault();
+            filterStreams(btn.getAttribute('data-filter'));
+        };
     });
-    // 搜索输入框
-    document.getElementById('searchInput').addEventListener('keyup', (e) => searchStreams(e.target.value));
 }
 
 // 刷新流列表
