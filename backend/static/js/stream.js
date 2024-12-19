@@ -464,7 +464,7 @@ function getStatusText(status) {
 
 // 页面加载时初始化
 document.addEventListener('DOMContentLoaded', function() {
-    debug('页面加载完成，开始初始化...');
+    debug('页面加载完成，开始初始��...');
     
     // 添加流按钮
     const addBtn = document.getElementById('addStreamBtn');
