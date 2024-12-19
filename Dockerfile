@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     procps \
     vim \
+    sqlite3 \
     && if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
        apt-get install -y --no-install-recommends \
        libnss3 \
@@ -36,17 +37,19 @@ RUN pip install --no-cache-dir flask-debugtoolbar
 COPY backend/ backend/
 COPY conf/ conf/
 
-# 创建必要的目录
-RUN mkdir -p data/sessions logs
-
-# 设置数据目录权限
-RUN chmod -R 777 data logs
+# 创建必要的目录并设置权限
+RUN mkdir -p /app/data/sessions /app/logs \
+    && chown -R nobody:nogroup /app \
+    && chmod -R 777 /app/data /app/logs
 
 # 设置环境变量
 ENV PYTHONPATH=/app
 ENV FLASK_APP=backend/app.py
 ENV FLASK_ENV=development
 ENV FLASK_DEBUG=1
+
+# 切换到非 root 用户
+USER nobody
 
 # 启动命令
 CMD ["flask", "run", "--host=0.0.0.0", "--port=10088"] 

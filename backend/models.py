@@ -5,10 +5,13 @@ import os
 from datetime import datetime
 
 # 确保数据目录存在
-os.makedirs('data', exist_ok=True)
+os.makedirs('/app/data', exist_ok=True)
 
-# 创建数据库引擎
-engine = create_engine('sqlite:///data/streams.db')
+# 创建数据库引擎，使用绝对路径
+engine = create_engine('sqlite:////app/data/streams.db', connect_args={
+    'check_same_thread': False,
+    'timeout': 30
+})
 Session = sessionmaker(bind=engine)
 Base = declarative_base()
 
@@ -45,4 +48,5 @@ class Stream(Base):
         }
 
 # 创建数据库表
-Base.metadata.create_all(engine) 
+if not os.path.exists('/app/data/streams.db'):
+    Base.metadata.create_all(engine) 

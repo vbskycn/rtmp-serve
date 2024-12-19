@@ -11,14 +11,14 @@ services:
     ports:
       - "10088:10088"
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./backend:/app/backend
+      - ./data:/app/data:rw
+      - ./logs:/app/logs:rw
+      - ./backend:/app/backend:ro
     environment:
       - PORT=10088
       - HOST=0.0.0.0
       - DEBUG=True
-      - DB_URL=sqlite:///data/streams.db
+      - DB_URL=sqlite:////app/data/streams.db
       - LOG_LEVEL=DEBUG
       - REMOTE_RTMP_URL=rtmp://ali.push.yximgs.com/live/
       - LOCAL_RTMP_URL=rtmp://srs:1935/live/
@@ -36,6 +36,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    user: nobody
 
   srs:
     image: ossrs/srs:4
