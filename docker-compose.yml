@@ -30,13 +30,8 @@ services:
       - srs
     restart: unless-stopped
     working_dir: /app
-    command: >
-      bash -c "
-        mkdir -p /app/data /app/logs &&
-        chmod -R 777 /app/data /app/logs &&
-        flask run --host=0.0.0.0 --port=10088
-      "
-    user: "${UID:-1000}:${GID:-1000}"
+    command: flask run --host=0.0.0.0 --port=10088
+    user: root
     logging:
       driver: "json-file"
       options:
