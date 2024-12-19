@@ -653,13 +653,13 @@ async function updateSystemStats() {
         document.getElementById('networkUsage').textContent = `${stats.network_speed} MB/s`;
         
         // 更新图表
-        if (window.cpuChart) {
+        if (typeof Chart !== 'undefined' && window.cpuChart) {
             window.cpuChart.data.datasets[0].data.push(stats.cpu_percent);
             window.cpuChart.data.datasets[0].data = window.cpuChart.data.datasets[0].data.slice(-20);
             window.cpuChart.update();
         }
         
-        if (window.memoryChart) {
+        if (typeof Chart !== 'undefined' && window.memoryChart) {
             window.memoryChart.data.datasets[0].data.push(stats.memory_percent);
             window.memoryChart.data.datasets[0].data = window.memoryChart.data.datasets[0].data.slice(-20);
             window.memoryChart.update();
