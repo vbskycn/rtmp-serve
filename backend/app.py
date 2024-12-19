@@ -202,7 +202,7 @@ class StreamManager:
                         logging.error(f"Error reading stderr for stream {stream_id}: {str(e)}")
                         stderr_output = ""
 
-                    # 检查 ffmpeg 进程��否真的在推流
+                    # 检查 ffmpeg 进程否真的在推流
                     try:
                         ps_process = subprocess.run(['ps', '-p', str(process.pid), '-o', 'cmd='], 
                                                  capture_output=True, text=True)
@@ -420,7 +420,7 @@ class StreamManager:
 
 stream_manager = StreamManager()
 
-# ��录装饰器
+# 录装饰器
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -578,6 +578,13 @@ def get_stats():
 @login_required
 def help_page():
     return send_from_directory('static', 'help.html')
+
+@app.route('/health')
+def health_check():
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat()
+    })
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))

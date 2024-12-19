@@ -30,13 +30,23 @@ services:
       - srs
     restart: unless-stopped
     working_dir: /app
-    command: flask run --host=0.0.0.0 --port=10088
+    command: >
+      bash -c "
+        mkdir -p /app/data /app/logs &&
+        chmod -R 777 /app/data /app/logs &&
+        flask run --host=0.0.0.0 --port=10088
+      "
     user: "${UID:-1000}:${GID:-1000}"
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10088/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   srs:
     image: ossrs/srs:4
