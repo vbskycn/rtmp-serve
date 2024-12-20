@@ -1,39 +1,36 @@
 const express = require('express');
-const bodyParser = require('body-parser');
-const cors = require('cors');
 const path = require('path');
-const apiRoutes = require('./routes/api');
-const UserModel = require('./models/user');
+const cors = require('cors');
+const auth = require('./middleware/auth');
+const streamController = require('./controllers/streamController');
+const configController = require('./controllers/configController');
+const systemController = require('./controllers/systemController');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
-// 初始化默认用户
-UserModel.initDefaultUser();
 
 // 中间件
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 app.use(express.static('static'));
 
-// API 路由
-app.use('/api', apiRoutes);
+// 认证中间件
+app.use('/api', auth);
 
-// 前端页面路由
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '../static/index.html'));
-});
+// API路由
+app.use('/api/streams', streamController);
+app.use('/api/configs', configController);
+app.use('/api/system', systemController);
 
-app.get('/login', (req, res) => {
-  res.sendFile(path.join(__dirname, '../static/login.html'));
-});
-
-// 错误处理中间件
+// 错误处理
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: '服务器内部错误' });
+    console.error(err.stack);
+    res.status(500).json({
+        status: 'error',
+        message: err.message || '服务器内部错误'
+    });
 });
 
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`服务器运行在 http://localhost:${PORT}`);
+    console.log(`服务器运行在 http://localhost:${PORT}`);
 }); 

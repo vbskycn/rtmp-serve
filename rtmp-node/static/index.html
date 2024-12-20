@@ -1,141 +1,248 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>流媒体转推管理系统</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free/css/all.min.css">
     <link rel="stylesheet" href="/css/main.css">
+    <link rel="stylesheet" href="/css/modal.css">
 </head>
 <body>
-    <div class="header">
-        <h1>流媒体转推管理系统</h1>
-        <div class="system-info">
-            <div>CPU: <span id="cpuUsage">0%</span></div>
-            <div>内存: <span id="memoryUsage">0%</span></div>
-            <div>网络: <span id="networkSpeed">0 MB/s</span></div>
-        </div>
-        <div class="user-info">
-            <span id="userRole">管理员</span>
-            <button id="logoutBtn">退出</button>
-        </div>
-        <button id="helpBtn">使用帮助</button>
-    </div>
-
-    <div class="main-content">
-        <div class="control-panel">
-            <section class="add-stream">
-                <h3>添加流</h3>
-                <button id="addStreamBtn">添加新流</button>
-                <button id="batchAddBtn">批量添加</button>
-            </section>
-
-            <section class="quick-filter">
-                <h3>快速筛选</h3>
-                <button class="filter-btn active" data-status="all">全部</button>
-                <button class="filter-btn" data-status="running">运行中</button>
-                <button class="filter-btn" data-status="error">异常</button>
-                <button class="filter-btn" data-status="stopped">已停止</button>
-            </section>
-
-            <section class="search">
-                <h3>搜索</h3>
-                <input type="text" id="searchInput" placeholder="搜索流名称或地址...">
-            </section>
-
-            <section class="config-management">
-                <h3>配置管理</h3>
-                <button id="transcodeConfigBtn">转码配置</button>
-                <button id="exportConfigBtn">导出配置</button>
-            </section>
-
-            <section class="batch-operations">
-                <h3>批量操作</h3>
-                <button id="batchStartBtn">批量启动</button>
-                <button id="batchStopBtn">批量停止</button>
-                <button id="batchDeleteBtn">批量删除</button>
-            </section>
-        </div>
-
-        <div class="status-summary">
-            <div class="status-item">
-                <div class="count" id="runningCount">0</div>
-                <div class="label">运行中</div>
+    <div class="layout">
+        <!-- 顶部导航 -->
+        <header class="header">
+            <div class="logo">
+                <i class="fas fa-video"></i>
+                流媒体转推管理系统
             </div>
-            <div class="status-item">
-                <div class="count" id="errorCount">0</div>
-                <div class="label">异常</div>
+            <div class="header-right">
+                <div class="system-status">
+                    <span><i class="fas fa-microchip"></i> CPU: <span id="cpuUsage">0%</span></span>
+                    <span><i class="fas fa-memory"></i> 内存: <span id="memUsage">0%</span></span>
+                    <span><i class="fas fa-network-wired"></i> 网络: <span id="netSpeed">0 MB/s</span></span>
+                </div>
+                <div class="user-actions">
+                    <button class="btn btn-text" id="helpBtn">
+                        <i class="fas fa-question-circle"></i>
+                    </button>
+                    <button class="btn btn-text" id="logoutBtn">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </button>
+                </div>
             </div>
-            <div class="status-item">
-                <div class="count" id="stoppedCount">0</div>
-                <div class="label">已停止</div>
-            </div>
-        </div>
+        </header>
 
-        <div class="stream-list">
-            <div class="list-header">
-                <h2>流列表</h2>
-                <div class="list-controls">
+        <div class="main-content">
+            <!-- 左侧菜单 -->
+            <aside class="sidebar">
+                <div class="action-group">
+                    <button class="btn btn-primary btn-block" id="addStreamBtn">
+                        <i class="fas fa-plus"></i> 添加流
+                    </button>
+                    <button class="btn btn-default btn-block" id="batchImportBtn">
+                        <i class="fas fa-file-import"></i> 批量导入
+                    </button>
+                </div>
+
+                <div class="filter-group">
+                    <h3>快速筛选</h3>
+                    <div class="filter-options">
+                        <button class="filter-btn active" data-status="all">全部</button>
+                        <button class="filter-btn" data-status="running">运行中</button>
+                        <button class="filter-btn" data-status="stopped">已停止</button>
+                        <button class="filter-btn" data-status="error">异常</button>
+                    </div>
+                </div>
+
+                <div class="config-group">
+                    <h3>配置管理</h3>
+                    <button class="btn btn-default btn-block" id="configManagerBtn">
+                        <i class="fas fa-cog"></i> 转码配置
+                    </button>
+                    <button class="btn btn-default btn-block" id="defaultConfigBtn">
+                        <i class="fas fa-sliders-h"></i> 默认配置
+                    </button>
+                </div>
+            </aside>
+
+            <!-- 主要内容区 -->
+            <main class="content">
+                <!-- 统计卡片 -->
+                <div class="stat-cards">
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalStreams">0</div>
+                        <div class="stat-label">总流数</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="runningStreams">0</div>
+                        <div class="stat-label">运行中</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stoppedStreams">0</div>
+                        <div class="stat-label">已停止</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="errorStreams">0</div>
+                        <div class="stat-label">异常</div>
+                    </div>
+                </div>
+
+                <!-- 工具栏 -->
+                <div class="toolbar">
+                    <div class="search-box">
+                        <input type="text" id="searchInput" placeholder="搜索流名称或地址...">
+                        <i class="fas fa-search"></i>
+                    </div>
+                    <div class="batch-actions">
+                        <button class="btn btn-success" id="batchStartBtn">
+                            <i class="fas fa-play"></i> 批量启动
+                        </button>
+                        <button class="btn btn-warning" id="batchStopBtn">
+                            <i class="fas fa-stop"></i> 批量停止
+                        </button>
+                        <button class="btn btn-danger" id="batchDeleteBtn">
+                            <i class="fas fa-trash"></i> 批量删除
+                        </button>
+                        <button class="btn btn-default" id="exportBtn">
+                            <i class="fas fa-file-export"></i> 导出
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 流列表 -->
+                <div class="table-container">
+                    <table class="stream-table">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" id="selectAll"></th>
+                                <th>名称</th>
+                                <th>源地址</th>
+                                <th>推流地址</th>
+                                <th>转码配置</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="streamList"></tbody>
+                    </table>
+                </div>
+
+                <!-- 分页 -->
+                <div class="pagination">
                     <select id="pageSize">
                         <option value="10">10条/页</option>
                         <option value="20">20条/页</option>
                         <option value="50">50条/页</option>
                     </select>
-                    <button id="refreshBtn">刷新</button>
+                    <div class="page-buttons">
+                        <button class="btn btn-text" id="prevPage">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <span>第 <span id="currentPage">1</span>/<span id="totalPages">1</span> 页</span>
+                        <button class="btn btn-text" id="nextPage">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
                 </div>
-            </div>
-            <table id="streamTable">
-                <thead>
-                    <tr>
-                        <th><input type="checkbox" id="selectAll"></th>
-                        <th>名称</th>
-                        <th>源地址</th>
-                        <th>推流地址</th>
-                        <th>播放地址</th>
-                        <th>转码配置</th>
-                        <th>状态</th>
-                        <th>操作</th>
-                    </tr>
-                </thead>
-                <tbody id="streamTableBody">
-                    <!-- 数据将通过JavaScript动态填充 -->
-                </tbody>
-            </table>
-            <div class="pagination">
-                <span>第 <span id="currentPage">1</span> 页</span>
-            </div>
+            </main>
         </div>
     </div>
 
-    <!-- 添加流的模态框 -->
+    <!-- 模态框 -->
     <div id="addStreamModal" class="modal">
         <div class="modal-content">
-            <h2>添加新流</h2>
-            <form id="addStreamForm">
-                <div class="form-group">
-                    <label>流名称:</label>
-                    <input type="text" name="name" required>
-                </div>
-                <div class="form-group">
-                    <label>源地址:</label>
-                    <input type="text" name="sourceUrl" required>
-                </div>
-                <div class="form-group">
-                    <label>转码配置:</label>
-                    <select name="transcodeConfig">
-                        <option value="">无</option>
-                        <!-- 其他选项将通过JavaScript动态填充 -->
-                    </select>
-                </div>
-                <div class="form-buttons">
-                    <button type="submit">确定</button>
-                    <button type="button" class="close-modal">取消</button>
-                </div>
-            </form>
+            <div class="modal-header">
+                <h2><i class="fas fa-plus-circle"></i> 添加新流</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="addStreamForm">
+                    <div class="form-group">
+                        <label class="form-label">流名称</label>
+                        <input type="text" class="form-input" name="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">源地址</label>
+                        <input type="text" class="form-input" name="sourceUrl" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">推流地址</label>
+                        <input type="text" class="form-input" name="pushUrl" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">转码配置</label>
+                        <select class="form-select" name="configId">
+                            <option value="">使用默认配置</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-default" onclick="closeModal('addStreamModal')">取消</button>
+                <button class="btn btn-primary" id="submitAddStream">确定</button>
+            </div>
         </div>
     </div>
 
+    <div id="configModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-cog"></i> 转码配置管理</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="config-list">
+                    <!-- 配置列表将通过JS动态生成 -->
+                </div>
+                <button class="btn btn-primary" id="addConfigBtn">
+                    <i class="fas fa-plus"></i> 添加配置
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="batchImportModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-file-import"></i> 批量导入</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">导入方式</label>
+                    <select class="form-select" id="importType">
+                        <option value="text">文本输入</option>
+                        <option value="file">文件上传</option>
+                    </select>
+                </div>
+                <div id="textImport">
+                    <div class="form-group">
+                        <label class="form-label">输入数据</label>
+                        <textarea class="form-textarea" placeholder="每行一条数据，格式：名称,源地址,推流地址[,配置ID]"></textarea>
+                    </div>
+                </div>
+                <div id="fileImport" style="display:none;">
+                    <div class="form-group">
+                        <label class="form-label">选择文件</label>
+                        <input type="file" accept=".csv,.txt">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-default" onclick="closeModal('batchImportModal')">取消</button>
+                <button class="btn btn-primary" id="submitImport">开始导入</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 提示框 -->
+    <div id="toast" class="toast"></div>
+
+    <!-- JavaScript -->
     <script src="/js/utils.js"></script>
+    <script src="/js/stream.js"></script>
     <script src="/js/config.js"></script>
-    <script src="/js/charts.js"></script>
     <script src="/js/main.js"></script>
 </body>
 </html> 

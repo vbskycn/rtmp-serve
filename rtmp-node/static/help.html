@@ -1,179 +1,111 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>使用说明 - 流媒体转推管理系统</title>
-    <link rel="stylesheet" href="/static/css/main.css">
-    <link rel="stylesheet" href="https://lib.baomitu.com/font-awesome/5.15.4/css/all.min.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>帮助文档 - 流媒体转推管理系统</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free/css/all.min.css">
+    <link rel="stylesheet" href="/css/main.css">
     <style>
-        .help-content {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2rem;
+        .help-container {
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
         }
         
         .help-section {
-            background: white;
-            border-radius: 8px;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 40px;
         }
         
         .help-section h2 {
-            color: #2c3e50;
-            margin-bottom: 1rem;
-            border-bottom: 2px solid #eee;
-            padding-bottom: 0.5rem;
+            color: #1890ff;
+            margin-bottom: 20px;
         }
         
-        .step-list {
-            list-style: none;
-            padding: 0;
+        .help-section h3 {
+            color: #333;
+            margin: 20px 0 10px;
         }
         
-        .step-list li {
-            margin-bottom: 1rem;
-            padding-left: 2rem;
-            position: relative;
+        .help-section p {
+            line-height: 1.6;
+            color: #666;
         }
         
-        .step-list li:before {
-            content: '\f0a4';
-            font-family: 'Font Awesome 5 Free';
-            position: absolute;
-            left: 0;
-            color: #3498db;
-        }
-        
-        .code-block {
-            background: #f8f9fa;
-            padding: 1rem;
+        .help-section code {
+            background: #f5f5f5;
+            padding: 2px 6px;
             border-radius: 4px;
-            margin: 1rem 0;
-            font-family: monospace;
+            color: #d56161;
         }
         
-        .tip {
-            background: #fff3cd;
-            border-left: 4px solid #ffc107;
-            padding: 1rem;
-            margin: 1rem 0;
+        .help-section ul {
+            padding-left: 20px;
+        }
+        
+        .help-section li {
+            margin: 10px 0;
         }
     </style>
 </head>
 <body>
-    <div class="layout">
-        <header class="header">
-            <div class="logo">
-                <i class="fas fa-video"></i>
-                流媒体转推管理系统
-            </div>
-            <div class="nav-links">
-                <a href="/" class="nav-link"><i class="fas fa-home"></i> 返回主页</a>
-            </div>
-        </header>
+    <div class="help-container">
+        <h1><i class="fas fa-question-circle"></i> 帮助文档</h1>
+        
+        <div class="help-section">
+            <h2>基本操作</h2>
+            <h3>添加流</h3>
+            <p>点击左侧的"添加流"按钮，填写以下信息：</p>
+            <ul>
+                <li>流名称：给这个转推任务起个名字</li>
+                <li>源地址：原始流的地址，支持RTMP/HTTP/HLS等格式</li>
+                <li>推流地址：转推的目标地址</li>
+                <li>转码配置：可选择预设的转码配置或使用默认配置</li>
+            </ul>
 
-        <div class="help-content">
-            <div class="help-section">
-                <h2><i class="fas fa-book"></i> 基本使用流程</h2>
-                <ol class="step-list">
-                    <li>登录系统（默认账号：admin，密码：admin）</li>
-                    <li>在左侧功能区选择"添加新流"或"批量添加"</li>
-                    <li>填写流配置信息</li>
-                    <li>点击确认添加</li>
-                    <li>在流列表中监控状态</li>
-                </ol>
-            </div>
+            <h3>批量导入</h3>
+            <p>支持通过文本或文件批量导入流配置，格式为：</p>
+            <code>名称,源地址,推流地址[,配置ID]</code>
+            
+            <h3>流管理</h3>
+            <p>在流列表中可以进行以下操作：</p>
+            <ul>
+                <li>启动/停止：控制单个流的转推状态</li>
+                <li>修改配置：更改转码参数</li>
+                <li>删除：移除转推任务</li>
+                <li>批量操作：可以同时操作多个流</li>
+            </ul>
+        </div>
 
-            <div class="help-section">
-                <h2><i class="fas fa-plus-circle"></i> 添加新流</h2>
-                <p>添加单个流需要填写以下信息：</p>
-                <div class="code-block">
-{
-    "名称": "流的名称",
-    "源地址": "源视频流的RTMP地址",
-    "推流地址": "目标服务器的RTMP地址",
-    "推流密钥": "用于验证的密钥",
-    "转码配置": "可选择预设或自定义"
-}
-                </div>
-                <div class="tip">
-                    <i class="fas fa-lightbulb"></i> 提示：源地址支持RTMP、HTTP-FLV等多种格式
-                </div>
-            </div>
+        <div class="help-section">
+            <h2>转码配置</h2>
+            <p>系统支持自定义转码配置，可以设置：</p>
+            <ul>
+                <li>视频编码：支持H.264/H.265</li>
+                <li>视频码率：建议根据分辨率选择合适的码率</li>
+                <li>音频编码：支持AAC/MP3</li>
+                <li>音频码率：一般128k即可</li>
+            </ul>
+        </div>
 
-            <div class="help-section">
-                <h2><i class="fas fa-file-import"></i> 批量导入</h2>
-                <p>支持以下两种方式批量导入：</p>
-                <ol class="step-list">
-                    <li>通过文本框粘贴多个源地址（每行一个）</li>
-                    <li>上传JSON格式的配置文件</li>
-                </ol>
-                <div class="code-block">
-[
-    {
-        "id": "stream1",
-        "sourceUrl": "rtmp://source1.com/live/stream1",
-        "key": "key1"
-    },
-    {
-        "id": "stream2",
-        "sourceUrl": "rtmp://source2.com/live/stream2",
-        "key": "key2"
-    }
-]
-                </div>
-            </div>
+        <div class="help-section">
+            <h2>常见问题</h2>
+            <h3>转推失败</h3>
+            <p>请检查：</p>
+            <ul>
+                <li>源地址是否可访问</li>
+                <li>网络连接是否正常</li>
+                <li>转码参数是否合适</li>
+                <li>查看详细错误日志</li>
+            </ul>
 
-            <div class="help-section">
-                <h2><i class="fas fa-cogs"></i> 转码配置</h2>
-                <p>系统提供以下预设配置：</p>
-                <ul class="step-list">
-                    <li>原画配置：直接复制音视频流，不进行转码</li>
-                    <li>标清配置：480P，1000kbps视频码率</li>
-                    <li>高清配置：720P，2500kbps视频码率</li>
-                    <li>超清配置：1080P，4000kbps视频码率</li>
-                </ul>
-                <div class="tip">
-                    <i class="fas fa-lightbulb"></i> 提示：可以在配置管理中添加自定义转码配置
-                </div>
-            </div>
-
-            <div class="help-section">
-                <h2><i class="fas fa-tasks"></i> 批量操作</h2>
-                <p>支持的批量操作：</p>
-                <ul class="step-list">
-                    <li>批量启动：同时启动多个选中的流</li>
-                    <li>批量停止：同时停止多个选中的流</li>
-                    <li>批量删除：同时删除多个选中的流</li>
-                </ul>
-                <div class="tip">
-                    <i class="fas fa-exclamation-triangle"></i> 注意：批量操作前请确认选中的流状态
-                </div>
-            </div>
-
-            <div class="help-section">
-                <h2><i class="fas fa-chart-line"></i> 监控和统计</h2>
-                <p>系统提供以下监控指标：</p>
-                <ul class="step-list">
-                    <li>CPU使用率</li>
-                    <li>内存使用情况</li>
-                    <li>网络带宽使用</li>
-                    <li>各状态流的数量统计</li>
-                    <li>单个流的详细性能指标</li>
-                </ul>
-            </div>
-
-            <div class="help-section">
-                <h2><i class="fas fa-exclamation-circle"></i> 常见问题</h2>
-                <ul class="step-list">
-                    <li>流无法启动：检查源地址是否可访问，网络是否正常</li>
-                    <li>转码失败：检查转码参数是否合适，服务器性能是否足够</li>
-                    <li>推流中断：检查网络状态，源是否正常</li>
-                    <li>性能问题：适当调整转码参数，减少同时转码的流数量</li>
-                </ul>
-            </div>
+            <h3>性能问题</h3>
+            <p>如果系统负载过高，建议：</p>
+            <ul>
+                <li>减少同时转码的流数量</li>
+                <li>降低转码质量</li>
+                <li>使用更强劲的服务器</li>
+            </ul>
         </div>
     </div>
 </body>

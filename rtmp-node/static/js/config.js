@@ -95,4 +95,140 @@ function saveConfig() {
         console.error('保存配置失败:', error);
         alert('保存配置失败: ' + error.message);
     }
-} 
+}
+
+class ConfigManager {
+    constructor() {
+        this.baseUrl = '/api';
+        this.configs = [];
+        this.initEventListeners();
+        this.loadConfigs();
+    }
+
+    async loadConfigs() {
+        try {
+            const response = await fetch(`${this.baseUrl}/configs`);
+            this.configs = await response.json();
+            this.updateConfigList();
+            this.updateConfigSelects();
+        } catch (error) {
+            showToast('加载配置失败', 'error');
+        }
+    }
+
+    updateConfigList() {
+        const configList = document.querySelector('.config-list');
+        configList.innerHTML = '';
+
+        this.configs.forEach(config => {
+            const configItem = document.createElement('div');
+            configItem.className = 'config-item';
+            configItem.innerHTML = `
+                <div class="config-info">
+                    <h3>${config.name}</h3>
+                    <p>${config.description || '无描述'}</p>
+                </div>
+                <div class="config-actions">
+                    <button class="btn btn-sm btn-default" onclick="editConfig(${config.id})">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteConfig(${config.id})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `;
+            configList.appendChild(configItem);
+        });
+    }
+
+    updateConfigSelects() {
+        const selects = document.querySelectorAll('select[name="configId"]');
+        const options = this.configs.map(config => 
+            `<option value="${config.id}">${config.name}</option>`
+        ).join('');
+
+        selects.forEach(select => {
+            select.innerHTML = '<option value="">使用默认配置</option>' + options;
+        });
+    }
+
+    async addConfig(configData) {
+        try {
+            const response = await fetch(`${this.baseUrl}/configs`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(configData)
+            });
+
+            if (response.ok) {
+                await this.loadConfigs();
+                showToast('添加配置成功');
+                closeModal('configModal');
+            }
+        } catch (error) {
+            showToast('添加配置失败', 'error');
+        }
+    }
+
+    async updateConfig(id, configData) {
+        try {
+            const response = await fetch(`${this.baseUrl}/configs/${id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(configData)
+            });
+
+            if (response.ok) {
+                await this.loadConfigs();
+                showToast('更新配置成功');
+            }
+        } catch (error) {
+            showToast('更新配置失败', 'error');
+        }
+    }
+
+    async deleteConfig(id) {
+        if (!confirm('确定要删除此配置吗？')) return;
+
+        try {
+            const response = await fetch(`${this.baseUrl}/configs/${id}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                await this.loadConfigs();
+                showToast('删除配置成功');
+            }
+        } catch (error) {
+            showToast('删除配置失败', 'error');
+        }
+    }
+
+    initEventListeners() {
+        // 添加配置按钮
+        document.getElementById('addConfigBtn').addEventListener('click', () => {
+            showConfigEditor();
+        });
+
+        // 配置表单提交
+        document.getElementById('configForm')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const configData = Object.fromEntries(formData.entries());
+            
+            if (configData.id) {
+                await this.updateConfig(configData.id, configData);
+            } else {
+                await this.addConfig(configData);
+            }
+        });
+    }
+}
+
+// 初始化配置管理器
+const configManager = new ConfigManager();
+</rewritten_file> 

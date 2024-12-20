@@ -1,138 +1,145 @@
-const StreamService = require('../services/ffmpegService');
-const fs = require('fs').promises;
-const path = require('path');
+const express = require('express');
+const router = express.Router();
+const ffmpegService = require('../services/ffmpegService');
+const db = require('../services/db');
 
-const streamService = new StreamService();
-const STREAMS_FILE = path.join(__dirname, '../../data/streams.json');
-
-class StreamController {
-  async getAllStreams(req, res) {
+// 获取所有流列表
+router.get('/', async (req, res) => {
     try {
-      const streams = await this.loadStreams();
-      res.json(streams);
+        const streams = await db.getAllStreams();
+        res.json({
+            status: 'success',
+            data: streams
+        });
     } catch (error) {
-      res.status(500).json({ error: '获取流列表失败' });
+        res.status(500).json({
+            status: 'error',
+            message: error.message
+        });
     }
-  }
+});
 
-  async addStream(req, res) {
+// 添加新流
+router.post('/', async (req, res) => {
     try {
-      const { name, sourceUrl, pushUrl, config } = req.body;
-      const streams = await this.loadStreams();
-      
-      const newStream = {
-        id: Date.now().toString(),
-        name,
-        sourceUrl,
-        pushUrl,
-        config,
-        status: 'stopped'
-      };
-
-      streams.push(newStream);
-      await this.saveStreams(streams);
-      
-      res.json(newStream);
+        const streamData = req.body;
+        const stream = await db.addStream(streamData);
+        res.json({
+            status: 'success',
+            data: stream
+        });
     } catch (error) {
-      res.status(500).json({ error: '添加流失败' });
+        res.status(400).json({
+            status: 'error',
+            message: error.message
+        });
     }
-  }
+});
 
-  async startStream(req, res) {
+// 启动流
+router.post('/:id/start', async (req, res) => {
     try {
-      const { id } = req.params;
-      const streams = await this.loadStreams();
-      const stream = streams.find(s => s.id === id);
-      
-      if (!stream) {
-        return res.status(404).json({ error: '未找到指定的流' });
-      }
-
-      await streamService.startStream(stream);
-      stream.status = 'running';
-      await this.saveStreams(streams);
-      
-      res.json(stream);
+        const { id } = req.params;
+        const stream = await db.getStream(id);
+        await ffmpegService.startStream(stream);
+        await db.updateStreamStatus(id, 'running');
+        res.json({
+            status: 'success',
+            message: '流已启动'
+        });
     } catch (error) {
-      res.status(500).json({ error: '启动流失败' });
+        res.status(500).json({
+            status: 'error',
+            message: error.message
+        });
     }
-  }
+});
 
-  async stopStream(req, res) {
+// 停止流
+router.post('/:id/stop', async (req, res) => {
     try {
-      const { id } = req.params;
-      const streams = await this.loadStreams();
-      const stream = streams.find(s => s.id === id);
-      
-      if (!stream) {
-        return res.status(404).json({ error: '未找到指定的流' });
-      }
-
-      await streamService.stopStream(stream);
-      stream.status = 'stopped';
-      await this.saveStreams(streams);
-      
-      res.json(stream);
+        const { id } = req.params;
+        await ffmpegService.stopStream(id);
+        await db.updateStreamStatus(id, 'stopped');
+        res.json({
+            status: 'success',
+            message: '流已停止'
+        });
     } catch (error) {
-      res.status(500).json({ error: '停止流失败' });
+        res.status(500).json({
+            status: 'error',
+            message: error.message
+        });
     }
-  }
+});
 
-  async deleteStream(req, res) {
+// 删除流
+router.delete('/:id', async (req, res) => {
     try {
-      const { id } = req.params;
-      const streams = await this.loadStreams();
-      const streamIndex = streams.findIndex(s => s.id === id);
-      
-      if (streamIndex === -1) {
-        return res.status(404).json({ error: '未找到指定的流' });
-      }
-
-      // 如果流正在运行，先停止它
-      const stream = streams[streamIndex];
-      if (stream.status === 'running') {
-        await streamService.stopStream(stream);
-      }
-
-      // 从数组中删除流
-      streams.splice(streamIndex, 1);
-      await this.saveStreams(streams);
-      
-      res.json({ message: '删除成功' });
+        const { id } = req.params;
+        await ffmpegService.stopStream(id);
+        await db.deleteStream(id);
+        res.json({
+            status: 'success',
+            message: '流已删除'
+        });
     } catch (error) {
-      res.status(500).json({ error: '删除流失败' });
+        res.status(500).json({
+            status: 'error',
+            message: error.message
+        });
     }
-  }
+});
 
-  async getStreamMetrics(req, res) {
+// 获取流状态
+router.get('/:id/status', async (req, res) => {
     try {
-      const streams = await this.loadStreams();
-      const metrics = streams.map(stream => {
-        const status = streamService.getStreamStatus(stream.id);
-        return {
-          id: stream.id,
-          status: stream.status,
-          ...status
-        };
-      });
-      res.json(metrics);
+        const { id } = req.params;
+        const status = await ffmpegService.getStreamStatus(id);
+        res.json({
+            status: 'success',
+            data: status
+        });
     } catch (error) {
-      res.status(500).json({ error: '获取流指标失败' });
+        res.status(500).json({
+            status: 'error',
+            message: error.message
+        });
     }
-  }
+});
 
-  async loadStreams() {
+// 批量操作
+router.post('/batch', async (req, res) => {
     try {
-      const data = await fs.readFile(STREAMS_FILE, 'utf8');
-      return JSON.parse(data);
+        const { action, ids } = req.body;
+        
+        switch (action) {
+            case 'start':
+                await Promise.all(ids.map(id => ffmpegService.startStream(id)));
+                break;
+            case 'stop':
+                await Promise.all(ids.map(id => ffmpegService.stopStream(id)));
+                break;
+            case 'delete':
+                await Promise.all(ids.map(id => {
+                    ffmpegService.stopStream(id);
+                    return db.deleteStream(id);
+                }));
+                break;
+            default:
+                throw new Error('未知的操作类型');
+        }
+        
+        res.json({
+            status: 'success',
+            message: '批量操作完成'
+        });
     } catch (error) {
-      return [];
+        res.status(500).json({
+            status: 'error',
+            message: error.message
+        });
     }
-  }
+});
 
-  async saveStreams(streams) {
-    await fs.writeFile(STREAMS_FILE, JSON.stringify(streams, null, 2));
-  }
-}
-
-module.exports = new StreamController(); 
+module.exports = router; 

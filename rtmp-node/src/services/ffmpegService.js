@@ -1,138 +1,129 @@
-const ffmpeg = require('fluent-ffmpeg');
-const winston = require('winston');
-const config = require('config');
+const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
 
 class FFmpegService {
-  constructor() {
-    this.activeStreams = new Map();
-    this.retryAttempts = new Map();
-    this.maxRetries = config.get('ffmpeg.maxRetries') || 3;
-    this.setupLogger();
-  }
-
-  setupLogger() {
-    this.logger = winston.createLogger({
-      level: 'info',
-      format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.json()
-      ),
-      transports: [
-        new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
-        new winston.transports.File({ filename: 'logs/combined.log' })
-      ]
-    });
-  }
-
-  async startStream(stream) {
-    if (this.activeStreams.has(stream.id)) {
-      throw new Error('流已经在运行中');
+    constructor() {
+        this.processes = new Map();
+        this.logDir = path.join(__dirname, '../../logs');
+        
+        // 确保日志目录存在
+        if (!fs.existsSync(this.logDir)) {
+            fs.mkdirSync(this.logDir, { recursive: true });
+        }
     }
 
-    const command = ffmpeg(stream.sourceUrl);
-    
-    // 应用转码配置
-    if (stream.config) {
-      if (stream.config.videoBitrate) {
-        command.videoBitrate(stream.config.videoBitrate);
-      }
-      if (stream.config.audioBitrate) {
-        command.audioBitrate(stream.config.audioBitrate);
-      }
-      if (stream.config.videoCodec) {
-        command.videoCodec(stream.config.videoCodec);
-      }
-      if (stream.config.audioCodec) {
-        command.audioCodec(stream.config.audioCodec);
-      }
-      if (stream.config.size) {
-        command.size(stream.config.size);
-      }
+    async startStream(stream) {
+        if (this.processes.has(stream.id)) {
+            throw new Error('流已经在运行');
+        }
+
+        const logFile = path.join(this.logDir, `${stream.id}.log`);
+        const logStream = fs.createWriteStream(logFile, { flags: 'a' });
+
+        const args = this.buildFFmpegArgs(stream);
+        const process = spawn('ffmpeg', args);
+
+        process.stdout.pipe(logStream);
+        process.stderr.pipe(logStream);
+
+        this.processes.set(stream.id, {
+            process,
+            logStream,
+            startTime: Date.now()
+        });
+
+        return new Promise((resolve, reject) => {
+            process.on('error', (error) => {
+                this.handleStreamError(stream.id, error);
+                reject(error);
+            });
+
+            // 等待进程启动
+            setTimeout(() => {
+                if (process.exitCode === null) {
+                    resolve();
+                } else {
+                    reject(new Error('启动失败'));
+                }
+            }, 1000);
+        });
     }
 
-    command
-      .output(stream.pushUrl)
-      .on('start', (commandLine) => {
-        this.logger.info(`Stream ${stream.id} started: ${commandLine}`);
-        this.updateStreamStatus(stream.id, 'running');
-      })
-      .on('error', (err) => {
-        this.logger.error(`Stream ${stream.id} error: ${err.message}`);
-        this.handleStreamError(stream);
-      })
-      .on('end', () => {
-        this.logger.info(`Stream ${stream.id} ended`);
-        this.activeStreams.delete(stream.id);
-        this.updateStreamStatus(stream.id, 'stopped');
-      });
+    async stopStream(id) {
+        const processInfo = this.processes.get(id);
+        if (!processInfo) {
+            return;
+        }
 
-    // 添加流状态监控
-    command.on('progress', (progress) => {
-      this.updateStreamMetrics(stream.id, progress);
-    });
+        return new Promise((resolve) => {
+            processInfo.process.on('exit', () => {
+                processInfo.logStream.end();
+                this.processes.delete(id);
+                resolve();
+            });
 
-    this.activeStreams.set(stream.id, {
-      command,
-      startTime: Date.now(),
-      metrics: {
-        fps: 0,
-        bitrate: 0,
-        speed: 0,
-        frames: 0
-      }
-    });
-
-    command.run();
-  }
-
-  async handleStreamError(stream) {
-    const attempts = this.retryAttempts.get(stream.id) || 0;
-    
-    if (attempts < this.maxRetries) {
-      this.logger.info(`Retrying stream ${stream.id}, attempt ${attempts + 1}`);
-      this.retryAttempts.set(stream.id, attempts + 1);
-      
-      setTimeout(() => {
-        this.startStream(stream);
-      }, 5000); // 5秒后重试
-    } else {
-      this.logger.error(`Stream ${stream.id} failed after ${attempts} retries`);
-      this.activeStreams.delete(stream.id);
-      this.retryAttempts.delete(stream.id);
-      this.updateStreamStatus(stream.id, 'error');
+            processInfo.process.kill('SIGTERM');
+        });
     }
-  }
 
-  updateStreamMetrics(streamId, progress) {
-    const streamData = this.activeStreams.get(streamId);
-    if (streamData) {
-      streamData.metrics = {
-        fps: progress.frames,
-        bitrate: progress.bitrate,
-        speed: progress.speed,
-        frames: progress.frames
-      };
+    getStreamStatus(id) {
+        const processInfo = this.processes.get(id);
+        if (!processInfo) {
+            return { status: 'stopped' };
+        }
+
+        return {
+            status: 'running',
+            uptime: Date.now() - processInfo.startTime,
+            pid: processInfo.process.pid
+        };
     }
-  }
 
-  getStreamStatus(streamId) {
-    const streamData = this.activeStreams.get(streamId);
-    if (!streamData) return null;
+    buildFFmpegArgs(stream) {
+        const args = [
+            '-i', stream.sourceUrl,
+            '-c:v', stream.config?.videoCodec || 'copy',
+            '-c:a', stream.config?.audioCodec || 'copy'
+        ];
 
-    return {
-      uptime: Date.now() - streamData.startTime,
-      ...streamData.metrics
-    };
-  }
+        if (stream.config?.videoBitrate) {
+            args.push('-b:v', stream.config.videoBitrate);
+        }
 
-  async stopStream(stream) {
-    const streamData = this.activeStreams.get(stream.id);
-    if (streamData) {
-      streamData.command.kill('SIGKILL');
-      this.activeStreams.delete(stream.id);
-      this.retryAttempts.delete(stream.id);
+        if (stream.config?.audioBitrate) {
+            args.push('-b:a', stream.config.audioBitrate);
+        }
+
+        if (stream.config?.frameRate) {
+            args.push('-r', stream.config.frameRate);
+        }
+
+        args.push(
+            '-f', 'flv',
+            stream.pushUrl
+        );
+
+        return args;
     }
-  }
+
+    handleStreamError(id, error) {
+        console.error(`Stream ${id} error:`, error);
+        this.processes.delete(id);
+    }
+
+    async getStreamMetrics(id) {
+        const processInfo = this.processes.get(id);
+        if (!processInfo) {
+            return null;
+        }
+
+        // 这里可以添加更多的指标收集逻辑
+        return {
+            uptime: Date.now() - processInfo.startTime,
+            pid: processInfo.process.pid
+        };
+    }
 }
 
-module.exports = FFmpegService; 
+module.exports = new FFmpegService(); 

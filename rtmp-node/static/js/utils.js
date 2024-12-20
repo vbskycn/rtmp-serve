@@ -129,4 +129,84 @@ function closeModal(modal) {
     if (modal && modal.parentNode) {
         modal.parentNode.removeChild(modal);
     }
+}
+
+// 显示提示信息
+function showToast(message, type = 'success') {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.className = `toast toast-${type}`;
+    toast.style.display = 'block';
+    
+    setTimeout(() => {
+        toast.style.display = 'none';
+    }, 3000);
+}
+
+// 显示模态框
+function showModal(modalId) {
+    document.getElementById(modalId).style.display = 'block';
+}
+
+// 关闭模态框
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+}
+
+// 格式化日期
+function formatDate(date) {
+    return new Date(date).toLocaleString();
+}
+
+// 格式化文件大小
+function formatSize(bytes) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = bytes;
+    let unitIndex = 0;
+    
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex++;
+    }
+    
+    return `${size.toFixed(2)} ${units[unitIndex]}`;
+}
+
+// 防抖函数
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// 处理API错误
+function handleApiError(error) {
+    console.error('API Error:', error);
+    if (error.response) {
+        showToast(error.response.data?.message || '操作失败', 'error');
+    } else if (error.request) {
+        showToast('网络请求失败', 'error');
+    } else {
+        showToast('操作失败', 'error');
+    }
+}
+
+// 验证表单数据
+function validateForm(formData, rules) {
+    for (const [field, rule] of Object.entries(rules)) {
+        const value = formData[field];
+        if (rule.required && !value) {
+            throw new Error(`${rule.message || field} 不能为空`);
+        }
+        if (rule.pattern && !rule.pattern.test(value)) {
+            throw new Error(rule.message || `${field} 格式不正确`);
+        }
+    }
+    return true;
 } 

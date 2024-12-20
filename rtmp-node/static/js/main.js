@@ -1,174 +1,198 @@
-document.addEventListener('DOMContentLoaded', function() {
-    // 初始化事件监听
-    initEventListeners();
-    // 加载初始数据
-    loadStreamList();
-    // 开始定时更新系统信息
-    startSystemInfoUpdate();
+// 全局配置
+const CONFIG = {
+    API_BASE_URL: '/api',
+    WS_URL: `ws://${location.host}/ws`,
+    REFRESH_INTERVAL: 5000,
+    PAGE_SIZES: [10, 20, 50],
+    STREAM_STATUSES: {
+        RUNNING: 'running',
+        ERROR: 'error',
+        STOPPED: 'stopped'
+    }
+};
+
+// 工具函数
+const utils = {
+    showToast(message, type = 'success') {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.className = `toast toast-${type}`;
+        toast.style.display = 'block';
+        setTimeout(() => toast.style.display = 'none', 3000);
+    },
+
+    showLoading() {
+        document.getElementById('loadingOverlay').style.display = 'block';
+    },
+
+    hideLoading() {
+        document.getElementById('loadingOverlay').style.display = 'none';
+    },
+
+    showModal(id) {
+        document.getElementById(id).style.display = 'block';
+    },
+
+    closeModal(id) {
+        document.getElementById(id).style.display = 'none';
+    },
+
+    formatDate(date) {
+        return new Date(date).toLocaleString();
+    },
+
+    formatSize(bytes) {
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let size = bytes;
+        let unitIndex = 0;
+        while (size >= 1024 && unitIndex < units.length - 1) {
+            size /= 1024;
+            unitIndex++;
+        }
+        return `${size.toFixed(2)} ${units[unitIndex]}`;
+    },
+
+    debounce(func, wait) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+};
+
+// 系统监控
+class SystemMonitor {
+    constructor() {
+        this.initWebSocket();
+        this.startMonitoring();
+    }
+
+    initWebSocket() {
+        this.ws = new WebSocket(CONFIG.WS_URL);
+        this.ws.onmessage = this.handleWebSocketMessage.bind(this);
+    }
+
+    handleWebSocketMessage(event) {
+        const data = JSON.parse(event.data);
+        switch (data.type) {
+            case 'metrics':
+                this.updateMetrics(data.data);
+                break;
+            case 'error':
+                utils.showToast(data.message, 'error');
+                break;
+        }
+    }
+
+    updateMetrics(metrics) {
+        document.getElementById('cpuUsage').textContent = `${metrics.cpu.toFixed(1)}%`;
+        document.getElementById('memUsage').textContent = `${metrics.memory.toFixed(1)}%`;
+        document.getElementById('netSpeed').textContent = utils.formatSize(metrics.network.bytesPerSecond) + '/s';
+    }
+
+    startMonitoring() {
+        setInterval(() => this.fetchMetrics(), CONFIG.REFRESH_INTERVAL);
+    }
+
+    async fetchMetrics() {
+        try {
+            const response = await fetch(`${CONFIG.API_BASE_URL}/system/metrics`);
+            const data = await response.json();
+            this.updateMetrics(data);
+        } catch (error) {
+            console.error('获取系统指标失败:', error);
+        }
+    }
+}
+
+// 配置管理
+class ConfigManager {
+    constructor() {
+        this.configs = [];
+        this.loadConfigs();
+        this.initEventListeners();
+    }
+
+    async loadConfigs() {
+        try {
+            const response = await fetch(`${CONFIG.API_BASE_URL}/configs`);
+            this.configs = await response.json();
+            this.updateConfigList();
+        } catch (error) {
+            utils.showToast('加载配置失败', 'error');
+        }
+    }
+
+    updateConfigList() {
+        const configList = document.querySelector('.config-list');
+        if (!configList) return;
+
+        configList.innerHTML = this.configs.map(config => `
+            <div class="config-item">
+                <div class="config-info">
+                    <h3>${config.name}</h3>
+                    <p>${config.description || '无描述'}</p>
+                </div>
+                <div class="config-actions">
+                    <button class="btn btn-sm btn-info" onclick="configManager.editConfig('${config.id}')">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="configManager.deleteConfig('${config.id}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    initEventListeners() {
+        document.getElementById('configManagerBtn')?.addEventListener('click', () => {
+            utils.showModal('configModal');
+        });
+
+        document.getElementById('addConfigBtn')?.addEventListener('click', () => {
+            this.showConfigEditor();
+        });
+    }
+
+    // ... 其他配置管理方法
+}
+
+// 流管理器
+class StreamManager {
+    constructor() {
+        this.streams = [];
+        this.selectedIds = new Set();
+        this.currentPage = 1;
+        this.pageSize = 10;
+        this.filter = 'all';
+        this.searchText = '';
+
+        this.initEventListeners();
+        this.loadStreams();
+    }
+
+    // ... stream.js 中的其他方法
+}
+
+// 初始化应用
+document.addEventListener('DOMContentLoaded', () => {
+    window.systemMonitor = new SystemMonitor();
+    window.configManager = new ConfigManager();
+    window.streamManager = new StreamManager();
 });
 
-function initEventListeners() {
-    // 添加流按钮
-    document.getElementById('addStreamBtn').addEventListener('click', () => {
-        document.getElementById('addStreamModal').style.display = 'block';
-    });
-
-    // 关闭模态框
-    document.querySelectorAll('.close-modal').forEach(button => {
-        button.addEventListener('click', () => {
-            document.getElementById('addStreamModal').style.display = 'none';
-        });
-    });
-
-    // 添加流表单提交
-    document.getElementById('addStreamForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const formData = new FormData(e.target);
-        const streamData = {
-            name: formData.get('name'),
-            sourceUrl: formData.get('sourceUrl'),
-            transcodeConfig: formData.get('transcodeConfig')
-        };
-
-        try {
-            const response = await fetch('/api/streams', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(streamData)
-            });
-
-            if (response.ok) {
-                document.getElementById('addStreamModal').style.display = 'none';
-                loadStreamList(); // 重新加载列表
-            } else {
-                alert('添加失败，请重试');
-            }
-        } catch (error) {
-            console.error('添加流失败:', error);
-            alert('添加失败，请检查网络连接');
-        }
-    });
-
-    // 筛选按钮
-    document.querySelectorAll('.filter-btn').forEach(button => {
-        button.addEventListener('click', (e) => {
-            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
-            e.target.classList.add('active');
-            loadStreamList(e.target.dataset.status);
-        });
-    });
-
-    // 刷新按钮
-    document.getElementById('refreshBtn').addEventListener('click', () => {
-        loadStreamList();
-    });
-
-    // 退出按钮
-    document.getElementById('logoutBtn').addEventListener('click', async () => {
-        try {
-            await fetch('/api/auth/logout', { method: 'POST' });
-            window.location.href = '/login';
-        } catch (error) {
-            console.error('退出失败:', error);
-        }
-    });
-}
-
-async function loadStreamList(status = 'all') {
-    try {
-        const response = await fetch(`/api/streams?status=${status}`);
-        const data = await response.json();
-        
-        updateStreamTable(data.streams);
-        updateStatusCounts(data.counts);
-    } catch (error) {
-        console.error('加载流列表失败:', error);
+// 全局事件处理
+document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('close-modal')) {
+        const modal = e.target.closest('.modal');
+        if (modal) utils.closeModal(modal.id);
     }
-}
+});
 
-function updateStreamTable(streams) {
-    const tbody = document.getElementById('streamTableBody');
-    tbody.innerHTML = '';
-
-    streams.forEach(stream => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td><input type="checkbox" value="${stream.id}"></td>
-            <td>${stream.name}</td>
-            <td>${stream.sourceUrl}</td>
-            <td>${stream.pushUrl || '-'}</td>
-            <td>${stream.playUrl || '-'}</td>
-            <td>${stream.transcodeConfig || '无'}</td>
-            <td><span class="status-${stream.status}">${getStatusText(stream.status)}</span></td>
-            <td>
-                ${getActionButtons(stream)}
-            </td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
-
-function getStatusText(status) {
-    const statusMap = {
-        running: '运行中',
-        stopped: '已停止',
-        error: '异���'
-    };
-    return statusMap[status] || status;
-}
-
-function getActionButtons(stream) {
-    if (stream.status === 'running') {
-        return `<button onclick="stopStream('${stream.id}')">停止</button>`;
-    }
-    return `<button onclick="startStream('${stream.id}')">启动</button>`;
-}
-
-function updateStatusCounts(counts) {
-    document.getElementById('runningCount').textContent = counts.running || 0;
-    document.getElementById('errorCount').textContent = counts.error || 0;
-    document.getElementById('stoppedCount').textContent = counts.stopped || 0;
-}
-
-async function startSystemInfoUpdate() {
-    setInterval(async () => {
-        try {
-            const response = await fetch('/api/system/info');
-            const data = await response.json();
-            
-            document.getElementById('cpuUsage').textContent = `${data.cpu}%`;
-            document.getElementById('memoryUsage').textContent = `${data.memory}%`;
-            document.getElementById('networkSpeed').textContent = `${data.network} MB/s`;
-        } catch (error) {
-            console.error('更新系统信息失败:', error);
-        }
-    }, 5000); // 每5秒更新一次
-}
-
-async function startStream(id) {
-    try {
-        const response = await fetch(`/api/streams/${id}/start`, { method: 'POST' });
-        if (response.ok) {
-            loadStreamList();
-        } else {
-            alert('启动失败，请重试');
-        }
-    } catch (error) {
-        console.error('启动流失败:', error);
-    }
-}
-
-async function stopStream(id) {
-    try {
-        const response = await fetch(`/api/streams/${id}/stop`, { method: 'POST' });
-        if (response.ok) {
-            loadStreamList();
-        } else {
-            alert('停止失败，请重试');
-        }
-    } catch (error) {
-        console.error('停止流失败:', error);
-    }
-} 
+// 登出处理
+document.getElementById('logoutBtn')?.addEventListener('click', () => {
+    localStorage.removeItem('token');
+    location.href = '/login.html';
+}); 

@@ -1,23 +1,23 @@
 {
-  "name": "stream-push-server",
+  "name": "stream-relay-manager",
   "version": "1.0.0",
-  "description": "流媒体转推服务器",
-  "main": "src/server.js",
+  "description": "流媒体转推管理系统",
+  "main": "start.js",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "start": "node start.js",
+    "dev": "nodemon start.js",
+    "init-db": "node src/services/db.js"
   },
   "dependencies": {
-    "express": "^4.17.1",
-    "fluent-ffmpeg": "^2.1.2",
-    "winston": "^3.3.3",
-    "body-parser": "^1.19.0",
     "cors": "^2.8.5",
+    "express": "^4.17.1",
     "jsonwebtoken": "^8.5.1",
-    "config": "^3.3.6",
+    "sqlite3": "^5.0.2",
+    "winston": "^3.3.3",
+    "ws": "^8.2.3",
     "bcryptjs": "^2.4.3"
   },
   "devDependencies": {
-    "nodemon": "^2.0.15"
+    "nodemon": "^2.0.12"
   }
 } 

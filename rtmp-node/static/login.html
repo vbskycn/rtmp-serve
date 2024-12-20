@@ -1,10 +1,11 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>登录 - 流媒体转推管理</title>
-    <link rel="stylesheet" href="/static/css/login.css">
-    <link rel="stylesheet" href="https://lib.baomitu.com/font-awesome/5.15.4/css/all.min.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - 流媒体转推管理系统</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free/css/all.min.css">
+    <link rel="stylesheet" href="/css/login.css">
 </head>
 <body>
     <div class="login-container">
@@ -16,17 +17,21 @@
             <form id="loginForm" class="login-form">
                 <div class="form-group">
                     <label><i class="fas fa-user"></i></label>
-                    <input type="text" id="username" placeholder="用户名" required>
+                    <input type="text" name="username" placeholder="用户名" required>
                 </div>
                 <div class="form-group">
                     <label><i class="fas fa-lock"></i></label>
-                    <input type="password" id="password" placeholder="密码" required>
+                    <input type="password" name="password" placeholder="密码" required>
+                </div>
+                <div class="form-group">
+                    <label class="remember-me">
+                        <input type="checkbox" name="remember"> 记住我
+                    </label>
                 </div>
                 <button type="submit" class="login-btn">登录</button>
             </form>
-            <div id="errorMessage" class="error-message"></div>
         </div>
     </div>
-    <script src="/static/js/login.js"></script>
+    <script src="/js/login.js"></script>
 </body>
 </html> 
