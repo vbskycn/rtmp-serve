@@ -11,11 +11,11 @@ router.post('/auth/login', authController.login);
 router.use(authMiddleware);
 
 // 流管理路由
-router.get('/streams', streamController.getAllStreams);
-router.post('/streams', streamController.addStream);
-router.post('/streams/:id/start', streamController.startStream);
-router.post('/streams/:id/stop', streamController.stopStream);
-router.delete('/streams/:id', streamController.deleteStream);
-router.get('/streams/metrics', streamController.getStreamMetrics);
+router.get('/streams', streamController.getAllStreams.bind(streamController));
+router.post('/streams', streamController.addStream.bind(streamController));
+router.post('/streams/:id/start', streamController.startStream.bind(streamController));
+router.post('/streams/:id/stop', streamController.stopStream.bind(streamController));
+router.delete('/streams/:id', streamController.deleteStream.bind(streamController));
+router.get('/streams/metrics', streamController.getStreamMetrics.bind(streamController));
 
 module.exports = router; 
