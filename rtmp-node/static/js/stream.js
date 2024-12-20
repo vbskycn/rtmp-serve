@@ -11,6 +11,7 @@ class StreamManager {
         this.initWebSocket();
         this.initEventListeners();
         this.loadStreams();
+        addLoadingOverlay();
     }
 
     initWebSocket() {
@@ -105,6 +106,27 @@ class StreamManager {
         // 全选框
         document.getElementById('selectAll').addEventListener('change', (e) => {
             this.handleSelectAll(e.target.checked);
+        });
+
+        // 添加导入类型切换处理
+        document.getElementById('importType')?.addEventListener('change', (e) => {
+            const textImport = document.getElementById('textImport');
+            const fileImport = document.getElementById('fileImport');
+            if (e.target.value === 'text') {
+                textImport.style.display = 'block';
+                fileImport.style.display = 'none';
+            } else {
+                textImport.style.display = 'none';
+                fileImport.style.display = 'block';
+            }
+        });
+
+        // 清空导入表单
+        document.getElementById('batchImportBtn')?.addEventListener('click', () => {
+            const textarea = document.querySelector('#textImport textarea');
+            const fileInput = document.querySelector('#fileImport input[type="file"]');
+            if (textarea) textarea.value = '';
+            if (fileInput) fileInput.value = '';
         });
     }
 
@@ -283,6 +305,144 @@ class StreamManager {
         } finally {
             hideLoading();
         }
+    }
+
+    async handleAddStream() {
+        try {
+            const form = document.getElementById('addStreamForm');
+            const formData = new FormData(form);
+            const streamData = {
+                name: formData.get('name'),
+                sourceUrl: formData.get('sourceUrl'),
+                pushUrl: formData.get('pushUrl'),
+                configId: formData.get('configId') || null
+            };
+
+            // 验证表单
+            if (!streamData.name || !streamData.sourceUrl || !streamData.pushUrl) {
+                utils.showToast('请填写所有必填字段', 'error');
+                return;
+            }
+
+            utils.showLoading();
+            const response = await fetch('/api/streams', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(streamData)
+            });
+
+            const data = await response.json();
+            if (data.status === 'success') {
+                utils.showToast('添加成功');
+                utils.closeModal('addStreamModal');
+                form.reset();
+                await this.loadStreams();
+            } else {
+                utils.showToast(data.message || '添加失败', 'error');
+            }
+        } catch (error) {
+            console.error('添加流失败:', error);
+            utils.showToast('添加失败', 'error');
+        } finally {
+            utils.hideLoading();
+        }
+    }
+
+    async handleBatchImport() {
+        try {
+            const importType = document.getElementById('importType').value;
+            let streamDataList = [];
+
+            if (importType === 'text') {
+                const textarea = document.querySelector('#textImport textarea');
+                streamDataList = this.parseImportText(textarea.value);
+            } else {
+                const fileInput = document.querySelector('#fileImport input[type="file"]');
+                if (!fileInput.files.length) {
+                    utils.showToast('请选择文件', 'error');
+                    return;
+                }
+                streamDataList = await this.parseImportFile(fileInput.files[0]);
+            }
+
+            if (!streamDataList.length) {
+                utils.showToast('没有有效的导入数据', 'error');
+                return;
+            }
+
+            utils.showLoading();
+            const results = await this.importStreams(streamDataList);
+            
+            // 显示导入结果
+            const successCount = results.filter(r => r.status === 'success').length;
+            const failCount = results.length - successCount;
+            
+            utils.showToast(`导入完成: ${successCount}个成功, ${failCount}个失败`);
+            if (successCount > 0) {
+                utils.closeModal('batchImportModal');
+                await this.loadStreams();
+            }
+        } catch (error) {
+            console.error('批量导入失败:', error);
+            utils.showToast('批量导入失败', 'error');
+        } finally {
+            utils.hideLoading();
+        }
+    }
+
+    parseImportText(text) {
+        const lines = text.trim().split('\n');
+        return lines.map(line => {
+            const [name, sourceUrl, pushUrl, configId] = line.split(',').map(s => s.trim());
+            if (!name || !sourceUrl || !pushUrl) return null;
+            return { name, sourceUrl, pushUrl, configId };
+        }).filter(data => data !== null);
+    }
+
+    async parseImportFile(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const text = e.target.result;
+                    resolve(this.parseImportText(text));
+                } catch (error) {
+                    reject(error);
+                }
+            };
+            reader.onerror = reject;
+            reader.readAsText(file);
+        });
+    }
+
+    async importStreams(streamDataList) {
+        const results = [];
+        for (const streamData of streamDataList) {
+            try {
+                const response = await fetch('/api/streams', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(streamData)
+                });
+                const result = await response.json();
+                results.push({
+                    name: streamData.name,
+                    status: result.status,
+                    message: result.message
+                });
+            } catch (error) {
+                results.push({
+                    name: streamData.name,
+                    status: 'error',
+                    message: error.message
+                });
+            }
+        }
+        return results;
     }
 
     // ... 更多方法实现
