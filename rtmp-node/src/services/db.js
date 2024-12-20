@@ -1,15 +1,29 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const fs = require('fs');
 const logger = require('./logger');
 
 class DatabaseService {
     constructor() {
-        this.dbPath = path.join(__dirname, '../../data/streams.db');
+        // 确保data目录存在
+        const dataDir = path.join(__dirname, '../../data');
+        if (!fs.existsSync(dataDir)) {
+            fs.mkdirSync(dataDir, { recursive: true });
+        }
+
+        this.dbPath = path.join(dataDir, 'streams.db');
+        
+        // 设置数据库文件权限
+        if (!fs.existsSync(this.dbPath)) {
+            fs.writeFileSync(this.dbPath, '', { mode: 0o666 });
+        }
+
         this.db = new sqlite3.Database(this.dbPath, (err) => {
             if (err) {
                 logger.error('数据库连接失败:', err);
                 throw err;
             }
+            logger.info('数据库连接成功');
             this.init();
         });
     }
@@ -28,7 +42,10 @@ class DatabaseService {
                     createdAt INTEGER,
                     updatedAt INTEGER
                 )
-            `);
+            `, (err) => {
+                if (err) logger.error('创建streams表失败:', err);
+                else logger.info('streams表创建成功');
+            });
 
             // 创建配置表
             this.db.run(`
@@ -42,7 +59,10 @@ class DatabaseService {
                     frameRate INTEGER,
                     createdAt INTEGER
                 )
-            `);
+            `, (err) => {
+                if (err) logger.error('创建configs表失败:', err);
+                else logger.info('configs表创建成功');
+            });
 
             // 创建用户表
             this.db.run(`
@@ -53,7 +73,10 @@ class DatabaseService {
                     role TEXT DEFAULT 'user',
                     createdAt INTEGER
                 )
-            `);
+            `, (err) => {
+                if (err) logger.error('创建users表失败:', err);
+                else logger.info('users表创建成功');
+            });
         });
     }
 
