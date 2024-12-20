@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>流媒体转推管理</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/modal.css">
+    <link rel="stylesheet" href="https://lib.baomitu.com/font-awesome/5.15.4/css/all.min.css">
+    <script src="https://lib.baomitu.com/Chart.js/3.7.0/chart.min.js"></script>
+</head>
+<body>
+    <div class="layout">
+        <!-- 顶部导航栏 -->
+        <header class="header">
+            <div class="logo">
+                <i class="fas fa-video"></i>
+                流媒体转推管理系统
+            </div>
+            <!-- 添加系统状态指标 -->
+            <div class="system-stats">
+                <div class="stat-item">
+                    <i class="fas fa-microchip"></i>
+                    CPU: <span id="cpuUsage">0%</span>
+                </div>
+                <div class="stat-item">
+                    <i class="fas fa-memory"></i>
+                    内存: <span id="memoryUsage">0%</span>
+                </div>
+                <div class="stat-item">
+                    <i class="fas fa-network-wired"></i>
+                    网络: <span id="networkUsage">0 MB/s</span>
+                </div>
+            </div>
+            <div class="user-info">
+                <span id="currentUser">管理员</span>
+                <a href="/api/logout" class="logout-btn">
+                    <i class="fas fa-sign-out-alt"></i> 退出
+                </a>
+            </div>
+            <div class="nav-links">
+                <a href="/help" class="nav-link">
+                    <i class="fas fa-question-circle"></i> 使用帮助
+                </a>
+            </div>
+        </header>
+
+        <!-- 主要内容区 -->
+        <div class="main-content">
+            <!-- 左侧功能区 -->
+            <div class="action-panel">
+                <div class="panel-section">
+                    <h3><i class="fas fa-plus-circle"></i> 添加流</h3>
+                    <button class="action-btn primary" id="addStreamBtn">
+                        <i class="fas fa-plus"></i> 添加新流
+                    </button>
+                    <button class="action-btn secondary" id="batchAddBtn">
+                        <i class="fas fa-file-import"></i> 批量添加
+                    </button>
+                </div>
+
+                <!-- 添加快速筛选功能 -->
+                <div class="panel-section">
+                    <h3><i class="fas fa-filter"></i> 快速筛选</h3>
+                    <div class="filter-buttons">
+                        <button class="filter-btn" data-filter="all">全部</button>
+                        <button class="filter-btn" data-filter="running">运行中</button>
+                        <button class="filter-btn" data-filter="error">异常</button>
+                        <button class="filter-btn" data-filter="stopped">已停止</button>
+                    </div>
+                </div>
+
+                <!-- 添加搜索功能 -->
+                <div class="panel-section">
+                    <h3><i class="fas fa-search"></i> 搜索</h3>
+                    <div class="search-box">
+                        <input type="text" id="searchInput" placeholder="搜索流名称或地址...">
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h3><i class="fas fa-cogs"></i> 配置管理</h3>
+                    <button class="action-btn primary" id="configBtn">
+                        <i class="fas fa-sliders-h"></i> 转码配置
+                    </button>
+                    <button class="action-btn secondary" id="exportBtn">
+                        <i class="fas fa-file-export"></i> 导出配置
+                    </button>
+                </div>
+
+                <div class="panel-section">
+                    <h3><i class="fas fa-tasks"></i> 批量操作</h3>
+                    <button class="action-btn success" data-action="start">
+                        <i class="fas fa-play"></i> 批量启动
+                    </button>
+                    <button class="action-btn warning" data-action="stop">
+                        <i class="fas fa-stop"></i> 批量停止
+                    </button>
+                    <button class="action-btn danger" data-action="delete">
+                        <i class="fas fa-trash"></i> 批量删除
+                    </button>
+                </div>
+            </div>
+
+            <!-- 右侧内容区 -->
+            <div class="content-area">
+                <!-- 添加统计卡片 -->
+                <div class="stats-cards">
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-play-circle"></i></div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="runningStreams">0</div>
+                            <div class="stat-label">运行中</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-exclamation-circle"></i></div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="errorStreams">0</div>
+                            <div class="stat-label">异常</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-stop-circle"></i></div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stoppedStreams">0</div>
+                            <div class="stat-label">已停止</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 流列表区域 -->
+                <div class="stream-list-container">
+                    <div class="list-header">
+                        <h2>流列表</h2>
+                        <div class="list-actions">
+                            <select id="pageSize">
+                                <option value="10">10条/页</option>
+                                <option value="20">20条/页</option>
+                                <option value="50">50条/页</option>
+                            </select>
+                            <button class="refresh-btn">
+                                <i class="fas fa-sync"></i> 刷新
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table class="stream-table">
+                            <thead>
+                                <tr>
+                                    <th class="batch-select">
+                                        <input type="checkbox" id="selectAll">
+                                    </th>
+                                    <th>名称</th>
+                                    <th>源地址</th>
+                                    <th>推流地址</th>
+                                    <th>播放地址</th>
+                                    <th>转码配置</th>
+                                    <th>状态</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="streamTableBody">
+                                <!-- 流列表将通过 JavaScript 动态填充 -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <!-- 添加分页件 -->
+                    <div class="pagination">
+                        <button class="page-btn prev-btn">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <span id="pageInfo">第 1 页</span>
+                        <button class="page-btn next-btn">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载 JavaScript 文件 -->
+    <script src="/static/js/utils.js"></script>
+    <script src="/static/js/stream.js"></script>
+    <script src="/static/js/charts.js"></script>
+</body>
+</html> 

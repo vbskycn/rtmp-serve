@@ -1,0 +1,21 @@
+{
+  "server": {
+    "port": 3000
+  },
+  "jwt": {
+    "secret": "your-secret-key-here"
+  },
+  "ffmpeg": {
+    "logLevel": "info",
+    "timeout": 30000,
+    "maxRetries": 3,
+    "retryDelay": 5000
+  },
+  "streams": {
+    "dataFile": "data/streams.json"
+  },
+  "monitoring": {
+    "enabled": true,
+    "interval": 5000
+  }
+} 
