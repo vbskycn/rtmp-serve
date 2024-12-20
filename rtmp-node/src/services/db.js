@@ -5,65 +5,91 @@ const logger = require('./logger');
 
 class DatabaseService {
     constructor() {
-        // 确保data目录存在
-        const dataDir = path.join(__dirname, '../../data');
-        if (!fs.existsSync(dataDir)) {
-            fs.mkdirSync(dataDir, { recursive: true });
-        }
-
-        this.dbPath = path.join(dataDir, 'streams.db');
-        
         try {
-            this.db = new Database(this.dbPath, { verbose: logger.info });
-            logger.info('数据库连接成功');
+            // 确保data目录存在
+            const dataDir = path.join(__dirname, '../../data');
+            if (!fs.existsSync(dataDir)) {
+                fs.mkdirSync(dataDir, { recursive: true });
+                logger.info('创建数据目录:', dataDir);
+            }
+
+            // 检查目录权限
+            fs.accessSync(dataDir, fs.constants.R_OK | fs.constants.W_OK);
+            logger.info('数据目录权限正常');
+
+            this.dbPath = path.join(dataDir, 'streams.db');
+            
+            // 连接数据库
+            this.db = new Database(this.dbPath, { 
+                verbose: logger.info,
+                fileMustExist: false
+            });
+            
+            logger.info('数据库连接成功:', this.dbPath);
+            
+            // 启用外键约束
+            this.db.pragma('foreign_keys = ON');
+            
+            // 初始化表
             this.init();
         } catch (err) {
-            logger.error('数据库连接失败:', err);
+            logger.error('数据库初始化失败:', err);
             throw err;
         }
     }
 
     init() {
-        // 创建流表
-        this.db.exec(`
-            CREATE TABLE IF NOT EXISTS streams (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                sourceUrl TEXT NOT NULL,
-                pushUrl TEXT NOT NULL,
-                configId TEXT,
-                status TEXT DEFAULT 'stopped',
-                createdAt INTEGER,
-                updatedAt INTEGER
-            )
-        `);
+        try {
+            // 开启事务
+            const initDb = this.db.transaction(() => {
+                // 创建流表
+                this.db.prepare(`
+                    CREATE TABLE IF NOT EXISTS streams (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        sourceUrl TEXT NOT NULL,
+                        pushUrl TEXT NOT NULL,
+                        configId TEXT,
+                        status TEXT DEFAULT 'stopped',
+                        createdAt INTEGER,
+                        updatedAt INTEGER
+                    )
+                `).run();
 
-        // 创建配置表
-        this.db.exec(`
-            CREATE TABLE IF NOT EXISTS configs (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                videoCodec TEXT,
-                videoBitrate TEXT,
-                audioCodec TEXT,
-                audioBitrate TEXT,
-                frameRate INTEGER,
-                createdAt INTEGER
-            )
-        `);
+                // 创建配置表
+                this.db.prepare(`
+                    CREATE TABLE IF NOT EXISTS configs (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        videoCodec TEXT,
+                        videoBitrate TEXT,
+                        audioCodec TEXT,
+                        audioBitrate TEXT,
+                        frameRate INTEGER,
+                        createdAt INTEGER
+                    )
+                `).run();
 
-        // 创建用户表
-        this.db.exec(`
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL,
-                role TEXT DEFAULT 'user',
-                createdAt INTEGER
-            )
-        `);
+                // 创建用户表
+                this.db.prepare(`
+                    CREATE TABLE IF NOT EXISTS users (
+                        id TEXT PRIMARY KEY,
+                        username TEXT UNIQUE NOT NULL,
+                        password TEXT NOT NULL,
+                        role TEXT DEFAULT 'user',
+                        createdAt INTEGER
+                    )
+                `).run();
+            });
 
-        logger.info('数据库表初始化完成');
+            // 执行事务
+            initDb();
+            
+            logger.info('数据库表初始化完成');
+        } catch (error) {
+            logger.error('创建数据库表失败:', error);
+            throw error;
+        }
     }
 
     // 流相关方法
@@ -145,4 +171,12 @@ class DatabaseService {
     }
 }
 
-module.exports = new DatabaseService(); 
+// 创建单例实例
+let instance = null;
+
+module.exports = (() => {
+    if (!instance) {
+        instance = new DatabaseService();
+    }
+    return instance;
+})(); 
