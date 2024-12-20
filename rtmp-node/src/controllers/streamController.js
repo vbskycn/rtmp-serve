@@ -78,6 +78,49 @@ class StreamController {
     }
   }
 
+  async deleteStream(req, res) {
+    try {
+      const { id } = req.params;
+      const streams = await this.loadStreams();
+      const streamIndex = streams.findIndex(s => s.id === id);
+      
+      if (streamIndex === -1) {
+        return res.status(404).json({ error: '未找到指定的流' });
+      }
+
+      // 如果流正在运行，先停止它
+      const stream = streams[streamIndex];
+      if (stream.status === 'running') {
+        await streamService.stopStream(stream);
+      }
+
+      // 从数组中删除流
+      streams.splice(streamIndex, 1);
+      await this.saveStreams(streams);
+      
+      res.json({ message: '删除成功' });
+    } catch (error) {
+      res.status(500).json({ error: '删除流失败' });
+    }
+  }
+
+  async getStreamMetrics(req, res) {
+    try {
+      const streams = await this.loadStreams();
+      const metrics = streams.map(stream => {
+        const status = streamService.getStreamStatus(stream.id);
+        return {
+          id: stream.id,
+          status: stream.status,
+          ...status
+        };
+      });
+      res.json(metrics);
+    } catch (error) {
+      res.status(500).json({ error: '获取流指标失败' });
+    }
+  }
+
   async loadStreams() {
     try {
       const data = await fs.readFile(STREAMS_FILE, 'utf8');

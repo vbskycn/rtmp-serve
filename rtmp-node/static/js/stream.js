@@ -119,6 +119,83 @@ class StreamManager {
     }
   }
 
+  async deleteStream(id) {
+    try {
+      const response = await this.fetchWithAuth(`${this.baseUrl}/streams/${id}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        this.loadStreams();
+      }
+    } catch (error) {
+      console.error('删除流失败:', error);
+    }
+  }
+
+  initEventListeners() {
+    // 添加流按钮事件
+    document.getElementById('addStreamBtn').addEventListener('click', () => {
+      // 实现添加流的逻辑
+    });
+
+    // 批量操作按钮事件
+    document.querySelectorAll('.action-btn[data-action]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const action = e.target.dataset.action;
+        this.handleBatchAction(action);
+      });
+    });
+
+    // 刷新按钮事件
+    document.querySelector('.refresh-btn').addEventListener('click', () => {
+      this.loadStreams();
+    });
+
+    // 搜索输入事件
+    document.getElementById('searchInput').addEventListener('input', (e) => {
+      this.filterStreams(e.target.value);
+    });
+  }
+
+  updateStreamTable(streams) {
+    const tbody = document.getElementById('streamTableBody');
+    tbody.innerHTML = '';
+
+    streams.forEach(stream => {
+      const tr = document.createElement('tr');
+      tr.dataset.streamId = stream.id;
+      
+      tr.innerHTML = `
+        <td><input type="checkbox" class="stream-select"></td>
+        <td>${stream.name}</td>
+        <td>${stream.sourceUrl}</td>
+        <td>${stream.pushUrl}</td>
+        <td>${stream.config ? JSON.stringify(stream.config) : '-'}</td>
+        <td class="stream-status ${stream.status}">${stream.status}</td>
+        <td class="stream-metrics">-</td>
+        <td>
+          <button class="btn-action start" ${stream.status === 'running' ? 'disabled' : ''}>
+            <i class="fas fa-play"></i>
+          </button>
+          <button class="btn-action stop" ${stream.status === 'stopped' ? 'disabled' : ''}>
+            <i class="fas fa-stop"></i>
+          </button>
+          <button class="btn-action delete">
+            <i class="fas fa-trash"></i>
+          </button>
+        </td>
+      `;
+
+      // 添加按钮事件监听器
+      tr.querySelector('.btn-action.start').addEventListener('click', () => this.startStream(stream.id));
+      tr.querySelector('.btn-action.stop').addEventListener('click', () => this.stopStream(stream.id));
+      tr.querySelector('.btn-action.delete').addEventListener('click', () => this.deleteStream(stream.id));
+
+      tbody.appendChild(tr);
+    });
+  }
+
   // ... 其他方法实现
 }
 
