@@ -2,8 +2,8 @@
 <html>
 <head>
     <title>流媒体管理系统</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet">
     <style>
         body {
             font-family: "Microsoft YaHei", Arial, sans-serif;
@@ -167,6 +167,77 @@
         .stream-list-container {
             margin-top: 20px;
         }
+
+        /* 添加表格列宽度控制 */
+        .table th.check-column {
+            width: 40px;
+        }
+        
+        .table th.name-column {
+            width: 150px;
+        }
+        
+        .table th.status-column {
+            width: 80px;
+        }
+        
+        .table th.rtmp-status-column {
+            width: 80px;
+        }
+        
+        .table th.source-column {
+            width: 180px;
+        }
+        
+        .table th.play-column {
+            width: 300px;
+        }
+        
+        .table th.action-column {
+            width: 320px;
+        }
+
+        /* 添加单元格文本溢出控制 */
+        .text-truncate-cell {
+            max-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* 修改输入组样式使其更紧凑 */
+        .input-group-compact {
+            width: 280px;
+        }
+
+        .input-group-compact .form-control {
+            font-size: 0.8rem;
+            padding: 0.25rem 0.5rem;
+        }
+
+        .input-group-compact .btn {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8rem;
+        }
+
+        /* 修改名称单元格样式 */
+        .stream-name {
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            display: inline-block;
+        }
+
+        /* 修改按钮组样式 */
+        .btn-group-sm > .btn {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        .stream-actions .btn {
+            margin: 0 2px;
+        }
     </style>
 </head>
 <body>
@@ -293,8 +364,11 @@
                         <button onclick="exportTXT()" class="btn btn-light btn-sm">
                             <i class="fa fa-download"></i> 导出TXT
                         </button>
-                        <button onclick="exportRtmpList()" class="btn btn-light btn-sm">
-                            <i class="fa fa-download"></i> 导出RTMP列表
+                        <button onclick="exportRemoteM3U()" class="btn btn-light btn-sm">
+                            <i class="fa fa-download"></i> 导出远程推流M3U
+                        </button>
+                        <button onclick="exportRemoteTXT()" class="btn btn-light btn-sm">
+                            <i class="fa fa-download"></i> 导出远程推流TXT
                         </button>
                     </div>
                 </div>
@@ -303,15 +377,15 @@
                         <table class="table table-hover">
                             <thead>
                                 <tr>
-                                    <th>
+                                    <th class="check-column">
                                         <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
                                     </th>
-                                    <th>名称</th>
-                                    <th>状态</th>
-                                    <th>推流状态</th>
-                                    <th>源地址</th>
-                                    <th>播放地址</th>
-                                    <th>操作</th>
+                                    <th class="name-column">名称</th>
+                                    <th class="status-column">状态</th>
+                                    <th class="rtmp-status-column">推流状态</th>
+                                    <th class="source-column">源地址</th>
+                                    <th class="play-column">播放地址</th>
+                                    <th class="action-column">操作</th>
                                 </tr>
                             </thead>
                             <tbody id="streamTable"></tbody>
@@ -322,7 +396,7 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
     <script>
         // 在 <script> 标签开始处添加置获取
         let serverConfig = null;
@@ -404,7 +478,7 @@
                         let statusClass = 'inactive';
                         let statusText = '已停止';
                         
-                        // 检查流是���失效
+                        // 检查流是否失效
                         if (stream.invalid) {
                             statusClass = 'error';
                             statusText = '已失效';
@@ -421,15 +495,15 @@
 
                         // 添加推流状态样式
                         const rtmpStatusStyle = isManuallyStarted ? 'background-color: #28a745;' : 'background-color: #6c757d;';
-                        const rtmpStatusText = isManuallyStarted ? '推流中' : '未推流';
+                        const rtmpStatusText = isManuallyStarted ? '推流��' : '未推流';
 
                         tr.innerHTML = `
                             <td>
                                 <input type="checkbox" class="stream-checkbox" value="${stream.id}" onchange="updateBatchButtons()">
                             </td>
-                            <td>
+                            <td class="text-truncate-cell">
                                 <img src="${stream.tvg?.logo || ''}" alt="" style="height: 20px; margin-right: 8px;">
-                                ${stream.name}
+                                <span class="stream-name" title="${stream.name}">${stream.name}</span>
                             </td>
                             <td>
                                 <span class="status ${statusClass}" style="${statusStyle}">
@@ -441,12 +515,12 @@
                                     ${rtmpStatusText}
                                 </span>
                             </td>
-                            <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
+                            <td class="text-truncate-cell" title="${stream.url}">
                                 ${stream.url}
                             </td>
                             <td>
                                 <div class="d-flex align-items-center">
-                                    <div class="input-group">
+                                    <div class="input-group input-group-compact">
                                         <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly 
                                                style="font-family: monospace; background-color: #f8f9fa;">
                                         <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${playUrl}')">
@@ -457,25 +531,27 @@
                                         </button>
                                         ${isManuallyStarted ? `
                                             <button class="btn btn-outline-info btn-sm" onclick="copyRtmpInfo('${stream.id}')">
-                                                <i class="fa fa-external-link"></i> 推流信息
+                                                <i class="fa fa-external-link"></i> 推流
                                             </button>
                                         ` : ''}
                                     </div>
                                 </div>
                             </td>
                             <td class="stream-actions">
-                                <button onclick="editStream('${stream.id}')" class="btn btn-info btn-sm">
-                                    <i class="fa fa-edit"></i> 编辑
-                                </button>
-                                <button onclick="restartStream('${stream.id}', true)" class="btn btn-warning btn-sm">
-                                    <i class="fa fa-refresh"></i> ${isManuallyStarted ? '重启' : '手动启动'}
-                                </button>
-                                <button onclick="stopStream('${stream.id}')" class="btn btn-secondary btn-sm">
-                                    <i class="fa fa-stop"></i> 停止
-                                </button>
-                                <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
-                                    <i class="fa fa-trash"></i> 删除
-                                </button>
+                                <div class="btn-group btn-group-sm">
+                                    <button onclick="editStream('${stream.id}')" class="btn btn-info btn-sm">
+                                        <i class="fa fa-edit"></i> 编辑
+                                    </button>
+                                    <button onclick="restartStream('${stream.id}', true)" class="btn btn-warning btn-sm">
+                                        <i class="fa fa-refresh"></i> ${isManuallyStarted ? '重启' : '手动启动'}
+                                    </button>
+                                    <button onclick="stopStream('${stream.id}')" class="btn btn-secondary btn-sm">
+                                        <i class="fa fa-stop"></i> 停止
+                                    </button>
+                                    <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
+                                        <i class="fa fa-trash"></i> 删除
+                                    </button>
+                                </div>
                             </td>
                         `;
                         tbody.appendChild(tr);
@@ -555,7 +631,7 @@
                 });
                 const result = await response.json();
                 if (result.success) {
-                    alert('流已重启');
+                    alert('流已���启');
                     loadStreams();
                 } else {
                     alert('重启流失败: ' + result.error);
@@ -785,7 +861,7 @@
             updateBatchButtons();
         }
 
-        // 更新批量操作按钮状态
+        // 更新��量操作按钮状态
         function updateBatchButtons() {
             const selectedCount = getSelectedStreams().length;
             document.getElementById('batchRestartBtn').disabled = selectedCount === 0;
@@ -1038,7 +1114,7 @@
                 });
         }
 
-        // 添加复制推流信息的函数
+        // 添加复制推流信息的函
         function copyRtmpInfo(streamId) {
             const rtmpInfo = `推流地址：rtmp://ali.push.yximgs.com/live/${streamId}\n` +
                             `播放地址：http://ali.hlspull.yximgs.com/live/${streamId}.flv`;
@@ -1060,8 +1136,51 @@
             setTimeout(() => toast.remove(), 2000);
         }
 
-        // 添加导出推流列表的函数
-        function exportRtmpList() {
+        // 添加导出远程推流M3U的函数
+        function exportRemoteM3U() {
+            fetch('/api/streams')
+                .then(response => response.json())
+                .then(streams => {
+                    let content = '#EXTM3U\n';
+                    content += '#EXTM3U x-tvg-url="https://assets.livednow.com/epg.xml"\n\n';
+                    
+                    // 按分类分组
+                    const streamsByCategory = {};
+                    streams.filter(stream => stream.manuallyStarted).forEach(stream => {
+                        const category = stream.category || '未分类';
+                        if (!streamsByCategory[category]) {
+                            streamsByCategory[category] = [];
+                        }
+                        streamsByCategory[category].push(stream);
+                    });
+
+                    // 生成分类内容
+                    for (const [category, categoryStreams] of Object.entries(streamsByCategory)) {
+                        categoryStreams.forEach(stream => {
+                            const rtmpPlayUrl = `${serverConfig.rtmp.pullServer}${stream.id}.flv`;
+                            const logoUrl = `https://assets.livednow.com/logo/${encodeURIComponent(stream.name)}.png`;
+                            content += `#EXTINF:-1 tvg-id="${stream.name}" tvg-name="${stream.name}" tvg-logo="${logoUrl}" group-title="${category}", ${stream.name}\n`;
+                            content += `${rtmpPlayUrl}\n\n`;
+                        });
+                    }
+                    
+                    // 下载文件
+                    const blob = new Blob([content], { type: 'text/plain' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'remote_playlist.m3u';
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                })
+                .catch(error => {
+                    console.error('Error exporting remote M3U:', error);
+                    alert('导出远程推流M3U失败');
+                });
+        }
+
+        // 添加导出远程推流TXT的函数
+        function exportRemoteTXT() {
             fetch('/api/streams')
                 .then(response => response.json())
                 .then(streams => {
@@ -1093,13 +1212,13 @@
                     const url = window.URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = 'rtmp_playlist.txt';
+                    a.download = 'remote_playlist.txt';
                     a.click();
                     window.URL.revokeObjectURL(url);
                 })
                 .catch(error => {
-                    console.error('Error exporting RTMP list:', error);
-                    alert('导出RTMP列表失败');
+                    console.error('Error exporting remote TXT:', error);
+                    alert('导出远程推流TXT失败');
                 });
         }
 
