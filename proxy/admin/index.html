@@ -232,11 +232,16 @@
                         <td>
                             <div class="d-flex align-items-center">
                                 <div class="input-group">
-                                    <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly>
+                                    <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly 
+                                           style="font-family: monospace; background-color: #f8f9fa;">
                                     <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${playUrl}')">
-                                        <i class="fa fa-copy"></i> 复制
+                                        <i class="fa fa-copy"></i> 复制播放地址
                                     </button>
                                 </div>
+                                <small class="text-muted ms-2">
+                                    <i class="fa fa-info-circle"></i> 
+                                    可用任意播放器打开此地址观看
+                                </small>
                             </div>
                         </td>
                         <td>

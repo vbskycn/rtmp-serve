@@ -35,29 +35,24 @@ app.use(express.static(path.join(__dirname, '../admin')));
 // 设置管理路由
 app.use(adminRoutes);
 
-// 播放路由
+// 播放���由
 app.get('/play/:streamId', async (req, res) => {
     try {
         const { streamId } = req.params;
-        // 移除可能的文件扩展名
-        const cleanStreamId = streamId.replace(/\.(m3u|m3u8)$/, '');
-        
-        // 获取流URL
-        const streamUrl = await streamManager.getStreamUrl(cleanStreamId);
+        const streamUrl = await streamManager.getStreamUrl(streamId);
         
         if (!streamUrl) {
             return res.status(404).send('Stream not found');
         }
-
-        // 检查文件是否存在
-        const playlistPath = path.join(__dirname, '..', streamUrl);
-        if (!fs.existsSync(playlistPath)) {
-            logger.error(`Playlist file not found: ${playlistPath}`);
-            return res.status(404).send('Stream file not found');
-        }
-
-        // 重定向到实际的流文件
-        res.redirect(streamUrl);
+        
+        // 直接代理流数据
+        const http = require('http');
+        http.get(streamUrl, (stream) => {
+            stream.pipe(res);
+        }).on('error', (error) => {
+            logger.error('Error proxying stream:', error);
+            res.status(500).send('Stream error');
+        });
     } catch (error) {
         logger.error('Error serving stream:', error);
         res.status(500).send('Internal Server Error');

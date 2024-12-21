@@ -24,8 +24,8 @@ class StreamManager {
         
         // 每小时运行一次清理
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
-        // 每分钟运行一次健康检查
-        setInterval(() => this.checkStreamsHealth(), 60 * 1000);
+        // 每5分钟运行一次健康检查
+        setInterval(() => this.checkStreamsHealth(), 5 * 60 * 1000);
     }
 
     // 加载保存的流配置
@@ -161,18 +161,9 @@ class StreamManager {
                 logger.info(`Starting stream ${streamId} on demand`);
                 await this.startStreaming(streamId);
             }
-            
-            // 返回 HLS 播放列表的路径
-            const playlistPath = `/streams/${streamId}/playlist.m3u8`;
-            
-            // 检查文件是否存在
-            const fullPath = path.join(__dirname, '..', 'streams', streamId, 'playlist.m3u8');
-            if (!fs.existsSync(fullPath)) {
-                logger.error(`Playlist file not found: ${fullPath}`);
-                return null;
-            }
-            
-            return playlistPath;
+
+            // 返回流服务器的地址
+            return `http://127.0.0.1:${stream.serverPort}`;
         } catch (error) {
             logger.error(`Error getting stream URL: ${streamId}`, error);
             return null;
@@ -265,17 +256,15 @@ class StreamManager {
             licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
         }
 
-        // 构建 yt-dlp 参数，针对 DASH/MPD 流优化
+        // 构建 yt-dlp 参数，针对直播流优化
         const args = [
             '--no-check-certificates',
-            '--live-from-start',
             '--no-part',
             '--no-mtime',
             '--no-progress',
             '--quiet',
-            '--format', 'best',  // 选择最佳质量
-            '--no-playlist-reverse',
-            '--no-hls-use-mpegts',
+            '--live-from-start',
+            '--stream-types', 'dash,hls',
             '--downloader', 'ffmpeg',  // 使用 ffmpeg 作为下载器
             '--downloader-args', 'ffmpeg:-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'
         ];
@@ -306,105 +295,77 @@ class StreamManager {
                 // 启动 yt-dlp 进程
                 const ytdlp = spawn('yt-dlp', args);
                 let ytdlpError = '';
-                let ffmpegError = '';
                 
-                // 启动 FFmpeg 进程，针对 DASH/MPD 流优化
-                const ffmpeg = spawn('ffmpeg', [
-                    '-i', 'pipe:0',
-                    '-c:v', 'libx264',           // 使用 H.264 编码
-                    '-c:a', 'aac',               // 使用 AAC 音频编码
-                    '-b:v', '5000k',             // 视频比特率
-                    '-b:a', '192k',              // 音频比特率
-                    '-preset', 'veryfast',       // 编码速度预设
-                    '-tune', 'zerolatency',      // 零延迟调优
-                    '-profile:v', 'high',        // 高规格编码
-                    '-level', '4.1',             // 编码等级
-                    '-sc_threshold', '0',        // 禁用场景切换检测
-                    '-g', '50',                  // GOP 大小
-                    '-keyint_min', '50',         // 最小关键帧间隔
-                    '-f', 'hls',                 // HLS 格式
-                    '-hls_time', '2',            // 每个分片2秒
-                    '-hls_list_size', '90',      // 保留90个分片（约3分钟）
-                    '-hls_flags', 'delete_segments+append_list+discont_start+omit_endlist',
-                    '-hls_segment_type', 'mpegts',
-                    '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
-                    '-max_muxing_queue_size', '2048',
-                    '-vsync', '1',               // 视频同步模式
-                    '-async', '1',               // 音频同步模式
-                    '-threads', '4',             // 使用4个线程
-                    '-movflags', '+faststart',   // 快速启动标志
-                    `${outputPath}/playlist.m3u8`
-                ]);
+                // 创建一个 TCP 服务器来处理直播流
+                const net = require('net');
+                const server = net.createServer();
+                const clients = new Set();
+                
+                server.listen(0, '127.0.0.1', () => {
+                    const port = server.address().port;
+                    logger.info(`Stream server listening on port ${port} for stream ${streamId}`);
+                    
+                    // 保存服务器信息到流配置中
+                    this.streams.get(streamId).serverPort = port;
+                });
 
-                // 错误处理
+                server.on('connection', (socket) => {
+                    clients.add(socket);
+                    logger.debug(`New client connected to stream ${streamId}`);
+
+                    socket.on('close', () => {
+                        clients.delete(socket);
+                        logger.debug(`Client disconnected from stream ${streamId}`);
+                    });
+
+                    socket.on('error', (error) => {
+                        logger.error(`Client socket error for stream ${streamId}:`, error);
+                        clients.delete(socket);
+                    });
+                });
+
+                // 处理 yt-dlp 输出
+                ytdlp.stdout.on('data', (data) => {
+                    // 向所有连接的客户端发送数据
+                    for (const client of clients) {
+                        try {
+                            client.write(data);
+                        } catch (error) {
+                            logger.error(`Error sending data to client for stream ${streamId}:`, error);
+                            clients.delete(client);
+                        }
+                    }
+                });
+
                 ytdlp.stderr.on('data', (data) => {
                     const message = data.toString();
                     ytdlpError += message;
                     logger.debug(`yt-dlp stderr: ${message}`);
                 });
 
-                ffmpeg.stderr.on('data', (data) => {
-                    const message = data.toString();
-                    ffmpegError += message;
-                    if (message.includes('Error') || 
-                        message.includes('Invalid') || 
-                        message.includes('Failed') ||
-                        message.includes('No such')) {
-                        logger.error(`ffmpeg stderr: ${message}`);
-                    }
-                });
-
-                // 处理管道错误
-                ytdlp.stdout.on('error', (error) => {
-                    if (error.code === 'EPIPE') {
-                        logger.warn(`Stream ${streamId} pipe broken, restarting...`);
-                        this.restartStream(streamId);
-                    }
-                });
-
-                ffmpeg.stdin.on('error', (error) => {
-                    if (error.code === 'EPIPE') {
-                        logger.warn(`Stream ${streamId} pipe broken, restarting...`);
-                        this.restartStream(streamId);
-                    }
-                });
-
-                // 连接进程
-                ytdlp.stdout.pipe(ffmpeg.stdin);
-
-                // 保存进程引用
+                // 保存进程和服务器引用
                 this.streamProcesses.set(streamId, {
                     ytdlp,
-                    ffmpeg,
+                    server,
+                    clients,
                     startTime: new Date()
                 });
-
-                // 设置文件清理定时器
-                const cleanupInterval = setInterval(() => {
-                    this.cleanupOldSegments(outputPath);
-                }, 60000); // 每分钟清理一次
-
-                // 检查文件创建
-                const checkInterval = setInterval(() => {
-                    if (fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
-                        clearInterval(checkInterval);
-                        logger.info(`Stream ${streamId} started successfully`);
-                        resolve();
-                    }
-                }, 1000);
 
                 // 错误处理
                 ytdlp.on('error', (error) => {
                     logger.error(`yt-dlp error for stream ${streamId}:`, error);
-                    clearInterval(cleanupInterval);
                     this.restartStream(streamId);
                 });
 
-                ffmpeg.on('error', (error) => {
-                    logger.error(`ffmpeg error for stream ${streamId}:`, error);
-                    clearInterval(cleanupInterval);
-                    this.restartStream(streamId);
+                ytdlp.on('exit', (code) => {
+                    if (code !== 0) {
+                        logger.error(`yt-dlp exited with code ${code} for stream ${streamId}`);
+                        this.restartStream(streamId);
+                    }
                 });
+
+                // 标记流为已启动
+                resolve();
 
             } catch (error) {
                 logger.error(`Failed to start stream ${streamId}:`, error);
@@ -466,8 +427,8 @@ class StreamManager {
         try {
             logger.info(`Restarting stream: ${streamId}`);
             await this.stopStreaming(streamId);
-            // 添加短暂延迟确保进程完全停止
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            // 增加延迟时间
+            await new Promise(resolve => setTimeout(resolve, 5000));
             await this.startStreaming(streamId);
             logger.info(`Stream restarted: ${streamId}`);
         } catch (error) {
@@ -558,8 +519,11 @@ class StreamManager {
                 if (processes.ytdlp) {
                     processes.ytdlp.kill('SIGTERM');
                 }
-                if (processes.ffmpeg) {
-                    processes.ffmpeg.kill('SIGTERM');
+                if (processes.server) {
+                    processes.server.close();
+                    for (const client of processes.clients) {
+                        client.destroy();
+                    }
                 }
                 this.streamProcesses.delete(streamId);
                 logger.info(`Stream stopped: ${streamId}`);
@@ -575,17 +539,15 @@ class StreamManager {
                 const stats = this.streamStats.get(streamId);
                 const outputPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
                 
-                // 检查文件是否存在且最近5分钟内更新
-                const fileStats = fs.statSync(outputPath);
-                const isHealthy = (Date.now() - fileStats.mtimeMs) < 5 * 60 * 1000;
-                
-                if (!isHealthy) {
+                // 只有在文件不存在时才认为流不健康
+                if (!fs.existsSync(outputPath)) {
                     logger.warn(`Unhealthy stream detected: ${streamId}`);
                     await this.restartStream(streamId);
+                    continue;
                 }
                 
-                // 如果错误次数过多，也重启流
-                if (stats.errors > 5) {
+                // 如果错误次数过多，重启流
+                if (stats && stats.errors > 10) {  // 增加错误容忍度
                     logger.warn(`Too many errors for stream: ${streamId}`);
                     await this.restartStream(streamId);
                 }
