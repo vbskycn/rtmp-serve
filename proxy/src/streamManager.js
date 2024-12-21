@@ -256,6 +256,59 @@ class StreamManager {
             licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
         }
 
+        // 首先获取可用格式
+        const formatArgs = [
+            '--no-check-certificates',
+            '--allow-unplayable-formats',
+            '--list-formats'
+        ];
+
+        if (licenseKey) {
+            formatArgs.push(
+                '--add-header',
+                `X-AxDRM-Message: ${licenseKey}`,
+                '--add-header',
+                'Content-Type: application/dash+xml'
+            );
+        }
+
+        formatArgs.push(streamConfig.url);
+
+        // 获取可用格式
+        let format = 'best';
+        try {
+            const formatProcess = spawn('yt-dlp', formatArgs);
+            let formatOutput = '';
+            
+            await new Promise((resolve, reject) => {
+                formatProcess.stdout.on('data', (data) => {
+                    formatOutput += data.toString();
+                });
+                
+                formatProcess.stderr.on('data', (data) => {
+                    logger.debug(`Format check stderr: ${data}`);
+                });
+                
+                formatProcess.on('close', (code) => {
+                    if (code === 0) {
+                        // 解析输出找到最佳格式
+                        const lines = formatOutput.split('\n');
+                        for (const line of lines) {
+                            if (line.includes('v5000000_33')) {
+                                format = 'v5000000_33';
+                                break;
+                            }
+                        }
+                        resolve();
+                    } else {
+                        reject(new Error(`Format check failed with code ${code}`));
+                    }
+                });
+            });
+        } catch (error) {
+            logger.error(`Error checking formats: ${error}`);
+        }
+
         // 构建 yt-dlp 参数
         const args = [
             '--allow-unplayable-formats',
@@ -267,14 +320,7 @@ class StreamManager {
             '--no-warnings',
             '--live-from-start',
             '--no-playlist-reverse',
-            '--no-write-playlist',  // 不写入播放列表文件
-            '--no-write-info-json', // 不写入信息文件
-            '--no-write-description', // 不写入描述文件
-            '--no-write-thumbnail',  // 不写入缩略图
-            '--no-download-archive', // 不使用下载存档
-            '--no-cookies',          // 不使用 cookies
-            '--no-cache-dir',        // 不使用缓存目录
-            '--format', 'best',      // 选择最佳质量
+            '--format', format,  // 使用找到的格式
         ];
 
         // 添加 DRM 解密头
@@ -316,7 +362,7 @@ class StreamManager {
                     const port = server.address().port;
                     logger.info(`Stream server listening on port ${port} for stream ${streamId}`);
                     
-                    // 保存服务器信息到流配置中
+                    // 保存服务器信息��流配置中
                     this.streams.get(streamId).serverPort = port;
                 });
 
@@ -388,7 +434,7 @@ class StreamManager {
         });
     }
 
-    // 添加清理旧分片的方法
+    // 添加清理旧分��的方法
     async cleanupOldSegments(outputPath) {
         try {
             const files = fs.readdirSync(outputPath);
@@ -450,7 +496,7 @@ class StreamManager {
         }
     }
 
-    // ��加 streamlink 作为备选方案
+    // 添加 streamlink 作为备选方案
     async startStreamingWithStreamlink(streamId, streamConfig) {
         const { spawn } = require('child_process');
         const outputPath = path.join(__dirname, '../streams', streamId);
