@@ -2,133 +2,302 @@
 <html>
 <head>
     <title>流媒体播放器</title>
-    <link href="https://cdn.jsdelivr.net/npm/video.js@7.20.3/dist/video-js.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/video.js@7.20.3/dist/video.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@videojs/http-streaming@2.14.2/dist/videojs-http-streaming.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/videojs-contrib-quality-levels@2.1.0/dist/videojs-contrib-quality-levels.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/flv.js@1.6.2/dist/flv.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
-        body { 
-            margin: 0; 
-            background: #000; 
-            overflow: hidden;
-        }
-        .video-container {
-            width: 100vw;
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            color: #fff;
+            font-family: "Microsoft YaHei", Arial, sans-serif;
             height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.8);
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: opacity 0.3s;
+        }
+
+        .header.hidden {
+            opacity: 0;
+        }
+
+        .stream-title {
+            font-size: 1.2em;
+            margin: 0;
+            color: #fff;
+        }
+
+        .player-container {
+            flex: 1;
             display: flex;
             justify-content: center;
             align-items: center;
+            position: relative;
+            margin-top: 60px;
         }
-        .video-js {
-            width: 100%;
-            height: 100%;
+
+        #videoPlayer {
+            max-width: 100%;
+            max-height: calc(100vh - 60px);
+            background: #000;
         }
-        .vjs-error-display {
+
+        .controls {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            transition: opacity 0.3s;
+        }
+
+        .controls.hidden {
+            opacity: 0;
+        }
+
+        .control-btn {
+            background: none;
+            border: none;
+            color: #fff;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .control-btn:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .control-btn i {
+            font-size: 1.2em;
+        }
+
+        /* 全屏时的样式 */
+        .fullscreen .header,
+        .fullscreen .controls {
+            z-index: 2147483647;
+        }
+
+        .fullscreen #videoPlayer {
+            width: 100vw;
+            height: 100vh;
+            max-height: none;
+        }
+
+        /* 加载动画 */
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1000;
+        }
+
+        .loading i {
+            font-size: 3em;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* 错误提示 */
+        .error-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(220, 53, 69, 0.9);
+            padding: 15px 30px;
+            border-radius: 4px;
             display: none;
         }
     </style>
 </head>
 <body>
-    <div class="video-container">
-        <video id="player" class="video-js vjs-default-skin vjs-big-play-centered" controls>
-            <p class="vjs-no-js">请启用 JavaScript 以观看视频</p>
-        </video>
+    <div class="header">
+        <h1 class="stream-title">正在加载...</h1>
+        <button class="control-btn" onclick="window.close()">
+            <i class="fa fa-times"></i>
+        </button>
+    </div>
+
+    <div class="player-container">
+        <video id="videoPlayer" controls></video>
+    </div>
+
+    <div class="controls">
+        <button class="control-btn" onclick="reloadPlayer()">
+            <i class="fa fa-refresh"></i> 重新加载
+        </button>
+        <button class="control-btn" onclick="toggleFullscreen()">
+            <i class="fa fa-expand"></i> 全屏
+        </button>
+        <span style="flex: 1"></span>
+        <div class="stream-info">
+            <span id="resolution">-</span> |
+            <span id="bitrate">-</span>
+        </div>
+    </div>
+
+    <div class="loading">
+        <i class="fa fa-spinner"></i>
+    </div>
+
+    <div class="error-message">
+        播放失败，请稍后重试
     </div>
 
     <script>
-        // 从 URL 获取流 ID
+        let hideControlsTimeout;
         const urlParams = new URLSearchParams(window.location.search);
         const streamId = urlParams.get('id');
-        
-        if (streamId) {
-            const player = videojs('player', {
-                fluid: true,
-                controls: true,
-                autoplay: true,
-                preload: 'auto',
-                liveui: true,
-                responsive: true,
-                html5: {
-                    vhs: {
-                        overrideNative: true,
-                        enableLowInitialPlaylist: true,
-                        smoothQualityChange: true,
-                        allowSeeksWithinUnsafeLiveWindow: true,
-                        handlePartialData: true,
-                        experimentalBufferBasedABR: true
-                    },
-                    nativeAudioTracks: false,
-                    nativeVideoTracks: false
-                },
-                controlBar: {
-                    children: [
-                        'playToggle',
-                        'volumePanel',
-                        'currentTimeDisplay',
-                        'timeDivider',
-                        'durationDisplay',
-                        'progressControl',
-                        'liveDisplay',
-                        'customControlSpacer',
-                        'playbackRateMenuButton',
-                        'fullscreenToggle'
-                    ]
+        let hls;
+
+        // 初始化播放器
+        async function initPlayer() {
+            try {
+                // 获取流信息
+                const response = await fetch(`/api/streams/${streamId}`);
+                const stream = await response.json();
+                document.querySelector('.stream-title').textContent = stream.name;
+
+                const video = document.getElementById('videoPlayer');
+                const playUrl = `/play/${streamId}`;
+
+                if (Hls.isSupported()) {
+                    hls = new Hls({
+                        debug: false,
+                        enableWorker: true,
+                        lowLatencyMode: true,
+                    });
+
+                    hls.loadSource(playUrl);
+                    hls.attachMedia(video);
+
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        video.play();
+                        document.querySelector('.loading').style.display = 'none';
+                    });
+
+                    hls.on(Hls.Events.ERROR, (event, data) => {
+                        if (data.fatal) {
+                            document.querySelector('.error-message').style.display = 'block';
+                            document.querySelector('.loading').style.display = 'none';
+                        }
+                    });
+
+                    // 监听视频信息更新
+                    hls.on(Hls.Events.FRAG_PARSING_DATA, (event, data) => {
+                        if (data.type === 'video') {
+                            const resolution = `${video.videoWidth}x${video.videoHeight}`;
+                            const bitrate = `${Math.round(hls.bandwidthEstimate / 1024)} Kbps`;
+                            document.getElementById('resolution').textContent = resolution;
+                            document.getElementById('bitrate').textContent = bitrate;
+                        }
+                    });
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    video.src = playUrl;
+                    video.addEventListener('loadedmetadata', () => {
+                        video.play();
+                        document.querySelector('.loading').style.display = 'none';
+                    });
                 }
-            });
-
-            // 设置播放源
-            player.src({
-                src: `/streams/${streamId}/playlist.m3u8`,
-                type: 'application/x-mpegurl'
-            });
-
-            // 错误处理
-            player.on('error', function(error) {
-                console.error('播放错误:', error);
-                // 尝试重新加载
-                player.load();
-                player.play();
-            });
-
-            // 自动重连
-            let reconnectAttempts = 0;
-            const maxReconnectAttempts = 5;
-
-            player.on('waiting', function() {
-                console.log('缓冲中...');
-            });
-
-            player.on('stalled', function() {
-                console.log('播放停滞...');
-                if (reconnectAttempts < maxReconnectAttempts) {
-                    reconnectAttempts++;
-                    console.log(`尝试重连 (${reconnectAttempts}/${maxReconnectAttempts})...`);
-                    player.load();
-                    player.play();
-                }
-            });
-
-            player.on('playing', function() {
-                console.log('播放中...');
-                reconnectAttempts = 0;
-            });
-
-            // 启动播放
-            player.play().catch(function(error) {
-                console.error("播放失败:", error);
-            });
-
-            if (flvjs.isSupported()) {
-                const flvPlayer = flvjs.createPlayer({
-                    type: 'flv',
-                    url: `/play/${streamId}`
-                });
-                flvPlayer.attachMediaElement(document.getElementById('player'));
-                flvPlayer.load();
-                flvPlayer.play();
+            } catch (error) {
+                console.error('Error initializing player:', error);
+                document.querySelector('.error-message').style.display = 'block';
+                document.querySelector('.loading').style.display = 'none';
             }
         }
+
+        // 重新加载播放器
+        function reloadPlayer() {
+            if (hls) {
+                hls.destroy();
+            }
+            document.querySelector('.loading').style.display = 'block';
+            document.querySelector('.error-message').style.display = 'none';
+            initPlayer();
+        }
+
+        // 切换全屏
+        function toggleFullscreen() {
+            const container = document.querySelector('.player-container');
+            if (!document.fullscreenElement) {
+                if (container.requestFullscreen) {
+                    container.requestFullscreen();
+                } else if (container.webkitRequestFullscreen) {
+                    container.webkitRequestFullscreen();
+                } else if (container.msRequestFullscreen) {
+                    container.msRequestFullscreen();
+                }
+                document.body.classList.add('fullscreen');
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                } else if (document.msExitFullscreen) {
+                    document.msExitFullscreen();
+                }
+                document.body.classList.remove('fullscreen');
+            }
+        }
+
+        // 自动隐藏控制栏
+        function showControls() {
+            const header = document.querySelector('.header');
+            const controls = document.querySelector('.controls');
+            header.classList.remove('hidden');
+            controls.classList.remove('hidden');
+
+            clearTimeout(hideControlsTimeout);
+            hideControlsTimeout = setTimeout(() => {
+                if (!document.querySelector('video').paused) {
+                    header.classList.add('hidden');
+                    controls.classList.add('hidden');
+                }
+            }, 3000);
+        }
+
+        // 监听鼠标移动
+        document.addEventListener('mousemove', showControls);
+
+        // 监听全屏变化
+        document.addEventListener('fullscreenchange', () => {
+            const fullscreenBtn = document.querySelector('.control-btn i.fa-expand');
+            if (document.fullscreenElement) {
+                fullscreenBtn.classList.remove('fa-expand');
+                fullscreenBtn.classList.add('fa-compress');
+            } else {
+                fullscreenBtn.classList.remove('fa-compress');
+                fullscreenBtn.classList.add('fa-expand');
+            }
+        });
+
+        // 启动播放器
+        initPlayer();
     </script>
 </body>
 </html> 
