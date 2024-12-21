@@ -306,7 +306,7 @@ class StreamManager {
 
                     // 发送 HTTP 响应头
                     socket.write('HTTP/1.1 200 OK\r\n');
-                    socket.write('Content-Type: video/mp4\r\n');  // 修改为 MP4 格式
+                    socket.write('Content-Type: video/mp2t\r\n');  // 使用 MPEG-TS 格式
                     socket.write('Cache-Control: no-cache\r\n');
                     socket.write('Connection: keep-alive\r\n');
                     socket.write('Access-Control-Allow-Origin: *\r\n');
@@ -324,9 +324,24 @@ class StreamManager {
                 });
 
                 const ytdlp = spawn('yt-dlp', args);
-                let ytdlpError = '';
+                const ffmpeg = spawn('ffmpeg', [
+                    '-i', 'pipe:0',          // 从标准输入读取
+                    '-c:v', 'copy',          // 复制视频流
+                    '-c:a', 'aac',           // 转换音频为 AAC
+                    '-b:a', '128k',          // 音频比特率
+                    '-f', 'mpegts',          // 输出格式为 MPEG-TS
+                    '-muxdelay', '0',        // 最小化延迟
+                    '-muxpreload', '0',
+                    '-reset_timestamps', '1', // 重置时间戳
+                    'pipe:1'                 // 输出到标准输出
+                ]);
 
-                ytdlp.stdout.on('data', (data) => {
+                let ytdlpError = '';
+                let ffmpegError = '';
+
+                ytdlp.stdout.pipe(ffmpeg.stdin);
+
+                ffmpeg.stdout.on('data', (data) => {
                     for (const client of clients) {
                         try {
                             if (!client.destroyed) {
@@ -344,8 +359,18 @@ class StreamManager {
                     logger.debug(`yt-dlp stderr: ${data.toString()}`);
                 });
 
+                ffmpeg.stderr.on('data', (data) => {
+                    ffmpegError += data.toString();
+                    logger.debug(`ffmpeg stderr: ${data.toString()}`);
+                });
+
                 ytdlp.on('error', (error) => {
                     logger.error(`yt-dlp error for stream ${streamId}:`, error);
+                    this.restartStream(streamId);
+                });
+
+                ffmpeg.on('error', (error) => {
+                    logger.error(`ffmpeg error for stream ${streamId}:`, error);
                     this.restartStream(streamId);
                 });
 
@@ -357,9 +382,18 @@ class StreamManager {
                     }
                 });
 
+                ffmpeg.on('exit', (code) => {
+                    if (code !== 0) {
+                        logger.error(`ffmpeg exited with code ${code} for stream ${streamId}`);
+                        logger.error(`ffmpeg stderr: ${ffmpegError}`);
+                        this.restartStream(streamId);
+                    }
+                });
+
                 // 保存进程和服务器引用
                 this.streamProcesses.set(streamId, {
                     ytdlp,
+                    ffmpeg,
                     server,
                     clients,
                     port,
