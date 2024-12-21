@@ -216,9 +216,8 @@ class StreamManager {
             stats.errors = 0;
             configStats.errors = 0;
 
-            // 默认使用 yt-dlp 处理所有流
-            logger.info(`Using yt-dlp for stream: ${streamId}`);
-            await this.startStreamingWithYtdlp(streamId, streamConfig);
+            // 使用 FFmpeg 处理流
+            await this.startStreamingWithFFmpeg(streamId, streamConfig);
 
         } catch (error) {
             logger.error(`Error starting stream: ${streamId}`, { 
@@ -244,27 +243,18 @@ class StreamManager {
         }
     }
 
-    async startStreamingWithYtdlp(streamId, streamConfig) {
+    async startStreamingWithFFmpeg(streamId, streamConfig) {
         const { spawn } = require('child_process');
-        const net = require('net');
+        const outputPath = path.join(__dirname, '../streams', streamId);
         
+        if (!fs.existsSync(outputPath)) {
+            fs.mkdirSync(outputPath, { recursive: true });
+        }
+
         // 如果已经有进程在运行，先停止它
         if (this.streamProcesses.has(streamId)) {
             await this.stopStreaming(streamId);
         }
-
-        // 先创建服务器并获取端口
-        const server = net.createServer();
-        const port = await new Promise((resolve) => {
-            server.listen(0, '127.0.0.1', () => {
-                const port = server.address().port;
-                resolve(port);
-            });
-        });
-
-        // 保存端口信息
-        this.serverPorts.set(streamId, port);
-        logger.info(`Created stream server on port ${port} for stream ${streamId}`);
 
         // 解析 license_key
         let licenseKey = null;
@@ -272,132 +262,91 @@ class StreamManager {
             licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
         }
 
-        // 构建 yt-dlp 参数
+        // 构建 FFmpeg 参数
         const args = [
-            '--no-check-certificates',
-            '--allow-unplayable-formats',
-            '--no-part',
-            '--no-mtime',
-            '--no-progress',
-            '--quiet',
-            '--no-warnings',
-            '--live-from-start',
-            '--no-playlist-reverse',
-            '--format', 'v5000000_33',  // 直接指定格式
-            '--no-download-archive',    // 不使用下载存档
-            '--no-write-info-json',     // 不写入信息文件
-            '--no-write-description',   // 不写入描述文件
-            '--no-write-thumbnail',     // 不写入缩略图
-            '--no-write-playlist',      // 不写入播放列表
-            '--no-cookies',             // 不使用 cookies
-            '--no-cache-dir',           // 不使用缓存目录
-            '--retries', '3',           // 重试次数
-            '--fragment-retries', '3',  // 片段重试次数
-            '--downloader', 'native',   // 使用原生下载器
-            '--buffer-size', '16K',     // 减小缓冲区大小
-            '--throttled-rate', '5M',   // 限制下载速度
+            '-reconnect', '1',
+            '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '5',
+            '-i', streamConfig.url,
+            '-c:v', 'copy',           // 复制视频流
+            '-c:a', 'aac',           // 转换音频为 AAC
+            '-b:a', '128k',          // 音频比特率
+            '-f', 'hls',             // HLS 格式
+            '-hls_time', '2',        // 每个分片2秒
+            '-hls_list_size', '6',   // 保留6个分片（约12秒）
+            '-hls_flags', 'delete_segments+append_list+discont_start',  // HLS 标志
+            '-hls_segment_type', 'mpegts',  // 分片类型
+            '-hls_segment_filename', `${outputPath}/segment_%d.ts`,  // 分片文件名
+            '-method', 'PUT',        // 使用 PUT 方法写入文件
+            `${outputPath}/playlist.m3u8`  // 播放列表路径
         ];
 
+        // 如果有 DRM 头，添加到参数中
         if (licenseKey) {
-            args.push(
-                '--add-header',
-                `X-AxDRM-Message: ${licenseKey}`,
-                '--add-header',
-                'Content-Type: application/dash+xml',
-                '--add-header',
-                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            args.unshift(
+                '-headers', 
+                `X-AxDRM-Message: ${licenseKey}\r\nContent-Type: application/dash+xml\r\n`
             );
         }
 
-        // 添加输出参数
-        args.push(
-            '--output',
-            '-',  // 输出到���准输出
-            streamConfig.url
-        );
+        logger.info(`Starting FFmpeg for stream: ${streamId}`);
 
         return new Promise((resolve, reject) => {
             try {
-                const clients = new Set();
-                
-                server.on('connection', (socket) => {
-                    clients.add(socket);
-                    logger.debug(`New client connected to stream ${streamId}`);
+                const ffmpeg = spawn('ffmpeg', args);
+                let ffmpegError = '';
 
-                    // 发送 HTTP 响应头
-                    socket.write('HTTP/1.1 200 OK\r\n');
-                    socket.write('Content-Type: video/mp4\r\n');  // 修改为 MP4 格式
-                    socket.write('Cache-Control: no-cache\r\n');
-                    socket.write('Connection: keep-alive\r\n');
-                    socket.write('Access-Control-Allow-Origin: *\r\n');
-                    socket.write('\r\n');
-
-                    socket.on('close', () => {
-                        clients.delete(socket);
-                        logger.debug(`Client disconnected from stream ${streamId}`);
-                    });
-
-                    socket.on('error', (error) => {
-                        logger.error(`Client socket error for stream ${streamId}:`, error);
-                        clients.delete(socket);
-                    });
-                });
-
-                const ytdlp = spawn('yt-dlp', args, {
-                    stdio: ['ignore', 'pipe', 'pipe'],
-                    env: {
-                        ...process.env,
-                        PYTHONUNBUFFERED: '1'  // 禁用 Python 输出缓冲
+                ffmpeg.stderr.on('data', (data) => {
+                    const message = data.toString();
+                    ffmpegError += message;
+                    if (message.includes('Error') || 
+                        message.includes('Invalid') || 
+                        message.includes('Failed') ||
+                        message.includes('No such')) {
+                        logger.error(`FFmpeg stderr: ${message}`);
+                    } else {
+                        logger.debug(`FFmpeg stderr: ${message}`);
                     }
                 });
 
-                let ytdlpError = '';
-
-                ytdlp.stdout.on('data', (data) => {
-                    for (const client of clients) {
-                        try {
-                            if (!client.destroyed) {
-                                client.write(data);
-                            }
-                        } catch (error) {
-                            logger.error(`Error sending data to client for stream ${streamId}:`, error);
-                            clients.delete(client);
-                        }
-                    }
+                ffmpeg.on('error', (error) => {
+                    logger.error(`FFmpeg error for stream ${streamId}:`, error);
+                    this.restartStream(streamId);
                 });
 
-                ytdlp.stderr.on('data', (data) => {
-                    ytdlpError += data.toString();
-                    logger.debug(`yt-dlp stderr: ${data.toString()}`);
-                });
-
-                ytdlp.on('error', (error) => {
-                    logger.error(`yt-dlp error for stream ${streamId}:`, error);
-                    setTimeout(() => {
-                        this.restartStream(streamId);
-                    }, 5000);
-                });
-
-                ytdlp.on('exit', (code) => {
+                ffmpeg.on('exit', (code) => {
                     if (code !== 0) {
-                        logger.error(`yt-dlp exited with code ${code} for stream ${streamId}`);
-                        logger.error(`yt-dlp stderr: ${ytdlpError}`);
-                        setTimeout(() => {
-                            this.restartStream(streamId);
-                        }, 5000);
+                        logger.error(`FFmpeg exited with code ${code} for stream ${streamId}`);
+                        logger.error(`FFmpeg stderr: ${ffmpegError}`);
+                        this.restartStream(streamId);
                     }
                 });
 
-                // 保存进程和服务器引用
+                // 保存进程引用
                 this.streamProcesses.set(streamId, {
-                    ytdlp,
-                    server,
-                    clients,
-                    port,
+                    ffmpeg,
                     startTime: new Date()
                 });
 
-                resolve();
+                // 等待播放列表文件创建
+                const checkInterval = setInterval(() => {
+                    if (fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
+                        clearInterval(checkInterval);
+                        logger.info(`Stream ${streamId} started successfully`);
+                        resolve();
+                    }
+                }, 1000);
+
+                // 设置检查超时
+                setTimeout(() => {
+                    clearInterval(checkInterval);
+                    if (!fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
+                        logger.error(`Stream ${streamId} failed to start within timeout`);
+                        this.stopStreaming(streamId);
+                        reject(new Error('Stream start timeout'));
+                    }
+                }, 30000);
+
             } catch (error) {
                 reject(error);
             }
