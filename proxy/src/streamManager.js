@@ -265,10 +265,14 @@ class StreamManager {
             licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
         }
 
-        // 构建 yt-dlp 参数
+        // 构建 yt-dlp 参数，针对直播流优化
         const args = [
-            '--allow-unplayable-formats',
-            '--no-check-certificates'
+            '--no-check-certificates',
+            '--live-from-start',
+            '--no-part',
+            '--no-mtime',
+            '--no-progress',
+            '--quiet'
         ];
 
         // 添加 DRM 解密头
@@ -278,17 +282,6 @@ class StreamManager {
                 `X-AxDRM-Message: ${licenseKey}`
             );
         }
-
-        // 添加其他必要参数
-        args.push(
-            '--no-part',
-            '--no-mtime',
-            '--no-progress',
-            '--quiet',
-            '--no-warnings',
-            '--no-simulate',
-            '--output', '-'
-        );
 
         // 添加源 URL
         args.push(streamConfig.url);
@@ -302,32 +295,24 @@ class StreamManager {
                 let ytdlpError = '';
                 let ffmpegError = '';
                 
-                // 启动 FFmpeg 进程
+                // 启动 FFmpeg 进程，针对直播流优化
                 const ffmpeg = spawn('ffmpeg', [
                     '-i', 'pipe:0',
-                    '-c:v', 'copy',
-                    '-c:a', 'copy',
-                    '-f', 'hls',
-                    '-hls_time', '4',
-                    '-hls_list_size', '6',
-                    '-hls_flags', 'delete_segments+append_list+independent_segments+program_date_time',
+                    '-c:v', 'copy',              // 复制视频流
+                    '-c:a', 'copy',              // 复制音频流
+                    '-f', 'hls',                 // HLS 格式
+                    '-hls_time', '2',            // 每个分片2秒
+                    '-hls_list_size', '90',      // 只保留90个分片（约3分钟）
+                    '-hls_flags', 'delete_segments+append_list+discont_start+omit_endlist',  // 删除旧分片，添加新分片，标记不连续点
                     '-hls_segment_type', 'mpegts',
                     '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
+                    '-strftime', '1',            // 启用时间戳
+                    '-strftime_mkdir', '1',      // 按需创建目录
                     '-max_muxing_queue_size', '2048',
-                    '-tune', 'zerolatency',
-                    '-preset', 'veryfast',
-                    '-sc_threshold', '0',
-                    '-sn',
-                    '-reconnect_streamed', '1',
-                    '-reconnect_delay_max', '2',
-                    '-strict', 'experimental',
-                    '-avoid_negative_ts', 'make_zero',
-                    '-start_number', '0',
-                    '-hls_init_time', '4',
-                    '-hls_time', '4',
-                    '-hls_playlist_type', 'event',
-                    '-metadata', 'service_provider="Stream Service"',
+                    '-tune', 'zerolatency',      // 零延迟
+                    '-metadata', 'service_provider="Live Stream"',
                     '-metadata', 'service_name="Live Stream"',
+                    '-method', 'PUT',            // 使用 PUT 方法写入文件
                     `${outputPath}/playlist.m3u8`
                 ]);
 
@@ -341,15 +326,11 @@ class StreamManager {
                 ffmpeg.stderr.on('data', (data) => {
                     const message = data.toString();
                     ffmpegError += message;
-                    // 只记录重要的错误信息
                     if (message.includes('Error') || 
                         message.includes('Invalid') || 
                         message.includes('Failed') ||
-                        message.includes('No such') ||
-                        message.includes('Cannot')) {
+                        message.includes('No such')) {
                         logger.error(`ffmpeg stderr: ${message}`);
-                    } else {
-                        logger.debug(`ffmpeg stderr: ${message}`);
                     }
                 });
 
@@ -358,8 +339,6 @@ class StreamManager {
                     if (error.code === 'EPIPE') {
                         logger.warn(`Stream ${streamId} pipe broken, restarting...`);
                         this.restartStream(streamId);
-                    } else {
-                        logger.error(`yt-dlp stdout error: ${error}`);
                     }
                 });
 
@@ -367,8 +346,6 @@ class StreamManager {
                     if (error.code === 'EPIPE') {
                         logger.warn(`Stream ${streamId} pipe broken, restarting...`);
                         this.restartStream(streamId);
-                    } else {
-                        logger.error(`ffmpeg stdin error: ${error}`);
                     }
                 });
 
@@ -382,20 +359,15 @@ class StreamManager {
                     startTime: new Date()
                 });
 
-                // 设置超时检查
-                const timeout = setTimeout(() => {
-                    if (!fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
-                        logger.error(`Stream ${streamId} failed to start within timeout.`);
-                        this.stopStreaming(streamId);
-                        reject(new Error('Stream start timeout'));
-                    }
-                }, 30000);
+                // 设置文件清理定时器
+                const cleanupInterval = setInterval(() => {
+                    this.cleanupOldSegments(outputPath);
+                }, 60000); // 每分钟清理一次
 
                 // 检查文件创建
                 const checkInterval = setInterval(() => {
                     if (fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
                         clearInterval(checkInterval);
-                        clearTimeout(timeout);
                         logger.info(`Stream ${streamId} started successfully`);
                         resolve();
                     }
@@ -404,15 +376,13 @@ class StreamManager {
                 // 错误处理
                 ytdlp.on('error', (error) => {
                     logger.error(`yt-dlp error for stream ${streamId}:`, error);
-                    clearInterval(checkInterval);
-                    clearTimeout(timeout);
+                    clearInterval(cleanupInterval);
                     this.restartStream(streamId);
                 });
 
                 ffmpeg.on('error', (error) => {
                     logger.error(`ffmpeg error for stream ${streamId}:`, error);
-                    clearInterval(checkInterval);
-                    clearTimeout(timeout);
+                    clearInterval(cleanupInterval);
                     this.restartStream(streamId);
                 });
 
@@ -421,6 +391,29 @@ class StreamManager {
                 reject(error);
             }
         });
+    }
+
+    // 添加清理旧分片的方法
+    async cleanupOldSegments(outputPath) {
+        try {
+            const files = fs.readdirSync(outputPath);
+            const now = Date.now();
+            
+            for (const file of files) {
+                if (file.endsWith('.ts')) {
+                    const filePath = path.join(outputPath, file);
+                    const stats = fs.statSync(filePath);
+                    
+                    // 如果文件超过3分钟，删除它
+                    if (now - stats.mtimeMs > 3 * 60 * 1000) {
+                        fs.unlinkSync(filePath);
+                        logger.debug(`Deleted old segment: ${file}`);
+                    }
+                }
+            }
+        } catch (error) {
+            logger.error('Error cleaning up segments:', error);
+        }
     }
 
     // 添加文件监控方法
