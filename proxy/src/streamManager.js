@@ -283,7 +283,8 @@ class StreamManager {
             '--no-warnings',
             '--live-from-start',
             '--no-playlist-reverse',
-            '--output', '-'  // 输出到标准输出
+            '--format', 'best',  // 使用最佳格式
+            '--output', '-'      // 输出到标准输出
         ];
 
         if (licenseKey) {
@@ -300,10 +301,18 @@ class StreamManager {
         return new Promise((resolve, reject) => {
             try {
                 const clients = new Set();
+                let buffer = Buffer.alloc(0);
                 
                 server.on('connection', (socket) => {
                     clients.add(socket);
                     logger.debug(`New client connected to stream ${streamId}`);
+
+                    // 发送 HTTP 响应头
+                    socket.write('HTTP/1.1 200 OK\r\n');
+                    socket.write('Content-Type: video/MP2T\r\n');
+                    socket.write('Cache-Control: no-cache\r\n');
+                    socket.write('Connection: keep-alive\r\n');
+                    socket.write('\r\n');
 
                     socket.on('close', () => {
                         clients.delete(socket);
@@ -320,15 +329,21 @@ class StreamManager {
                 let ytdlpError = '';
 
                 ytdlp.stdout.on('data', (data) => {
-                    for (const client of clients) {
-                        try {
-                            if (!client.destroyed) {
-                                client.write(data);
+                    buffer = Buffer.concat([buffer, data]);
+                    
+                    // 当缓冲区达到一定大小时发送数据
+                    if (buffer.length >= 188 * 1024) {  // 使用 MPEG-TS 包大小的倍数
+                        for (const client of clients) {
+                            try {
+                                if (!client.destroyed) {
+                                    client.write(buffer);
+                                }
+                            } catch (error) {
+                                logger.error(`Error sending data to client for stream ${streamId}:`, error);
+                                clients.delete(client);
                             }
-                        } catch (error) {
-                            logger.error(`Error sending data to client for stream ${streamId}:`, error);
-                            clients.delete(client);
                         }
+                        buffer = Buffer.alloc(0);  // 清空缓冲区
                     }
                 });
 
@@ -358,12 +373,6 @@ class StreamManager {
                     port,
                     startTime: new Date()
                 });
-
-                // 更新流配置中的端口信息
-                const stream = this.streams.get(streamId);
-                if (stream) {
-                    stream.serverPort = port;
-                }
 
                 resolve();
             } catch (error) {
@@ -403,7 +412,7 @@ class StreamManager {
                 const now = Date.now();
                 const fileAge = now - stats.mtimeMs;
 
-                // 如果文件超过30秒没有更新，重启流
+                // 如果文件超过30秒没有更���，重启流
                 if (fileAge > 30000) {
                     logger.warn(`Stream file not updated for ${fileAge}ms, restarting: ${streamId}`);
                     this.restartStream(streamId);
@@ -545,7 +554,7 @@ class StreamManager {
                     continue;
                 }
                 
-                // 如果错误次数过多，重启流
+                // 如果错误次数过��，重启流
                 if (stats && stats.errors > 10) {  // 增加错误容忍度
                     logger.warn(`Too many errors for stream: ${streamId}`);
                     await this.restartStream(streamId);
