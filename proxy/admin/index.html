@@ -1,294 +1,162 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>流媒体管理后台v1.0.9</title>
+    <title>Stream Manager</title>
     <style>
-        body { 
-            font-family: Arial, sans-serif; 
+        body {
+            font-family: Arial, sans-serif;
             margin: 20px;
+        }
+        .container {
             max-width: 1200px;
             margin: 0 auto;
-            padding: 20px;
         }
-        .stream-list { 
-            margin-top: 20px; 
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-        }
-        .stream-item { 
-            border: 1px solid #ddd; 
-            padding: 15px; 
-            border-radius: 8px;
-            background: #f9f9f9;
-        }
-        .stream-item.active {
-            border-color: #4CAF50;
-        }
-        .stats {
-            background: #fff;
-            padding: 10px;
-            border-radius: 4px;
-            margin-top: 10px;
-        }
-        .form-section {
-            margin-bottom: 30px;
-            padding: 20px;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-        }
-        .tabs {
+        .form-group {
             margin-bottom: 20px;
-        }
-        .tab {
-            padding: 10px 20px;
-            border: none;
-            background: #f0f0f0;
-            cursor: pointer;
-            margin-right: 5px;
-            border-radius: 4px;
-        }
-        .tab.active {
-            background: #4CAF50;
-            color: white;
         }
         textarea {
             width: 100%;
-            height: 200px;
+            height: 300px;
             margin-bottom: 10px;
-            padding: 10px;
         }
-        button {
-            padding: 8px 16px;
-            background: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        button:hover {
-            background: #45a049;
-        }
-        .error {
-            color: red;
-            margin-top: 10px;
-        }
-        .success {
-            color: green;
-            margin-top: 10px;
-        }
-        input[type="text"] {
+        table {
             width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
             padding: 8px;
-            margin-bottom: 10px;
             border: 1px solid #ddd;
+            text-align: left;
+        }
+        th {
+            background-color: #f5f5f5;
+        }
+        .status {
+            padding: 4px 8px;
             border-radius: 4px;
+        }
+        .status.active {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .status.inactive {
+            background-color: #f44336;
+            color: white;
         }
     </style>
 </head>
 <body>
-    <h1>流媒体管理后台v1.0.1</h1>
-    
-    <div class="tabs">
-        <button class="tab active" onclick="showTab('single')">单个添加</button>
-        <button class="tab" onclick="showTab('batch')">批量导入</button>
-    </div>
+    <div class="container">
+        <h1>Stream Manager V1.0.11</h1>
+        
+        <div class="form-group">
+            <h2>Add Streams (M3U Format)</h2>
+            <textarea id="m3uInput" placeholder="Paste M3U content here..."></textarea>
+            <button onclick="addStreams()">Add Streams</button>
+        </div>
 
-    <div id="singleAdd" class="form-section">
-        <h2>添加新流</h2>
-        <form id="addStreamForm">
-            <div>
-                <label>ID: <input type="text" id="streamId" required></label>
-            </div>
-            <div>
-                <label>名称: <input type="text" id="streamName" required></label>
-            </div>
-            <div>
-                <label>URL: <input type="text" id="streamUrl" required></label>
-            </div>
-            <button type="submit">添加</button>
-        </form>
+        <div class="form-group">
+            <h2>Current Streams</h2>
+            <table id="streamTable">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>URL</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
     </div>
-
-    <div id="batchAdd" class="form-section" style="display: none;">
-        <h2>批量导入</h2>
-        <p>请输入M3U格式的播放列表：</p>
-        <textarea id="batchInput" placeholder="#EXTINF:-1 tvg-id='ID' tvg-name='名称',频道名称
-http://example.com/stream"></textarea>
-        <button onclick="importBatch()">导入</button>
-        <div id="importResult"></div>
-    </div>
-
-    <h2>当前流列表</h2>
-    <div class="stream-list" id="streamList"></div>
 
     <script>
-        function showTab(tabName) {
-            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
-            document.querySelector(`[onclick="showTab('${tabName}')"]`).classList.add('active');
-            
-            document.getElementById('singleAdd').style.display = tabName === 'single' ? 'block' : 'none';
-            document.getElementById('batchAdd').style.display = tabName === 'batch' ? 'block' : 'none';
-        }
-
+        // 加载流列表
         async function loadStreams() {
             try {
                 const response = await fetch('/api/streams');
                 const streams = await response.json();
-                const listEl = document.getElementById('streamList');
-                listEl.innerHTML = streams.map(stream => `
-                    <div class="stream-item ${stream.active ? 'active' : ''}">
-                        <h3>${stream.name} (${stream.id})</h3>
-                        <p>URL: ${stream.url}</p>
-                        <p>状态: ${stream.active ? '活跃' : '停止'}</p>
-                        <div class="stats">
-                            <p>总请求数: ${stream.stats?.totalRequests || 0}</p>
-                            <p>最后访问: ${stream.stats?.lastAccessed ? new Date(stream.stats.lastAccessed).toLocaleString() : '从未'}</p>
-                            <p>错误次数: ${stream.stats?.errors || 0}</p>
-                            <p>运行时间: ${formatUptime(stream.stats?.uptime || 0)}</p>
-                        </div>
-                        <div style="margin-top: 10px;">
-                            ${stream.active ? 
-                                `<button onclick="stopStream('${stream.id}')">停止</button>` : 
-                                `<button onclick="startStream('${stream.id}')">启动</button>`}
-                            <button onclick="deleteStream('${stream.id}')" style="background: #f44336;">删除</button>
-                        </div>
-                    </div>
-                `).join('');
+                const tbody = document.querySelector('#streamTable tbody');
+                tbody.innerHTML = '';
+
+                streams.forEach(stream => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${stream.name}</td>
+                        <td>${stream.url}</td>
+                        <td><span class="status ${stream.stats?.startTime ? 'active' : 'inactive'}">
+                            ${stream.stats?.startTime ? 'Active' : 'Inactive'}
+                        </span></td>
+                        <td>
+                            <button onclick="deleteStream('${stream.id}')">Delete</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
             } catch (error) {
                 console.error('Error loading streams:', error);
+                alert('Failed to load streams');
             }
         }
 
-        async function importBatch() {
-            const input = document.getElementById('batchInput').value;
-            const streams = parsem3u(input);
-            const resultDiv = document.getElementById('importResult');
-            
+        // 批量添加流
+        async function addStreams() {
+            const m3u = document.getElementById('m3uInput').value;
+            if (!m3u) {
+                alert('Please enter M3U content');
+                return;
+            }
+
             try {
-                for (const stream of streams) {
-                    await fetch('/api/streams', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(stream)
-                    });
+                const response = await fetch('/api/streams/batch', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ m3u })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    alert(`Successfully added ${result.count} streams`);
+                    document.getElementById('m3uInput').value = '';
+                    loadStreams();
+                } else {
+                    alert('Failed to add streams: ' + result.error);
                 }
-                resultDiv.innerHTML = `<div class="success">成功导入 ${streams.length} 个流</div>`;
-                loadStreams();
             } catch (error) {
-                resultDiv.innerHTML = `<div class="error">导入失败: ${error.message}</div>`;
+                console.error('Error adding streams:', error);
+                alert('Failed to add streams');
             }
         }
 
-        function parsem3u(content) {
-            const lines = content.split('\n');
-            const streams = [];
-            let currentStream = {};
-            let kodiProps = [];
-
-            for (let line of lines) {
-                line = line.trim();
-                if (line.startsWith('#EXTINF:')) {
-                    // 解析频道信息
-                    const match = line.match(/tvg-id="([^"]*)".*tvg-name="([^"]*)".*,(.*)$/);
-                    if (match) {
-                        currentStream = {
-                            id: match[1],
-                            name: match[3] || match[2],
-                        };
-                    }
-                } else if (line.startsWith('#KODIPROP:')) {
-                    kodiProps.push(line);
-                    // 解析 license_key
-                    if (line.includes('license_key')) {
-                        const keyMatch = line.match(/license_key=(.+)$/);
-                        if (keyMatch) {
-                            currentStream.license_key = keyMatch[1];
-                        }
-                    }
-                    // 解析 manifest_type
-                    if (line.includes('manifest_type')) {
-                        const typeMatch = line.match(/manifest_type=(.+)$/);
-                        if (typeMatch) {
-                            currentStream.manifest_type = typeMatch[1];
-                        }
-                    }
-                } else if (line.startsWith('http')) {
-                    // 添加URL并保存流
-                    if (currentStream.id) {
-                        currentStream.url = line;
-                        if (kodiProps.length > 0) {
-                            currentStream.kodiprop = kodiProps.join('\n');
-                        }
-                        streams.push({...currentStream});
-                        currentStream = {};
-                        kodiProps = [];
-                    }
-                }
-            }
-            return streams;
-        }
-
-        async function stopStream(id) {
-            try {
-                await fetch(`/api/streams/${id}/stop`, { method: 'POST' });
-                loadStreams();
-            } catch (error) {
-                console.error('Error stopping stream:', error);
-            }
-        }
-
-        async function startStream(id) {
-            try {
-                await fetch(`/api/streams/${id}/start`, { method: 'POST' });
-                loadStreams();
-            } catch (error) {
-                console.error('Error starting stream:', error);
-            }
-        }
-
+        // 删除流
         async function deleteStream(id) {
-            if (!confirm('确定要删除这个流吗？')) return;
+            if (!confirm('Are you sure you want to delete this stream?')) {
+                return;
+            }
+
             try {
-                await fetch(`/api/streams/${id}`, { method: 'DELETE' });
-                loadStreams();
+                const response = await fetch(`/api/streams/${id}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+                if (result.success) {
+                    loadStreams();
+                } else {
+                    alert('Failed to delete stream: ' + result.error);
+                }
             } catch (error) {
                 console.error('Error deleting stream:', error);
+                alert('Failed to delete stream');
             }
-        }
-
-        document.getElementById('addStreamForm').onsubmit = async (e) => {
-            e.preventDefault();
-            const data = {
-                id: document.getElementById('streamId').value,
-                name: document.getElementById('streamName').value,
-                url: document.getElementById('streamUrl').value,
-                manifest_type: document.getElementById('streamUrl').value.includes('.mpd') ? 'mpd' : undefined
-            };
-            try {
-                await fetch('/api/streams', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                loadStreams();
-                e.target.reset();
-            } catch (error) {
-                console.error('Error adding stream:', error);
-            }
-        };
-
-        function formatUptime(ms) {
-            const seconds = Math.floor(ms / 1000);
-            const minutes = Math.floor(seconds / 60);
-            const hours = Math.floor(minutes / 60);
-            return `${hours}小时${minutes % 60}分钟`;
         }
 
         // 初始加载
         loadStreams();
         // 定期刷新
-        setInterval(loadStreams, 5000);
+        setInterval(loadStreams, 10000);
     </script>
 </body>
 </html> 

@@ -261,28 +261,21 @@ class StreamManager {
         const { spawn } = require('child_process');
         const outputPath = path.join(__dirname, '../streams', streamId);
         
-        // 确保输出目录存在
         if (!fs.existsSync(outputPath)) {
             fs.mkdirSync(outputPath, { recursive: true });
         }
 
-        // 构建 yt-dlp 命令参数
+        // 简化 yt-dlp 参数，只保留必要的选项
         const args = [
+            '--allow-unplayable-formats',
             '--no-check-certificates',
-            '--no-part',                    // 不使用临时文件
-            '--no-mtime',                   // 不修改文件时间戳
-            '--no-playlist',                // 不处理播放列表
-            '--no-write-playlist-metafiles', // 不写入元数据文件
-            '--live-from-start',            // 从直播开始处开始下载
-            '--force-generic-extractor',    // 强制使用通用提取器
-            '--downloader', 'ffmpeg',       // 使用 ffmpeg 作为下载器
-            '--retries', 'infinite',        // 无限重试
+            '--no-part',
+            '--live-from-start',
             '--fragment-retries', 'infinite',
-            '--hls-use-mpegts',            // 使用 MPEGTS 容器
-            '--concurrent-fragments', '1'    // 并发下载片段数
+            '--concurrent-fragments', '1'
         ];
 
-        // 如果有 license key，添加到请求头
+        // 添加 DRM 解密头
         if (streamConfig.inputstream?.adaptive?.license_key) {
             args.push(
                 '--add-header',
@@ -290,49 +283,24 @@ class StreamManager {
             );
         }
 
-        // 添加 User-Agent
+        // 设置输出
         args.push(
-            '--add-header',
-            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        );
-
-        // 设置输出格式
-        args.push(
-            '--format', 'best',             // 选择最佳质量
-            '--output', `${outputPath}/stream.ts`, // 输出文件
-            streamConfig.url                // 流地址
+            '--output', `${outputPath}/stream.ts`,
+            streamConfig.url
         );
 
         logger.info(`Starting yt-dlp with args:`, { args });
 
-        // 启动 yt-dlp 进程
         const ytdlp = spawn('yt-dlp', args);
         this.streamProcesses.set(streamId, ytdlp);
 
-        // 处理输出
         ytdlp.stdout.on('data', (data) => {
             logger.debug(`yt-dlp stdout: ${data}`);
         });
 
         ytdlp.stderr.on('data', (data) => {
             const message = data.toString();
-            if (message.includes('ERROR') || message.includes('Failed')) {
-                logger.error(`yt-dlp stderr: ${message}`);
-            } else {
-                logger.debug(`yt-dlp stderr: ${message}`);
-            }
-        });
-
-        // 处理进程结束
-        ytdlp.on('close', async (code) => {
-            logger.info(`yt-dlp process exited with code ${code}`);
-            this.streamProcesses.delete(streamId);
-
-            if (code !== 0) {
-                logger.error(`yt-dlp failed for stream: ${streamId}`);
-                // 5秒后重试
-                setTimeout(() => this.startStreaming(streamId), 5000);
-            }
+            logger.debug(`yt-dlp stderr: ${message}`);
         });
 
         // 创建 HLS 播放列表
@@ -345,7 +313,7 @@ stream.ts`;
 
         fs.writeFileSync(path.join(outputPath, 'playlist.m3u8'), playlistContent);
 
-        // 等待文件创建
+        // 等待文件创建并监控大小
         return new Promise((resolve, reject) => {
             const maxAttempts = 30;
             let attempts = 0;
@@ -367,6 +335,48 @@ stream.ts`;
                 }
             };
             checkFile();
+        });
+    }
+
+    // 添加 streamlink 作为备选方案
+    async startStreamingWithStreamlink(streamId, streamConfig) {
+        const { spawn } = require('child_process');
+        const outputPath = path.join(__dirname, '../streams', streamId);
+
+        const args = [
+            '--player-external-http',
+            '--player-continuous-http',
+            '--stream-segment-threads', '1',
+            '--stream-timeout', '60',
+            '--retry-max', '0',
+            '--retry-streams', '1',
+            '--http-header',
+            `X-AxDRM-Message=${streamConfig.inputstream?.adaptive?.license_key}`,
+            streamConfig.url,
+            'best',
+            '-o',
+            `${outputPath}/stream.ts`
+        ];
+
+        logger.info(`Starting streamlink with args:`, { args });
+
+        const streamlink = spawn('streamlink', args);
+        this.streamProcesses.set(streamId, streamlink);
+
+        streamlink.stdout.on('data', (data) => {
+            logger.debug(`streamlink stdout: ${data}`);
+        });
+
+        streamlink.stderr.on('data', (data) => {
+            logger.error(`streamlink stderr: ${data}`);
+        });
+
+        streamlink.on('close', (code) => {
+            logger.info(`streamlink process exited with code ${code}`);
+            this.streamProcesses.delete(streamId);
+            if (code !== 0) {
+                setTimeout(() => this.startStreaming(streamId), 5000);
+            }
         });
     }
 
