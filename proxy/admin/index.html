@@ -262,7 +262,8 @@ http://example.com/stream"></textarea>
             const data = {
                 id: document.getElementById('streamId').value,
                 name: document.getElementById('streamName').value,
-                url: document.getElementById('streamUrl').value
+                url: document.getElementById('streamUrl').value,
+                manifest_type: document.getElementById('streamUrl').value.includes('.mpd') ? 'mpd' : undefined
             };
             try {
                 await fetch('/api/streams', {

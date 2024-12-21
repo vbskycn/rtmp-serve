@@ -37,6 +37,27 @@ class StreamManager {
                 }
             }
 
+            // 检查是否是 MPD 流
+            const isMPD = config.url.includes('.mpd') || 
+                         config.manifest_type === 'mpd' ||
+                         config.inputstream?.adaptive?.manifest_type === 'mpd';
+
+            if (isMPD) {
+                logger.info(`Detected MPD stream: ${id}`);
+                if (!config.inputstream) {
+                    config.inputstream = { adaptive: {} };
+                }
+                config.inputstream.adaptive.manifest_type = 'mpd';
+            }
+
+            // 如果有 license_key，确保它被正确设置
+            if (config.license_key && !config.inputstream?.adaptive?.license_key) {
+                if (!config.inputstream) {
+                    config.inputstream = { adaptive: {} };
+                }
+                config.inputstream.adaptive.license_key = config.license_key;
+            }
+
             this.streams.set(id, config);
             this.streamStats.set(id, {
                 totalRequests: 0,
