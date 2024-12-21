@@ -275,25 +275,27 @@ class StreamManager {
         args.push(
             '--format', 'best',
             '--no-check-formats',
-            '--retries', '3',  // 限制重试次数
+            '--retries', '3',
             '--fragment-retries', '3',
             '--stream-types', 'dash,hls',
             '--no-part',
             '--no-mtime',
-            '--no-progress',
-            '--verbose',  // 添加详细输出以便调试
+            '--verbose',  // 添加详细输出
+            '--dump-pages',  // 添加页面转储以便调试
             '--output', '-'
         );
 
         // 添加源 URL
         args.push(streamConfig.url);
 
-        logger.info(`Starting yt-dlp for stream: ${streamId}`);
+        logger.info(`Starting yt-dlp for stream: ${streamId} with URL: ${streamConfig.url}`);
 
         return new Promise((resolve, reject) => {
             try {
                 // 启动 yt-dlp 进程
                 const ytdlp = spawn('yt-dlp', args);
+                let ytdlpError = '';
+                let ffmpegError = '';
                 
                 // 启动 FFmpeg 进程
                 const ffmpeg = spawn('ffmpeg', [
@@ -312,11 +314,13 @@ class StreamManager {
                 // 错误处理
                 ytdlp.stderr.on('data', (data) => {
                     const message = data.toString();
+                    ytdlpError += message;
                     logger.debug(`yt-dlp stderr: ${message}`);
                 });
 
                 ffmpeg.stderr.on('data', (data) => {
                     const message = data.toString();
+                    ffmpegError += message;
                     logger.debug(`ffmpeg stderr: ${message}`);
                 });
 
@@ -333,7 +337,7 @@ class StreamManager {
                 // 设置超时检查
                 const timeout = setTimeout(() => {
                     if (!fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
-                        logger.error(`Stream ${streamId} failed to start within timeout`);
+                        logger.error(`Stream ${streamId} failed to start within timeout. yt-dlp errors: ${ytdlpError}, ffmpeg errors: ${ffmpegError}`);
                         this.stopStreaming(streamId);
                         reject(new Error('Stream start timeout'));
                     }
@@ -344,6 +348,7 @@ class StreamManager {
                     if (fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
                         clearInterval(checkInterval);
                         clearTimeout(timeout);
+                        logger.info(`Stream ${streamId} started successfully`);
                         resolve();
                     }
                 }, 1000);
@@ -351,16 +356,32 @@ class StreamManager {
                 // 错误处理
                 ytdlp.on('error', (error) => {
                     logger.error(`yt-dlp error for stream ${streamId}:`, error);
+                    logger.error(`yt-dlp stderr output: ${ytdlpError}`);
                     clearInterval(checkInterval);
                     clearTimeout(timeout);
                     reject(error);
                 });
 
+                ytdlp.on('exit', (code) => {
+                    logger.info(`yt-dlp process exited with code ${code} for stream ${streamId}`);
+                    if (code !== 0) {
+                        logger.error(`yt-dlp stderr output: ${ytdlpError}`);
+                    }
+                });
+
                 ffmpeg.on('error', (error) => {
                     logger.error(`ffmpeg error for stream ${streamId}:`, error);
+                    logger.error(`ffmpeg stderr output: ${ffmpegError}`);
                     clearInterval(checkInterval);
                     clearTimeout(timeout);
                     reject(error);
+                });
+
+                ffmpeg.on('exit', (code) => {
+                    logger.info(`ffmpeg process exited with code ${code} for stream ${streamId}`);
+                    if (code !== 0) {
+                        logger.error(`ffmpeg stderr output: ${ffmpegError}`);
+                    }
                 });
 
             } catch (error) {
@@ -506,7 +527,7 @@ class StreamManager {
                 const stats = this.streamStats.get(streamId);
                 const outputPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
                 
-                // 检查文件是否存在且最近5分钟内有更新
+                // 检查文件是否存在且最近5分钟内���更新
                 const fileStats = fs.statSync(outputPath);
                 const isHealthy = (Date.now() - fileStats.mtimeMs) < 5 * 60 * 1000;
                 
