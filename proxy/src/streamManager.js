@@ -273,22 +273,25 @@ class StreamManager {
 
         // 设置格式和输出
         args.push(
-            '--format', 'best',
+            '--format', 'best[protocol=dash]/best[protocol=hls]/best',  // 优先选择 DASH 或 HLS 格式
             '--no-check-formats',
             '--retries', '3',
             '--fragment-retries', '3',
-            '--stream-types', 'dash,hls',
             '--no-part',
             '--no-mtime',
-            '--verbose',  // 添加详细输出
-            '--dump-pages',  // 添加页面转储以便调试
-            '--output', '-'
+            '--verbose',
+            '--dump-pages',
+            '--no-progress',
+            '--no-warnings',
+            '--no-simulate',  // 实际下载而不是模拟
+            '--output', '-'   // 输出到标准输出
         );
 
         // 添加源 URL
         args.push(streamConfig.url);
 
         logger.info(`Starting yt-dlp for stream: ${streamId} with URL: ${streamConfig.url}`);
+        logger.debug(`yt-dlp args: ${args.join(' ')}`);
 
         return new Promise((resolve, reject) => {
             try {
@@ -296,6 +299,7 @@ class StreamManager {
                 const ytdlp = spawn('yt-dlp', args);
                 let ytdlpError = '';
                 let ffmpegError = '';
+                let ytdlpOutput = '';
                 
                 // 启动 FFmpeg 进程
                 const ffmpeg = spawn('ffmpeg', [
@@ -318,6 +322,11 @@ class StreamManager {
                     logger.debug(`yt-dlp stderr: ${message}`);
                 });
 
+                ytdlp.stdout.on('data', (data) => {
+                    ytdlpOutput += data.toString();
+                    logger.debug(`yt-dlp stdout: ${data.toString()}`);
+                });
+
                 ffmpeg.stderr.on('data', (data) => {
                     const message = data.toString();
                     ffmpegError += message;
@@ -337,7 +346,10 @@ class StreamManager {
                 // 设置超时检查
                 const timeout = setTimeout(() => {
                     if (!fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
-                        logger.error(`Stream ${streamId} failed to start within timeout. yt-dlp errors: ${ytdlpError}, ffmpeg errors: ${ffmpegError}`);
+                        logger.error(`Stream ${streamId} failed to start within timeout.`);
+                        logger.error(`yt-dlp output: ${ytdlpOutput}`);
+                        logger.error(`yt-dlp errors: ${ytdlpError}`);
+                        logger.error(`ffmpeg errors: ${ffmpegError}`);
                         this.stopStreaming(streamId);
                         reject(new Error('Stream start timeout'));
                     }
@@ -356,7 +368,8 @@ class StreamManager {
                 // 错误处理
                 ytdlp.on('error', (error) => {
                     logger.error(`yt-dlp error for stream ${streamId}:`, error);
-                    logger.error(`yt-dlp stderr output: ${ytdlpError}`);
+                    logger.error(`yt-dlp output: ${ytdlpOutput}`);
+                    logger.error(`yt-dlp stderr: ${ytdlpError}`);
                     clearInterval(checkInterval);
                     clearTimeout(timeout);
                     reject(error);
@@ -365,13 +378,14 @@ class StreamManager {
                 ytdlp.on('exit', (code) => {
                     logger.info(`yt-dlp process exited with code ${code} for stream ${streamId}`);
                     if (code !== 0) {
-                        logger.error(`yt-dlp stderr output: ${ytdlpError}`);
+                        logger.error(`yt-dlp output: ${ytdlpOutput}`);
+                        logger.error(`yt-dlp stderr: ${ytdlpError}`);
                     }
                 });
 
                 ffmpeg.on('error', (error) => {
                     logger.error(`ffmpeg error for stream ${streamId}:`, error);
-                    logger.error(`ffmpeg stderr output: ${ffmpegError}`);
+                    logger.error(`ffmpeg stderr: ${ffmpegError}`);
                     clearInterval(checkInterval);
                     clearTimeout(timeout);
                     reject(error);
@@ -380,7 +394,7 @@ class StreamManager {
                 ffmpeg.on('exit', (code) => {
                     logger.info(`ffmpeg process exited with code ${code} for stream ${streamId}`);
                     if (code !== 0) {
-                        logger.error(`ffmpeg stderr output: ${ffmpegError}`);
+                        logger.error(`ffmpeg stderr: ${ffmpegError}`);
                     }
                 });
 
@@ -527,7 +541,7 @@ class StreamManager {
                 const stats = this.streamStats.get(streamId);
                 const outputPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
                 
-                // 检查文件是否存在且最近5分钟内���更新
+                // 检查文件是否存���且最近5分钟内更新
                 const fileStats = fs.statSync(outputPath);
                 const isHealthy = (Date.now() - fileStats.mtimeMs) < 5 * 60 * 1000;
                 
