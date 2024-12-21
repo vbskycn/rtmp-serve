@@ -1,7 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const StreamManager = require('./streamManager');
+const { StreamManager } = require('./streamManager');
 const logger = require('./utils/logger');
+
+// 创建 StreamManager 实例
+const streamManager = new StreamManager();
 
 // 添加单个流
 router.post('/api/streams', async (req, res) => {
@@ -28,7 +31,7 @@ router.post('/api/streams', async (req, res) => {
             }
         };
 
-        await StreamManager.addStream(streamData);
+        await streamManager.addStream(streamData);
         
         res.json({
             success: true,
@@ -51,11 +54,11 @@ function generateStreamId() {
 // 获取所有流列表
 router.get('/api/streams', (req, res) => {
     const streams = [];
-    for (const [id, config] of StreamManager.streams.entries()) {
+    for (const [id, config] of streamManager.streams.entries()) {
         streams.push({
             id,
             ...config,
-            stats: StreamManager.streamStats.get(id)
+            stats: streamManager.streamStats.get(id)
         });
     }
     res.json(streams);
@@ -68,7 +71,7 @@ router.post('/api/streams/batch', async (req, res) => {
         const streams = parseM3U(m3u);
         
         for (const stream of streams) {
-            await StreamManager.addStream(stream.name, {
+            await streamManager.addStream(stream.name, {
                 name: stream.name,
                 url: stream.url,
                 kodiprop: stream.kodiprop,
@@ -88,7 +91,7 @@ router.post('/api/streams/batch', async (req, res) => {
 router.delete('/api/streams/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        await StreamManager.deleteStream(id);
+        await streamManager.deleteStream(id);
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
