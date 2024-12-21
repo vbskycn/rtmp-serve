@@ -184,6 +184,7 @@ http://example.com/stream"></textarea>
             const lines = content.split('\n');
             const streams = [];
             let currentStream = {};
+            let kodiProps = [];
 
             for (let line of lines) {
                 line = line.trim();
@@ -196,12 +197,32 @@ http://example.com/stream"></textarea>
                             name: match[3] || match[2],
                         };
                     }
+                } else if (line.startsWith('#KODIPROP:')) {
+                    kodiProps.push(line);
+                    // 解析 license_key
+                    if (line.includes('license_key')) {
+                        const keyMatch = line.match(/license_key=(.+)$/);
+                        if (keyMatch) {
+                            currentStream.license_key = keyMatch[1];
+                        }
+                    }
+                    // 解析 manifest_type
+                    if (line.includes('manifest_type')) {
+                        const typeMatch = line.match(/manifest_type=(.+)$/);
+                        if (typeMatch) {
+                            currentStream.manifest_type = typeMatch[1];
+                        }
+                    }
                 } else if (line.startsWith('http')) {
                     // 添加URL并保存流
                     if (currentStream.id) {
                         currentStream.url = line;
+                        if (kodiProps.length > 0) {
+                            currentStream.kodiprop = kodiProps.join('\n');
+                        }
                         streams.push({...currentStream});
                         currentStream = {};
+                        kodiProps = [];
                     }
                 }
             }

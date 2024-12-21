@@ -20,6 +20,23 @@ class StreamManager {
 
     async addStream(id, config) {
         try {
+            // 解析 KODIPROP 属性
+            if (config.kodiprop) {
+                const props = config.kodiprop.split('\n');
+                for (const prop of props) {
+                    if (prop.startsWith('#KODIPROP:')) {
+                        const [key, value] = prop.substring(10).split('=');
+                        if (!config.inputstream) {
+                            config.inputstream = { adaptive: {} };
+                        }
+                        const parts = key.split('.');
+                        if (parts.length === 3 && parts[0] === 'inputstream' && parts[1] === 'adaptive') {
+                            config.inputstream.adaptive[parts[2]] = value;
+                        }
+                    }
+                }
+            }
+
             this.streams.set(id, config);
             this.streamStats.set(id, {
                 totalRequests: 0,
@@ -71,34 +88,110 @@ class StreamManager {
             stats.startTime = new Date();
             stats.errors = 0;
 
-            // 更新 ffmpeg 选项
             const inputOptions = [
                 '-reconnect', '1',
                 '-reconnect_streamed', '1',
                 '-reconnect_delay_max', '5',
-                '-rw_timeout', '15000000',
-                '-y',
-                '-thread_queue_size', '4096'
+                '-timeout', '15000000',
+                '-allowed_extensions', 'ALL',
+                '-y'
             ];
 
+            // 检查是否是 MPD 流
+            const isMPD = streamConfig.url.includes('.mpd') || 
+                         streamConfig.manifest_type === 'mpd' ||
+                         streamConfig.inputstream?.adaptive?.manifest_type === 'mpd';
+
+            if (isMPD) {
+                inputOptions.push(
+                    '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
+                    '-re',
+                    '-fflags', '+genpts',
+                    '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36\r\n'
+                );
+
+                // 如果有 clearkey
+                if (streamConfig.license_key || streamConfig.inputstream?.adaptive?.license_key) {
+                    const licenseKey = streamConfig.license_key || 
+                                     streamConfig.inputstream?.adaptive?.license_key;
+                    
+                    if (licenseKey) {
+                        const [keyId, key] = licenseKey.split(':');
+                        if (keyId && key) {
+                            // 使用新的解密选项格式
+                            inputOptions.push(
+                                '-decryption_keys', `${keyId}:${key}`
+                            );
+                        }
+                    }
+                }
+
+                // 获取实际的 MPD URL（处理重定向）
+                try {
+                    logger.info(`Fetching MPD manifest for stream: ${streamId}`);
+                    const response = await axios.get(streamConfig.url, {
+                        maxRedirects: 5,
+                        validateStatus: null,
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                        }
+                    });
+                    
+                    // 检查是否有重定向
+                    if (response.status === 302 || response.headers.location) {
+                        const redirectUrl = response.headers.location;
+                        logger.info(`Stream redirected to: ${redirectUrl}`);
+                        streamConfig.url = redirectUrl;
+                    } else if (response.request?.res?.responseUrl !== streamConfig.url) {
+                        streamConfig.url = response.request.res.responseUrl;
+                        logger.info(`Updated stream URL to: ${streamConfig.url}`);
+                    }
+                    
+                    // 如果是 MPD 内容，记录一下
+                    if (response.headers['content-type']?.includes('application/dash+xml')) {
+                        logger.info(`Valid MPD content received for stream: ${streamId}`);
+                    }
+
+                    // 添加额外的 MPD 相关选项
+                    inputOptions.push(
+                        '-live_start_index', '0',
+                        '-strict', 'experimental'
+                    );
+
+                } catch (error) {
+                    logger.error(`Error fetching MPD manifest: ${streamId}`, { 
+                        error: error.message,
+                        response: error.response?.data,
+                        status: error.response?.status
+                    });
+                    throw new Error(`Failed to fetch MPD manifest: ${error.message}`);
+                }
+            }
+
+            // 修改输出选项以处理 HEVC/H.265
             const outputOptions = [
                 '-c:v', 'copy',
                 '-c:a', 'copy',
                 '-f', 'hls',
                 '-hls_time', '2',
                 '-hls_list_size', '6',
-                '-hls_flags', 'delete_segments+append_list',
+                '-hls_flags', 'delete_segments+append_list+independent_segments',
                 '-hls_segment_type', 'mpegts',
-                '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
-                '-timeout', '15000000'
+                '-hls_segment_filename', `${outputPath}/segment_%d.ts`
             ];
 
-            // 如果是MPD流，添加特殊处理
-            if (streamConfig.url.includes('.mpd') || streamConfig.url.includes('manifest_type=mpd')) {
+            // 如果是加密流，添加解密选项
+            if (streamConfig.inputstream?.adaptive?.license_type === 'clearkey') {
+                outputOptions.push(
+                    '-encryption_scheme', 'none',
+                    '-hls_enc', '0'
+                );
+            }
+
+            // 如果是HLS流，添加特殊处理
+            if (streamConfig.url.includes('.m3u8') || streamConfig.url.includes('hls')) {
                 inputOptions.push(
-                    '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
-                    '-re',
-                    '-fflags', '+genpts'
+                    '-live_start_index', '-1'  // 从最新的片段开始
                 );
             }
 
@@ -109,6 +202,7 @@ class StreamManager {
                 url: streamConfig.url
             });
 
+            // 创建新的 ffmpeg 进程
             const process = ffmpeg(streamConfig.url)
                 .inputOptions(inputOptions)
                 .outputOptions(outputOptions)
@@ -117,7 +211,12 @@ class StreamManager {
                     logger.info(`FFmpeg command: ${commandLine}`);
                 })
                 .on('stderr', (stderrLine) => {
-                    logger.debug(`FFmpeg stderr: ${stderrLine}`);
+                    // 只记录重要的错误信息
+                    if (stderrLine.includes('Error') || stderrLine.includes('Failed')) {
+                        logger.error(`FFmpeg stderr: ${stderrLine}`);
+                    } else {
+                        logger.debug(`FFmpeg stderr: ${stderrLine}`);
+                    }
                 })
                 .on('progress', (progress) => {
                     logger.debug(`Stream progress: ${streamId}`, progress);
@@ -125,8 +224,8 @@ class StreamManager {
                 .on('end', () => {
                     logger.info(`Stream ${streamId} ended`);
                     this.streamProcesses.delete(streamId);
-                    // 流结束后自动重启
-                    setTimeout(() => this.startStreaming(streamId), 1000);
+                    // 流结束后延迟重启
+                    setTimeout(() => this.startStreaming(streamId), 5000);
                 })
                 .on('error', (err) => {
                     logger.error(`Stream ${streamId} error:`, { 
@@ -136,8 +235,10 @@ class StreamManager {
                     });
                     stats.errors++;
                     this.streamProcesses.delete(streamId);
-                    // 错误后自动重试
-                    setTimeout(() => this.startStreaming(streamId), 5000);
+                    
+                    // 根据错误类型决定重试时间
+                    const retryDelay = err.message.includes('SIGSEGV') ? 30000 : 5000;
+                    setTimeout(() => this.startStreaming(streamId), retryDelay);
                 });
 
             process.run();
@@ -152,24 +253,26 @@ class StreamManager {
                 error: error.message,
                 stack: error.stack 
             });
-            // 如果启动失败，5秒后重试
-            setTimeout(() => this.startStreaming(streamId), 5000);
+            // 如果启动失败，30秒后重试
+            setTimeout(() => this.startStreaming(streamId), 30000);
             throw error;
         }
     }
 
     async waitForStream(streamId, outputPath) {
         return new Promise((resolve, reject) => {
-            const maxAttempts = 30; // 增加尝试次数
+            const maxAttempts = 30;
             let attempts = 0;
             
             const checkFile = () => {
                 const playlistPath = path.join(outputPath, 'playlist.m3u8');
-                if (fs.existsSync(playlistPath)) {
+                const segmentPath = path.join(outputPath, 'segment_0.ts');
+                
+                if (fs.existsSync(playlistPath) && fs.existsSync(segmentPath)) {
                     // 检查文件大小
-                    const stats = fs.statSync(playlistPath);
+                    const stats = fs.statSync(segmentPath);
                     if (stats.size > 0) {
-                        logger.info(`Stream ${streamId} playlist file created successfully`);
+                        logger.info(`Stream ${streamId} started successfully`);
                         resolve();
                         return;
                     }
