@@ -1,22 +1,15 @@
 {
-  "name": "proxy",
+  "name": "stream-proxy",
   "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "description": "",
+  "description": "Stream proxy server",
+  "main": "src/server.js",
   "dependencies": {
-    "axios": "^1.7.9",
-    "express": "^4.21.2",
-    "express-basic-auth": "^1.2.1",
-    "ffmpeg-static": "^5.2.0",
-    "fluent-ffmpeg": "^2.1.3",
-    "m3u8-parser": "^7.2.0",
-    "winston": "^3.17.0"
+    "express": "^4.17.1",
+    "cors": "^2.8.5",
+    "fluent-ffmpeg": "^2.1.2",
+    "axios": "^0.24.0"
+  },
+  "scripts": {
+    "start": "node src/server.js"
   }
 }
