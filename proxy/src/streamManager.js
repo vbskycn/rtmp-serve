@@ -256,7 +256,7 @@ class StreamManager {
             licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
         }
 
-        // 构建 yt-dlp 参数，使用与测试命令相同的参数
+        // 构建 yt-dlp 参数
         const args = [
             '--allow-unplayable-formats',
             '--no-check-certificates',
@@ -264,16 +264,34 @@ class StreamManager {
             '--no-mtime',
             '--no-progress',
             '--quiet',
-            '--no-warnings'
+            '--no-warnings',
+            '--live-from-start',
+            '--no-playlist-reverse',
+            '--no-write-playlist',  // 不写入播放列表文件
+            '--no-write-info-json', // 不写入信息文件
+            '--no-write-description', // 不写入描述文件
+            '--no-write-thumbnail',  // 不写入缩略图
+            '--no-download-archive', // 不使用下载存档
+            '--no-cookies',          // 不使用 cookies
+            '--no-cache-dir',        // 不使用缓存目录
+            '--format', 'best',      // 选择最佳质量
         ];
 
         // 添加 DRM 解密头
         if (licenseKey) {
             args.push(
                 '--add-header',
-                `X-AxDRM-Message: ${licenseKey}`
+                `X-AxDRM-Message: ${licenseKey}`,
+                '--add-header',
+                'Content-Type: application/dash+xml'
             );
         }
+
+        // 添加 User-Agent
+        args.push(
+            '--add-header',
+            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        );
 
         // 添加源 URL
         args.push(streamConfig.url);
@@ -284,7 +302,9 @@ class StreamManager {
         return new Promise((resolve, reject) => {
             try {
                 // 启动 yt-dlp 进程
-                const ytdlp = spawn('yt-dlp', args);
+                const ytdlp = spawn('yt-dlp', args, {
+                    stdio: ['ignore', 'pipe', 'pipe']  // 忽略标准输入，管道输出和错误
+                });
                 let ytdlpError = '';
                 
                 // 创建一个 TCP 服务器来处理直播流
@@ -320,7 +340,9 @@ class StreamManager {
                     // 向所有连接的客户端发送数据
                     for (const client of clients) {
                         try {
-                            client.write(data);
+                            if (!client.destroyed) {
+                                client.write(data);
+                            }
                         } catch (error) {
                             logger.error(`Error sending data to client for stream ${streamId}:`, error);
                             clients.delete(client);
@@ -428,7 +450,7 @@ class StreamManager {
         }
     }
 
-    // 添加 streamlink 作为备选方案
+    // ��加 streamlink 作为备选方案
     async startStreamingWithStreamlink(streamId, streamConfig) {
         const { spawn } = require('child_process');
         const outputPath = path.join(__dirname, '../streams', streamId);
