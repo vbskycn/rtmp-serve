@@ -272,57 +272,34 @@ class StreamManager {
             licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
         }
 
-        // 先用 yt-dlp 获取真实地址
-        const realUrl = await new Promise((resolve, reject) => {
-            const args = [
-                '--no-check-certificates',
-                '--no-warnings',
-                '--quiet',
-                '--get-url',
-                '--allow-unplayable-formats',
-                '--format', 'v5000000_33'
-            ];
+        // 构建 yt-dlp 参数
+        const args = [
+            '--no-check-certificates',
+            '--allow-unplayable-formats',
+            '--no-part',
+            '--no-mtime',
+            '--no-progress',
+            '--quiet',
+            '--no-warnings',
+            '--live-from-start',
+            '--no-playlist-reverse',
+            '--format', 'v5000000_33',  // 直接指定格式
+            '--downloader', 'ffmpeg',    // 使用 ffmpeg 作为下载器
+            '--downloader-args', 'ffmpeg:-c copy -f mpegts pipe:1'  // 直接输出 MPEG-TS
+        ];
 
-            if (licenseKey) {
-                args.push(
-                    '--add-header',
-                    `X-AxDRM-Message: ${licenseKey}`,
-                    '--add-header',
-                    'Content-Type: application/dash+xml',
-                    '--add-header',
-                    'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                );
-            }
+        if (licenseKey) {
+            args.push(
+                '--add-header',
+                `X-AxDRM-Message: ${licenseKey}`,
+                '--add-header',
+                'Content-Type: application/dash+xml',
+                '--add-header',
+                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            );
+        }
 
-            args.push(streamConfig.url);
-
-            logger.debug(`yt-dlp args for URL resolution: ${args.join(' ')}`);
-
-            const ytdlp = spawn('yt-dlp', args);
-            let url = '';
-            let error = '';
-
-            ytdlp.stdout.on('data', (data) => {
-                url += data.toString();
-            });
-
-            ytdlp.stderr.on('data', (data) => {
-                error += data.toString();
-                logger.debug(`yt-dlp stderr during URL resolution: ${data.toString()}`);
-            });
-
-            ytdlp.on('close', (code) => {
-                if (code === 0 && url.trim()) {
-                    logger.info(`Successfully resolved real URL for stream ${streamId}`);
-                    resolve(url.trim());
-                } else {
-                    logger.error(`Failed to resolve URL with error: ${error}`);
-                    reject(new Error(`Failed to get real URL: ${error}`));
-                }
-            });
-        });
-
-        logger.info(`Got real URL for stream ${streamId}`);
+        args.push(streamConfig.url);
 
         return new Promise((resolve, reject) => {
             try {
@@ -351,51 +328,13 @@ class StreamManager {
                     });
                 });
 
-                // 使用 FFmpeg 处理流
-                const ffmpeg = spawn('ffmpeg', [
-                    '-reconnect', '1',
-                    '-reconnect_streamed', '1',
-                    '-reconnect_delay_max', '5',
-                    '-headers', [
-                        `X-AxDRM-Message: ${licenseKey}`,
-                        'Content-Type: application/dash+xml',
-                        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                    ].join('\r\n'),
-                    '-i', realUrl,
-                    '-c:v', 'copy',
-                    '-c:a', 'copy',
-                    '-f', 'mpegts',
-                    '-mpegts_flags', '+resend_headers',
-                    '-mpegts_copyts', '1',
-                    '-mpegts_flags', '+initial_discontinuity',
-                    '-avoid_negative_ts', 'make_zero',
-                    '-fflags', '+genpts+igndts',
-                    '-max_delay', '5000000',
-                    '-muxdelay', '0.1',
-                    '-flush_packets', '1',
-                    '-protocol_whitelist', 'file,http,https,tcp,tls,crypto,pipe,data',
-                    '-allowed_extensions', 'ALL',
-                    '-segment_time_metadata', '1',
-                    '-analyzeduration', '10000000',
-                    '-probesize', '10000000',
-                    'pipe:1'
-                ]);
+                const ytdlp = spawn('yt-dlp', args);
+                let ytdlpError = '';
 
-                let ffmpegError = '';
-
-                ffmpeg.stdout.on('data', (data) => {
+                ytdlp.stdout.on('data', (data) => {
                     for (const client of clients) {
                         try {
                             if (!client.destroyed) {
-                                if (!client.headerSent) {
-                                    client.write('HTTP/1.1 200 OK\r\n');
-                                    client.write('Content-Type: video/mp2t\r\n');
-                                    client.write('Cache-Control: no-cache\r\n');
-                                    client.write('Connection: keep-alive\r\n');
-                                    client.write('Access-Control-Allow-Origin: *\r\n');
-                                    client.write('\r\n');
-                                    client.headerSent = true;
-                                }
                                 client.write(data);
                             }
                         } catch (error) {
@@ -405,33 +344,22 @@ class StreamManager {
                     }
                 });
 
-                ffmpeg.stderr.on('data', (data) => {
-                    const message = data.toString();
-                    if (message.includes('Invalid mvhd time scale') || 
-                        message.includes('Application provided duration')) {
-                        return;
-                    }
-                    
-                    if (message.includes('Error') || 
-                        message.includes('Invalid') || 
-                        message.includes('Failed') ||
-                        message.includes('No such')) {
-                        logger.error(`ffmpeg stderr: ${message}`);
-                    } else {
-                        logger.debug(`ffmpeg stderr: ${message}`);
-                    }
+                ytdlp.stderr.on('data', (data) => {
+                    ytdlpError += data.toString();
+                    logger.debug(`yt-dlp stderr: ${data.toString()}`);
                 });
 
-                ffmpeg.on('error', (error) => {
-                    logger.error(`ffmpeg error for stream ${streamId}:`, error);
+                ytdlp.on('error', (error) => {
+                    logger.error(`yt-dlp error for stream ${streamId}:`, error);
                     setTimeout(() => {
                         this.restartStream(streamId);
                     }, 5000);
                 });
 
-                ffmpeg.on('exit', (code) => {
+                ytdlp.on('exit', (code) => {
                     if (code !== 0) {
-                        logger.error(`ffmpeg exited with code ${code} for stream ${streamId}`);
+                        logger.error(`yt-dlp exited with code ${code} for stream ${streamId}`);
+                        logger.error(`yt-dlp stderr: ${ytdlpError}`);
                         setTimeout(() => {
                             this.restartStream(streamId);
                         }, 5000);
@@ -440,7 +368,7 @@ class StreamManager {
 
                 // 保存进程和服务器引用
                 this.streamProcesses.set(streamId, {
-                    ffmpeg,
+                    ytdlp,
                     server,
                     clients,
                     port,
@@ -477,7 +405,7 @@ class StreamManager {
         }
     }
 
-    // 添加��件监控方法
+    // 添加件监控方法
     monitorStreamFile(streamId, filePath) {
         const checkInterval = setInterval(() => {
             try {
