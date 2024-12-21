@@ -117,46 +117,52 @@ class StreamManager extends EventEmitter {
                 streamId = streamData.id;
             } else if (streamData.customId) {
                 streamId = `stream_${streamData.customId}`;
-            } else if (lastPart.includes('.')) {
-                // 如果URL最后部分包含文件扩展名，生成随机ID
-                const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-                let randomId = '';
-                for (let i = 0; i < 6; i++) {
-                    randomId += chars.charAt(Math.floor(Math.random() * chars.length));
-                }
-                streamId = `stream_${randomId}`;
             } else {
-                // 使用URL最后部分作为ID
+                // 不再检查文件扩展名，直接使用URL最后部分作为ID
                 streamId = `stream_${lastPart}`;
             }
 
-            // 添加新流
-            this.streams.set(streamId, {
-                id: streamId,
-                name: streamData.name,
-                url: streamData.url,
-                category: streamData.category || '未分类',
-                tvg: streamData.tvg || {
-                    id: '',
-                    name: streamData.name,
-                    logo: '',
-                    group: streamData.category || ''
-                },
-                stats: {
-                    startTime: null,
-                    uptime: 0,
-                    errors: 0
+            // 检查是否已存在相同的流
+            if (this.streams.has(streamId)) {
+                // 如果存在，更新现有流的信息
+                const existingStream = this.streams.get(streamId);
+                existingStream.name = streamData.name;
+                existingStream.url = streamData.url;
+                existingStream.category = streamData.category || existingStream.category;
+                if (streamData.tvg) {
+                    existingStream.tvg = streamData.tvg;
                 }
-            });
+                logger.info(`Updated existing stream: ${streamId}`);
+            } else {
+                // 添加新流
+                this.streams.set(streamId, {
+                    id: streamId,
+                    name: streamData.name,
+                    url: streamData.url,
+                    category: streamData.category || '未分类',
+                    tvg: streamData.tvg || {
+                        id: '',
+                        name: streamData.name,
+                        logo: '',
+                        group: streamData.category || ''
+                    },
+                    stats: {
+                        startTime: null,
+                        uptime: 0,
+                        errors: 0
+                    }
+                });
 
-            // 初始化统计信息
-            this.streamStats.set(streamId, {
-                totalRequests: 0,
-                lastAccessed: null,
-                errors: 0,
-                uptime: 0,
-                startTime: null
-            });
+                // 初始化统计信息
+                this.streamStats.set(streamId, {
+                    totalRequests: 0,
+                    lastAccessed: null,
+                    errors: 0,
+                    uptime: 0,
+                    startTime: null
+                });
+                logger.info(`Added new stream: ${streamId}`);
+            }
 
             // 保存配置
             await this.saveStreams();
@@ -289,7 +295,7 @@ class StreamManager extends EventEmitter {
 
         // 构建 FFmpeg 输入参数
         const inputArgs = [
-            '-hide_banner',          // 隐��� banner
+            '-hide_banner',          // 隐 banner
             '-reconnect', '1',       // 断开时重连
             '-reconnect_streamed', '1',
             '-reconnect_delay_max', '5',
@@ -423,7 +429,7 @@ class StreamManager extends EventEmitter {
                     }
                 }, 1000);
 
-                // 设置检查超时
+                // 设置检查���时
                 setTimeout(() => {
                     clearInterval(checkInterval);
                     if (!fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
@@ -619,7 +625,7 @@ class StreamManager extends EventEmitter {
                 // 清理流程序引用
                 this.streamProcesses.delete(streamId);
                 
-                // 重置统计信��
+                // 重置统计信息
                 const stats = this.streamStats.get(streamId);
                 if (stats) {
                     stats.startTime = null;
@@ -640,7 +646,7 @@ class StreamManager extends EventEmitter {
                 // 清理文件
                 const outputPath = path.join(__dirname, '../streams', streamId);
                 if (fs.existsSync(outputPath)) {
-                    // 删除所有分片文件
+                    // 删除所有���片文件
                     const files = fs.readdirSync(outputPath);
                     for (const file of files) {
                         if (file.endsWith('.ts') || file.endsWith('.m3u8')) {
@@ -864,7 +870,7 @@ class StreamManager extends EventEmitter {
         return configs.join('\n');
     }
 
-    // 在 StreamManager 类中添加
+    // 在 StreamManager 类中添加或修改 updateStream 方法
     async updateStream(streamId, streamData) {
         try {
             const stream = this.streams.get(streamId);
@@ -886,6 +892,9 @@ class StreamManager extends EventEmitter {
                     throw new Error('新ID已存在');
                 }
 
+                // 先停止当前流
+                await this.stopStreaming(streamId);
+
                 // 使用新ID重新创建流
                 this.streams.delete(streamId);
                 stream.id = newId;
@@ -897,6 +906,39 @@ class StreamManager extends EventEmitter {
                     this.streamStats.delete(streamId);
                     this.streamStats.set(newId, stats);
                 }
+
+                // 移动流媒体文件
+                const oldPath = path.join(__dirname, '../streams', streamId);
+                const newPath = path.join(__dirname, '../streams', newId);
+                if (fs.existsSync(oldPath)) {
+                    if (fs.existsSync(newPath)) {
+                        fs.rmSync(newPath, { recursive: true, force: true });
+                    }
+                    fs.renameSync(oldPath, newPath);
+                }
+
+                // 更新进程映射
+                if (this.streamProcesses.has(streamId)) {
+                    const process = this.streamProcesses.get(streamId);
+                    this.streamProcesses.delete(streamId);
+                    this.streamProcesses.set(newId, process);
+                }
+
+                // 更新观看者计数
+                if (this.activeViewers.has(streamId)) {
+                    const viewers = this.activeViewers.get(streamId);
+                    this.activeViewers.delete(streamId);
+                    this.activeViewers.set(newId, viewers);
+                }
+
+                // 更新自动停止定时器
+                if (this.autoStopTimers.has(streamId)) {
+                    const timer = this.autoStopTimers.get(streamId);
+                    clearTimeout(timer);
+                    this.autoStopTimers.delete(streamId);
+                }
+
+                logger.info(`Stream ID updated from ${streamId} to ${newId}`);
             }
 
             // 保存更新
@@ -904,7 +946,8 @@ class StreamManager extends EventEmitter {
 
             return {
                 success: true,
-                message: '流更新成功'
+                message: '流更新成功',
+                newId: streamData.customId ? `stream_${streamData.customId}` : streamId
             };
         } catch (error) {
             logger.error('Error updating stream:', error);

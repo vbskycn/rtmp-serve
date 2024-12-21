@@ -15,35 +15,13 @@ function generateStreamId(name, url, customId = '') {
         return 'stream_' + customId;
     }
 
-    // 尝试从URL中提取ID
-    try {
-        const urlParts = url.split('/');
-        const lastPart = urlParts[urlParts.length - 1];
-        
-        // 检查是否有文件扩展名
-        if (lastPart.includes('.')) {
-            // 如果有扩展名，生成随机ID
-            const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-            let randomId = '';
-            for (let i = 0; i < 6; i++) {
-                randomId += chars.charAt(Math.floor(Math.random() * chars.length));
-            }
-            return 'stream_' + randomId;
-        } else {
-            // 如果没有扩展名，直接使用最后一部分作为ID
-            return 'stream_' + lastPart;
-        }
-    } catch (error) {
-        logger.debug('Failed to extract ID from URL:', error);
-        
-        // 如果出错，生成随机ID
-        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-        let randomId = '';
-        for (let i = 0; i < 6; i++) {
-            randomId += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return 'stream_' + randomId;
+    // 生成6位随机ID
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let randomId = '';
+    for (let i = 0; i < 6; i++) {
+        randomId += chars.charAt(Math.floor(Math.random() * chars.length));
     }
+    return 'stream_' + randomId;
 }
 
 // 添加单个流
@@ -58,6 +36,7 @@ router.post('/api/streams', async (req, res) => {
             });
         }
 
+        // 生成streamId (优先使用customId，否则生成随机ID)
         const streamId = generateStreamId(name, url, customId);
         const streamData = {
             id: streamId,
@@ -76,7 +55,7 @@ router.post('/api/streams', async (req, res) => {
         const result = await streamManager.addStream(streamData);
         
         if (!result || !result.success) {
-            throw new Error(result?.error || '添���流失败');
+            throw new Error(result?.error || '添加流失败');
         }
 
         res.json({
