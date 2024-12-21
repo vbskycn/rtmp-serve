@@ -86,7 +86,8 @@ router.get('/api/streams', (req, res) => {
         streams.push({
             id,
             ...config,
-            stats: streamManager.streamStats.get(id)
+            stats: streamManager.streamStats.get(id),
+            processRunning: streamManager.streamProcesses.has(id)
         });
     }
     res.json(streams);

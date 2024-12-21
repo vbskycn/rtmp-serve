@@ -318,26 +318,36 @@ class StreamManager {
                     ffmpegError += message;
 
                     // 检查是否是致命错误
-                    const isFatalError = message.includes('Server returned 404') || 
-                                       message.includes('Failed to open segment') ||
-                                       message.includes('Error when loading first segment');
+                    const isFatalError = 
+                        message.includes('Connection timed out') ||
+                        message.includes('Server returned 404') || 
+                        message.includes('Failed to open segment') ||
+                        message.includes('Error when loading first segment') ||
+                        message.includes('Failed to reload playlist');
 
                     if (isFatalError) {
                         // 增加失败计数
                         const currentCount = this.failureCount.get(streamId) || 0;
                         this.failureCount.set(streamId, currentCount + 1);
 
-                        // 如果失败次数超过阈值，标记流为失效
-                        if (currentCount >= 10) {  // 10次失败后标记为失效
+                        // 如果失败次数超过阈值，标记流为失效并停止
+                        if (currentCount >= 3) {  // 降低失败阈值到3次
                             logger.error(`Stream ${streamId} marked as invalid after ${currentCount} failures`);
                             this.markStreamAsInvalid(streamId);
                             this.stopStreaming(streamId);
+                            return;  // 立即返回，不再重试
                         }
-                    } else if (message.includes('Error') || 
-                        message.includes('Invalid') || 
+                    }
+
+                    // 只记录重要的错误信息
+                    if (message.includes('Error') || 
                         message.includes('Failed') ||
-                        message.includes('No such')) {
+                        message.includes('Invalid') ||
+                        message.includes('timeout')) {
                         logger.error(`FFmpeg stderr: ${message}`);
+                    } else if (message.includes('fps=') || message.includes('speed=')) {
+                        // 忽略常规的进度信息
+                        return;
                     } else {
                         logger.debug(`FFmpeg stderr: ${message}`);
                     }
@@ -465,22 +475,31 @@ class StreamManager {
     async restartStream(streamId) {
         try {
             const stream = this.streams.get(streamId);
-            if (!stream || stream.invalid) {
+            if (!stream) {
+                logger.warn(`Stream not found: ${streamId}`);
+                return;
+            }
+
+            if (stream.invalid) {
                 logger.info(`Skipping restart of invalid stream: ${streamId}`);
+                return;
+            }
+
+            // 检查失败次数
+            const failureCount = this.failureCount.get(streamId) || 0;
+            if (failureCount >= 3) {
+                logger.info(`Stream ${streamId} has failed too many times, marking as invalid`);
+                this.markStreamAsInvalid(streamId);
                 return;
             }
 
             logger.info(`Restarting stream: ${streamId}`);
             await this.forceStopStreaming(streamId);
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 5000));  // 增加等待时间到5秒
             await this.startStreaming(streamId);
-            
-            // 重置失败计数
-            this.failureCount.set(streamId, 0);
-            
-            logger.info(`Stream restarted: ${streamId}`);
         } catch (error) {
             logger.error(`Error restarting stream: ${streamId}`, { error });
+            this.failureCount.set(streamId, (this.failureCount.get(streamId) || 0) + 1);
         }
     }
 
@@ -669,7 +688,7 @@ class StreamManager {
                     processes.ffmpeg.kill('SIGKILL');
                 }
                 
-                // 立即清理��源
+                // 立即清理源
                 this.streamProcesses.delete(streamId);
                 
                 // 清理文件
@@ -693,9 +712,11 @@ class StreamManager {
         const stream = this.streams.get(streamId);
         if (stream) {
             stream.invalid = true;
-            stream.lastError = 'Stream marked as invalid due to repeated failures';
+            stream.lastError = '流连接失败次数过多，已标记为失效';
             stream.lastErrorTime = new Date();
+            await this.stopStreaming(streamId);  // 确保停止流
             await this.saveStreams();
+            logger.warn(`Stream ${streamId} marked as invalid`);
         }
     }
 

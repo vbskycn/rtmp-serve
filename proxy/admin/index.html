@@ -157,7 +157,7 @@
             </div>
         </div>
 
-        <!-- 在添加流的卡片后面添加新的量���入卡片 -->
+        <!-- 在添加流的卡片后面添加新的量入卡片 -->
         <div class="card">
             <div class="card-header">
                 <h5 class="mb-0"><i class="fa fa-upload"></i> 批量导入流</h5>
@@ -236,8 +236,13 @@
 
                 // 更新仪表盘
                 document.getElementById('totalStreams').textContent = streams.length;
-                document.getElementById('activeStreams').textContent = 
-                    streams.filter(s => s.stats?.startTime).length;
+
+                // 获取活跃流的数量
+                const activeStreams = streams.filter(stream => {
+                    // 检查流是否有进程在运行
+                    return stream.processRunning || stream.stats?.startTime;
+                });
+                document.getElementById('activeStreams').textContent = activeStreams.length;
 
                 streams.forEach(stream => {
                     const tr = document.createElement('tr');
@@ -253,8 +258,8 @@
                         statusClass = 'error';
                         statusText = '已失效';
                     } 
-                    // 检查流是否在运行
-                    else if (stream.stats?.startTime) {
+                    // 检查流是否在运行（包括通过播放链接启动的）
+                    else if (stream.processRunning || stream.stats?.startTime) {
                         statusClass = 'active';
                         statusText = '运行中';
                     }
@@ -666,7 +671,7 @@
             const selectedStreams = getSelectedStreams();
             if (!selectedStreams.length) return;
             
-            if (!confirm(`确定要删除选中的 ${selectedStreams.length} 个流吗？此操作不可恢复！`)) return;
+            if (!confirm(`确定要删除选中的 ${selectedStreams.length} 个流吗？此操作��可恢复！`)) return;
 
             let success = 0;
             let failed = 0;
