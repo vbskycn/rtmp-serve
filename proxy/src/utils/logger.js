@@ -8,12 +8,12 @@ const logger = winston.createLogger({
         winston.format.json()
     ),
     transports: [
-        new winston.format.Console(),
-        new winston.format.File({ 
+        new winston.transports.Console(),
+        new winston.transports.File({ 
             filename: path.join(__dirname, '../../logs/error.log'), 
             level: 'error' 
         }),
-        new winston.format.File({ 
+        new winston.transports.File({ 
             filename: path.join(__dirname, '../../logs/combined.log') 
         })
     ]
