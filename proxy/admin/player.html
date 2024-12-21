@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>流媒体播放器</title>
+    <link href="https://cdn.jsdelivr.net/npm/video.js@7.20.3/dist/video-js.min.css" rel="stylesheet">
+    <style>
+        body { margin: 0; background: #000; }
+        .video-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .video-js {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="video-container">
+        <video id="player" class="video-js vjs-default-skin" controls>
+            <p class="vjs-no-js">请启用 JavaScript 以观看视频</p>
+        </video>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/video.js@7.20.3/dist/video.min.js"></script>
+    <script>
+        // 从 URL 获取流 ID
+        const urlParams = new URLSearchParams(window.location.search);
+        const streamId = urlParams.get('id');
+        
+        if (streamId) {
+            const player = videojs('player', {
+                fluid: true,
+                controls: true,
+                autoplay: true,
+                preload: 'auto',
+                html5: {
+                    hls: {
+                        enableLowInitialPlaylist: true,
+                        smoothQualityChange: true,
+                        overrideNative: true
+                    }
+                }
+            });
+
+            // 设置播放源
+            player.src({
+                src: `/play/${streamId}`,
+                type: 'application/x-mpegURL'
+            });
+
+            player.play().catch(function(error) {
+                console.log("播放失败:", error);
+            });
+        }
+    </script>
+</body>
+</html> 

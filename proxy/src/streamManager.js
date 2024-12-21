@@ -272,6 +272,59 @@ class StreamManager {
             licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
         }
 
+        // 首先获取可用格式
+        const formatArgs = [
+            '--no-check-certificates',
+            '--allow-unplayable-formats',
+            '--list-formats'
+        ];
+
+        if (licenseKey) {
+            formatArgs.push(
+                '--add-header',
+                `X-AxDRM-Message: ${licenseKey}`,
+                '--add-header',
+                'Content-Type: application/dash+xml'
+            );
+        }
+
+        formatArgs.push(streamConfig.url);
+
+        // 获取可用格式
+        let format = 'v5000000_33';  // 默认格式
+        try {
+            const formatProcess = spawn('yt-dlp', formatArgs);
+            let formatOutput = '';
+            
+            await new Promise((resolve, reject) => {
+                formatProcess.stdout.on('data', (data) => {
+                    formatOutput += data.toString();
+                });
+                
+                formatProcess.stderr.on('data', (data) => {
+                    logger.debug(`Format check stderr: ${data}`);
+                });
+                
+                formatProcess.on('close', (code) => {
+                    if (code === 0) {
+                        // 解析输出找到最佳格式
+                        const lines = formatOutput.split('\n');
+                        for (const line of lines) {
+                            if (line.includes('v5000000_33')) {
+                                format = 'v5000000_33';
+                                break;
+                            }
+                        }
+                        resolve();
+                    } else {
+                        reject(new Error(`Format check failed with code ${code}`));
+                    }
+                });
+            });
+        } catch (error) {
+            logger.error(`Error checking formats: ${error}`);
+        }
+
         // 构建 yt-dlp 参数
         const args = [
             '--allow-unplayable-formats',
@@ -283,7 +336,7 @@ class StreamManager {
             '--no-warnings',
             '--live-from-start',
             '--no-playlist-reverse',
-            '--format', 'best',  // 使用最佳格式
+            '--format', format,  // 使用找到的格式
             '--output', '-'      // 输出到标准输出
         ];
 
@@ -412,7 +465,7 @@ class StreamManager {
                 const now = Date.now();
                 const fileAge = now - stats.mtimeMs;
 
-                // 如果文件超过30秒没有更���，重启流
+                // 如果文件超过30秒没有更新，重启流
                 if (fileAge > 30000) {
                     logger.warn(`Stream file not updated for ${fileAge}ms, restarting: ${streamId}`);
                     this.restartStream(streamId);
@@ -554,7 +607,7 @@ class StreamManager {
                     continue;
                 }
                 
-                // 如果错误次数过��，重启流
+                // 如果错误次数过多，重启流
                 if (stats && stats.errors > 10) {  // 增加错误容忍度
                     logger.warn(`Too many errors for stream: ${streamId}`);
                     await this.restartStream(streamId);

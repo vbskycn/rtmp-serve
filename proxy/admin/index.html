@@ -235,7 +235,10 @@
                                     <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly 
                                            style="font-family: monospace; background-color: #f8f9fa;">
                                     <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${playUrl}')">
-                                        <i class="fa fa-copy"></i> 复制播放地址
+                                        <i class="fa fa-copy"></i> 复制地址
+                                    </button>
+                                    <button class="btn btn-outline-success btn-sm" onclick="window.open('player.html?id=${stream.id}', '_blank')">
+                                        <i class="fa fa-play"></i> 在线播放
                                     </button>
                                 </div>
                                 <small class="text-muted ms-2">
