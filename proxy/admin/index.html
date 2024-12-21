@@ -96,11 +96,20 @@
             color: #7f8c8d;
             margin-top: 5px;
         }
+        .input-group {
+            max-width: 300px;
+        }
+        .input-group input {
+            font-size: 0.9em;
+        }
+        .form-label {
+            font-weight: 500;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">流媒体管理系统v1.0.15</h1>
+        <h1 class="text-center mb-4">流媒体管理系统v1.0.17</h1>
 
         <!-- 仪表盘 -->
         <div class="dashboard">
@@ -128,12 +137,23 @@
                 <h5 class="mb-0"><i class="fa fa-plus-circle"></i> 添加流</h5>
             </div>
             <div class="card-body">
-                <div class="mb-3">
-                    <textarea id="m3uInput" class="form-control" placeholder="请粘贴 M3U 格式的流配置..."></textarea>
-                </div>
-                <button onclick="addStreams()" class="btn btn-primary">
-                    <i class="fa fa-plus"></i> 添加流
-                </button>
+                <form id="addStreamForm">
+                    <div class="mb-3">
+                        <label class="form-label">流名称</label>
+                        <input type="text" class="form-control" id="streamName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">源地址</label>
+                        <input type="text" class="form-control" id="streamUrl" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">License Key (可选)</label>
+                        <input type="text" class="form-control" id="licenseKey" placeholder="请输入 license_key">
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fa fa-plus"></i> 添加流
+                    </button>
+                </form>
             </div>
         </div>
 
@@ -157,7 +177,8 @@
                             <tr>
                                 <th>名称</th>
                                 <th>状态</th>
-                                <th>地址</th>
+                                <th>源地址</th>
+                                <th>播放地址</th>
                                 <th>统计信息</th>
                                 <th>操作</th>
                             </tr>
@@ -186,6 +207,7 @@
 
                 streams.forEach(stream => {
                     const tr = document.createElement('tr');
+                    const playUrl = `${window.location.origin}/play/${stream.id}`;
                     tr.innerHTML = `
                         <td>
                             <img src="${stream.tvg?.logo || ''}" alt="" style="height: 20px; margin-right: 8px;">
@@ -196,8 +218,16 @@
                                 ${stream.stats?.startTime ? '运行中' : '已停止'}
                             </span>
                         </td>
-                        <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis;">
+                        <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
                             ${stream.url}
+                        </td>
+                        <td>
+                            <div class="input-group">
+                                <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly>
+                                <button class="btn btn-outline-secondary btn-sm" onclick="copyToClipboard('${playUrl}')">
+                                    <i class="fa fa-copy"></i>
+                                </button>
+                            </div>
                         </td>
                         <td>
                             <span class="stats-badge">
@@ -230,35 +260,37 @@
         }
 
         // 添加流
-        async function addStreams() {
-            const m3u = document.getElementById('m3uInput').value;
-            if (!m3u) {
-                alert('请输入 M3U 内容');
-                return;
-            }
+        document.getElementById('addStreamForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const streamData = {
+                name: document.getElementById('streamName').value,
+                url: document.getElementById('streamUrl').value,
+                license_key: document.getElementById('licenseKey').value
+            };
 
             try {
-                const response = await fetch('/api/streams/batch', {
+                const response = await fetch('/api/streams', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ m3u })
+                    body: JSON.stringify(streamData)
                 });
 
                 const result = await response.json();
                 if (result.success) {
-                    alert(`成功添加 ${result.count} 个流`);
-                    document.getElementById('m3uInput').value = '';
+                    alert('流添加成功');
+                    this.reset();
                     loadStreams();
                 } else {
                     alert('添加流失败: ' + result.error);
                 }
             } catch (error) {
-                console.error('Error adding streams:', error);
+                console.error('Error adding stream:', error);
                 alert('添加流失败');
             }
-        }
+        });
 
         // 删除流
         async function deleteStream(id) {
@@ -365,6 +397,16 @@
         loadStreams();
         // 定期刷新
         setInterval(loadStreams, 10000);
+
+        // 添加新的复制到剪贴板函数
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('播放地址已复制到剪贴板');
+            }).catch(err => {
+                console.error('复制失败:', err);
+                alert('复制失败');
+            });
+        }
     </script>
 </body>
 </html> 
