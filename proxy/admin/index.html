@@ -127,7 +127,7 @@
             </div>
             <div class="stat-card">
                 <div class="stat-value" id="trafficReceived">0 B</div>
-                <div class="stat-label">总接收流量</div>
+                <div class="stat-label">总接收��量</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value" id="trafficSent">0 B</div>
@@ -273,10 +273,14 @@
                 try {
                     const statsResponse = await fetch('/api/stats');
                     const statsData = await statsResponse.json();
-                    const uptime = formatUptime(statsData.uptime);
-                    document.getElementById('systemUptime').textContent = uptime;
+                    
+                    // 更新统计显示
+                    document.getElementById('totalStreams').textContent = streams.length;
+                    document.getElementById('activeStreams').textContent = statsData.activeStreams;
+                    document.getElementById('systemUptime').textContent = formatUptime(statsData.uptime);
                     document.getElementById('trafficReceived').textContent = statsData.traffic.received;
                     document.getElementById('trafficSent').textContent = statsData.traffic.sent;
+                    
                 } catch (error) {
                     console.error('Error loading system stats:', error);
                 }
@@ -368,7 +372,7 @@
                                     <i class="fa fa-stop"></i> 停止
                                 </button>
                                 <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
-                                    <i class="fa fa-trash"></i> 删除
+                                    <i class="fa fa-trash"></i> ��除
                                 </button>
                             </td>
                         `;
@@ -527,7 +531,24 @@
         async function init() {
             await getServerConfig();
             await loadStreams();
+            
+            // 每10秒更新一次完整列表
             setInterval(loadStreams, 10000);
+            
+            // 每秒更新统计数据
+            setInterval(async () => {
+                try {
+                    const statsResponse = await fetch('/api/stats');
+                    const statsData = await statsResponse.json();
+                    
+                    document.getElementById('activeStreams').textContent = statsData.activeStreams;
+                    document.getElementById('systemUptime').textContent = formatUptime(statsData.uptime);
+                    document.getElementById('trafficReceived').textContent = statsData.traffic.received;
+                    document.getElementById('trafficSent').textContent = statsData.traffic.sent;
+                } catch (error) {
+                    console.error('Error updating stats:', error);
+                }
+            }, 1000);
         }
 
         // 启动始化

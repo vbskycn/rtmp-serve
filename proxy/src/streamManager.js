@@ -30,27 +30,33 @@ class StreamManager extends EventEmitter {
         
         // 每小时运行一次清理
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
-        // 每5分钟运行一次健康检查
+        // 每5分钟运行一���健康检查
         setInterval(() => this.checkStreamsHealth(), 5 * 60 * 1000);
         
         // 加载配置
         this.config = require('../config/config.json');
         
-        // 每秒更新一次统计信息
-        setInterval(() => this.updateStats(), 1000);
-        
         // 修改流量统计初始化
-        this.startTime = Date.now(); // 添加系统启动时间记录
+        this.startTime = Date.now();
         this.totalTraffic = {
-            sent: 0n,     // 使用 BigInt 来存储大数字
-            received: 0n  // 使用 BigInt 来存储大数字
+            sent: 0n,
+            received: 0n
         };
         
-        // 每秒更新流量统计
-        setInterval(() => this.updateTrafficStats(), 1000);
+        // 加载已保存的统计数据
+        this.loadStats();
         
-        // 每10秒保存统计数据到文件
-        setInterval(() => this.saveStats(), 10000);
+        // 每秒更新流量统计
+        setInterval(() => {
+            this.updateTrafficStats();
+            this.updateStats();
+            this.emit('statsUpdated', this.getTrafficStats());
+        }, 1000);
+        
+        // 每10秒保存统计数据
+        setInterval(() => {
+            this.saveStats();
+        }, 10000);
     }
 
     // 加载保存的流配置
@@ -352,7 +358,7 @@ class StreamManager extends EventEmitter {
             '-hls_segment_type', 'mpegts',
             '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
             '-start_number', '0',
-            '-preset', 'veryfast',         // 使用快速编码预设
+            '-preset', 'veryfast',         // 使用��速编码预设
             '-tune', 'zerolatency',        // 优化低延迟
             '-max_muxing_queue_size', '2048',
             '-hls_init_time', '2',
@@ -993,48 +999,14 @@ class StreamManager extends EventEmitter {
 
     // 修改更新流量统计的方法
     updateTrafficStats() {
-        // 遍历所有活跃流计算流量
         for (const [streamId, process] of this.streamProcesses.entries()) {
             if (process && process.ffmpeg) {
-                try {
-                    const outputPath = path.join(__dirname, '../streams', streamId);
-                    if (fs.existsSync(outputPath)) {
-                        // 计算目录中所有.ts文件的大小
-                        const files = fs.readdirSync(outputPath);
-                        const tsFiles = files.filter(f => f.endsWith('.ts'));
-                        let totalSize = 0n;
-                        
-                        for (const file of tsFiles) {
-                            const stats = fs.statSync(path.join(outputPath, file));
-                            totalSize += BigInt(stats.size);
-                        }
-
-                        // 更新流量统计
-                        this.totalTraffic.received += 2n * 1024n * 1024n; // 接收流量（每秒2MB）
-                        this.totalTraffic.sent += totalSize;              // 实际发送的文件大小
-                    }
-                } catch (error) {
-                    logger.error(`Error updating traffic stats for stream ${streamId}:`, error);
-                }
+                // 每个活跃流每秒接收约2MB数据
+                this.totalTraffic.received += BigInt(2 * 1024 * 1024);
+                
+                // 每个活跃流每秒发送约1MB数据
+                this.totalTraffic.sent += BigInt(1024 * 1024);
             }
-        }
-    }
-
-    // 添加保存统计数据的方法
-    async saveStats() {
-        try {
-            const statsPath = path.join(__dirname, '../config/stats.json');
-            const stats = {
-                startTime: this.startTime,
-                traffic: {
-                    sent: this.totalTraffic.sent.toString(),
-                    received: this.totalTraffic.received.toString()
-                }
-            };
-            
-            fs.writeFileSync(statsPath, JSON.stringify(stats, null, 2));
-        } catch (error) {
-            logger.error('Error saving stats:', error);
         }
     }
 
@@ -1043,7 +1015,8 @@ class StreamManager extends EventEmitter {
         return {
             sent: this.formatBytes(this.totalTraffic.sent),
             received: this.formatBytes(this.totalTraffic.received),
-            uptime: Date.now() - this.startTime
+            uptime: Date.now() - this.startTime,
+            activeStreams: this.streamProcesses.size
         };
     }
 
@@ -1064,18 +1037,46 @@ class StreamManager extends EventEmitter {
         return value.toFixed(2) + ' ' + sizes[i];
     }
 
-    // 在加载时恢复统计数据
-    loadStats() {
+    // 修改保存统计数据的方法
+    async saveStats() {
+        try {
+            const statsPath = path.join(__dirname, '../config/stats.json');
+            const stats = {
+                startTime: this.startTime,
+                traffic: {
+                    sent: this.totalTraffic.sent.toString(),
+                    received: this.totalTraffic.received.toString()
+                }
+            };
+            
+            await fs.promises.writeFile(statsPath, JSON.stringify(stats, null, 2));
+            logger.debug('Stats saved successfully');
+        } catch (error) {
+            logger.error('Error saving stats:', error);
+        }
+    }
+
+    // 修改加载统计数据的方法
+    async loadStats() {
         try {
             const statsPath = path.join(__dirname, '../config/stats.json');
             if (fs.existsSync(statsPath)) {
-                const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
+                const data = await fs.promises.readFile(statsPath, 'utf8');
+                const stats = JSON.parse(data);
+                
+                // 恢复启动时间和流量数据
                 this.startTime = stats.startTime;
                 this.totalTraffic.sent = BigInt(stats.traffic.sent);
                 this.totalTraffic.received = BigInt(stats.traffic.received);
+                
+                logger.info('Stats loaded successfully');
             }
         } catch (error) {
             logger.error('Error loading stats:', error);
+            // 如果加载失败，重置统计数据
+            this.startTime = Date.now();
+            this.totalTraffic.sent = 0n;
+            this.totalTraffic.received = 0n;
         }
     }
 }
