@@ -203,8 +203,11 @@
                     <button onclick="refreshStreams()" class="btn btn-light btn-sm">
                         <i class="fa fa-refresh"></i> 刷新
                     </button>
-                    <button onclick="exportConfig()" class="btn btn-light btn-sm">
-                        <i class="fa fa-download"></i> 导出配置
+                    <button onclick="exportM3U()" class="btn btn-light btn-sm">
+                        <i class="fa fa-download"></i> 导出M3U
+                    </button>
+                    <button onclick="exportTXT()" class="btn btn-light btn-sm">
+                        <i class="fa fa-download"></i> 导出TXT
                     </button>
                 </div>
             </div>
@@ -785,12 +788,97 @@
                     loadStreams();
                     alert('更新成功');
                 } else {
-                    alert('��新失败: ' + result.error);
+                    alert('更新失败: ' + result.error);
                 }
             } catch (error) {
                 console.error('Error updating stream:', error);
                 alert('更新失败');
             }
+        }
+
+        // 导出M3U格式
+        function exportM3U() {
+            fetch('/api/streams')
+                .then(response => response.json())
+                .then(streams => {
+                    // M3U文件头
+                    let content = '#EXTM3U\n';
+                    content += '#EXTM3U x-tvg-url="https://assets.livednow.com/epg.xml"\n\n';
+                    
+                    // 按分类分组
+                    const streamsByCategory = {};
+                    streams.forEach(stream => {
+                        const category = stream.category || '未分类';
+                        if (!streamsByCategory[category]) {
+                            streamsByCategory[category] = [];
+                        }
+                        streamsByCategory[category].push(stream);
+                    });
+
+                    // 生成分类内容
+                    for (const [category, categoryStreams] of Object.entries(streamsByCategory)) {
+                        categoryStreams.forEach(stream => {
+                            const playUrl = `http://${serverConfig.server.host}:${serverConfig.server.port}/play/${stream.id}`;
+                            const logoUrl = `https://assets.livednow.com/logo/${encodeURIComponent(stream.name)}.png`;
+                            content += `#EXTINF:-1 tvg-id="${stream.name}" tvg-name="${stream.name}" tvg-logo="${logoUrl}" group-title="${category}", ${stream.name}\n`;
+                            content += `${playUrl}\n\n`;
+                        });
+                    }
+                    
+                    // 下载文件
+                    const blob = new Blob([content], { type: 'text/plain' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'playlist.m3u';
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                })
+                .catch(error => {
+                    console.error('Error exporting M3U:', error);
+                    alert('导出M3U失败');
+                });
+        }
+
+        // 导出TXT格式
+        function exportTXT() {
+            fetch('/api/streams')
+                .then(response => response.json())
+                .then(streams => {
+                    let content = '';
+                    
+                    // 按分类分组
+                    const streamsByCategory = {};
+                    streams.forEach(stream => {
+                        const category = stream.category || '未分类';
+                        if (!streamsByCategory[category]) {
+                            streamsByCategory[category] = [];
+                        }
+                        streamsByCategory[category].push(stream);
+                    });
+
+                    // 生成分类内容
+                    for (const [category, categoryStreams] of Object.entries(streamsByCategory)) {
+                        content += `${category},#genre#\n`;
+                        categoryStreams.forEach(stream => {
+                            content += `${stream.name},${stream.url}\n`;
+                        });
+                        content += '\n'; // 分类之间添加空行
+                    }
+                    
+                    // 下载文件
+                    const blob = new Blob([content], { type: 'text/plain' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'playlist.txt';
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                })
+                .catch(error => {
+                    console.error('Error exporting TXT:', error);
+                    alert('导出TXT失败');
+                });
         }
     </script>
 
