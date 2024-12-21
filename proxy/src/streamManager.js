@@ -256,39 +256,30 @@ class StreamManager {
             licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
         }
 
-        // 构建 yt-dlp 参数，针对直播流优化
+        // 构建 yt-dlp 参数，使用与测试命令相同的参数
         const args = [
+            '--allow-unplayable-formats',
             '--no-check-certificates',
             '--no-part',
             '--no-mtime',
             '--no-progress',
             '--quiet',
-            '--live-from-start',
-            '--stream-types', 'dash,hls',
-            '--downloader', 'ffmpeg',  // 使用 ffmpeg 作为下载器
-            '--downloader-args', 'ffmpeg:-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'
+            '--no-warnings'
         ];
 
         // 添加 DRM 解密头
         if (licenseKey) {
             args.push(
                 '--add-header',
-                `X-AxDRM-Message: ${licenseKey}`,
-                '--add-header',
-                'Content-Type: application/dash+xml'
+                `X-AxDRM-Message: ${licenseKey}`
             );
         }
-
-        // 添加 User-Agent
-        args.push(
-            '--add-header',
-            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        );
 
         // 添加源 URL
         args.push(streamConfig.url);
 
         logger.info(`Starting yt-dlp for stream: ${streamId} with URL: ${streamConfig.url}`);
+        logger.debug(`yt-dlp args: ${args.join(' ')}`);
 
         return new Promise((resolve, reject) => {
             try {
@@ -360,6 +351,7 @@ class StreamManager {
                 ytdlp.on('exit', (code) => {
                     if (code !== 0) {
                         logger.error(`yt-dlp exited with code ${code} for stream ${streamId}`);
+                        logger.error(`yt-dlp stderr: ${ytdlpError}`);
                         this.restartStream(streamId);
                     }
                 });
