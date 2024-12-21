@@ -363,12 +363,15 @@ class StreamManager {
                     ].join('\r\n'),
                     '-i', realUrl,
                     '-c:v', 'copy',
-                    '-c:a', 'aac',
-                    '-b:a', '128k',
+                    '-c:a', 'copy',
                     '-f', 'mpegts',
-                    '-muxdelay', '0',
-                    '-muxpreload', '0',
-                    '-reset_timestamps', '1',
+                    '-mpegts_flags', '+resend_headers',
+                    '-mpegts_copyts', '1',
+                    '-mpegts_flags', '+initial_discontinuity',
+                    '-avoid_negative_ts', 'make_zero',
+                    '-max_delay', '5000000',
+                    '-muxdelay', '0.1',
+                    '-flush_packets', '1',
                     'pipe:1'
                 ]);
 
@@ -378,6 +381,15 @@ class StreamManager {
                     for (const client of clients) {
                         try {
                             if (!client.destroyed) {
+                                if (!client.headerSent) {
+                                    client.write('HTTP/1.1 200 OK\r\n');
+                                    client.write('Content-Type: video/mp2t\r\n');
+                                    client.write('Cache-Control: no-cache\r\n');
+                                    client.write('Connection: keep-alive\r\n');
+                                    client.write('Access-Control-Allow-Origin: *\r\n');
+                                    client.write('\r\n');
+                                    client.headerSent = true;
+                                }
                                 client.write(data);
                             }
                         } catch (error) {
@@ -388,8 +400,15 @@ class StreamManager {
                 });
 
                 ffmpeg.stderr.on('data', (data) => {
-                    ffmpegError += data.toString();
-                    logger.debug(`ffmpeg stderr: ${data.toString()}`);
+                    const message = data.toString();
+                    if (message.includes('Error') || 
+                        message.includes('Invalid') || 
+                        message.includes('Failed') ||
+                        message.includes('No such')) {
+                        logger.error(`ffmpeg stderr: ${message}`);
+                    } else {
+                        logger.debug(`ffmpeg stderr: ${message}`);
+                    }
                 });
 
                 ffmpeg.on('error', (error) => {
@@ -463,7 +482,7 @@ class StreamManager {
                 this.restartStream(streamId);
                 clearInterval(checkInterval);
             }
-        }, 5000); // 每5秒检查一次
+        }, 5000); // 每5���检查一次
 
         // 保存检查间隔的引用，以便后续清理
         this.healthChecks.set(streamId, checkInterval);
