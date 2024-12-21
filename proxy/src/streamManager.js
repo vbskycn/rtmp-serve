@@ -60,7 +60,7 @@ class StreamManager extends EventEmitter {
             received: 0n
         };
         
-        // 加��已保存的统计数据
+        // 加载已保存的统计数据
         this.loadStats();
         
         // 每秒更新流量统计
@@ -210,7 +210,7 @@ class StreamManager extends EventEmitter {
                 logger.info(`Added new stream: ${streamId}`);
             }
 
-            // 立即保存���置到文件
+            // 立即保存配置到文件
             await this.saveStreams();
 
             return {
@@ -546,7 +546,7 @@ class StreamManager extends EventEmitter {
             }
         }, 5000); // 每5秒检查一次
 
-        // 保存查间隔的引用，便后续���理
+        // 保存查间隔的引用，便后续处理
         this.healthChecks.set(streamId, checkInterval);
     }
 
