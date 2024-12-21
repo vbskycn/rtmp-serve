@@ -24,7 +24,8 @@ app.use(adminRoutes);
 app.get('/play/:streamId', async (req, res) => {
     try {
         const { streamId } = req.params;
-        const streamUrl = await streamManager.getStreamUrl(streamId);
+        const cleanStreamId = streamId.replace(/\.m3u$/, '');
+        const streamUrl = await streamManager.getStreamUrl(cleanStreamId);
         
         if (!streamUrl) {
             return res.status(404).send('Stream not found');

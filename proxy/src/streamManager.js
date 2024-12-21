@@ -163,7 +163,16 @@ class StreamManager {
             }
             
             // 返回 HLS 播放列表的路径
-            return `/streams/${streamId}/playlist.m3u8`;
+            const playlistPath = `/streams/${streamId}/playlist.m3u8`;
+            
+            // 检查文件是否存在
+            const fullPath = path.join(__dirname, '..', 'streams', streamId, 'playlist.m3u8');
+            if (!fs.existsSync(fullPath)) {
+                logger.error(`Playlist file not found: ${fullPath}`);
+                return null;
+            }
+            
+            return playlistPath;
         } catch (error) {
             logger.error(`Error getting stream URL: ${streamId}`, error);
             return null;
@@ -535,7 +544,7 @@ class StreamManager {
                     await this.restartStream(streamId);
                 }
                 
-                // 如果错误次数过多，也重启流
+                // 如果错���次数过多，也重启流
                 if (stats.errors > 5) {
                     logger.warn(`Too many errors for stream: ${streamId}`);
                     await this.restartStream(streamId);

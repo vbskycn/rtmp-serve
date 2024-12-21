@@ -209,7 +209,7 @@
                 streams.forEach(stream => {
                     const tr = document.createElement('tr');
                     const streamId = stream.id.replace('stream_', '');  // 移除前缀
-                    const playUrl = `http://47.243.164.1:3000/play/${stream.id}.m3u`;
+                    const playUrl = `http://47.243.164.1:3000/play/${stream.id}`;
                     tr.innerHTML = `
                         <td>
                             <img src="${stream.tvg?.logo || ''}" alt="" style="height: 20px; margin-right: 8px;">
