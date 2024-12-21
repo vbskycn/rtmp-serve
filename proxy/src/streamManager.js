@@ -30,7 +30,7 @@ class StreamManager extends EventEmitter {
         
         // 每小时运行一次清理
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
-        // 每5分钟运行一次健康检查
+        // 每5分钟运行一���健康检查
         setInterval(() => this.checkStreamsHealth(), 5 * 60 * 1000);
         
         // 加载配置
@@ -39,14 +39,18 @@ class StreamManager extends EventEmitter {
         // 每秒更新一次统计信息
         setInterval(() => this.updateStats(), 1000);
         
-        // 添加流量统计
+        // 修改流量统计初始化
+        this.startTime = Date.now(); // 添加系统启动时间记录
         this.totalTraffic = {
-            sent: 0,     // 发送的总字节数
-            received: 0  // 接收的总字节数
+            sent: 0n,     // 使用 BigInt 来存储大数字
+            received: 0n  // 使用 BigInt 来存储大数字
         };
         
         // 每秒更新流量统计
         setInterval(() => this.updateTrafficStats(), 1000);
+        
+        // 每10秒保存统计数据到文件
+        setInterval(() => this.saveStats(), 10000);
     }
 
     // 加载保存的流配置
@@ -84,7 +88,7 @@ class StreamManager extends EventEmitter {
         try {
             const configs = {};
             for (const [id, config] of this.streams.entries()) {
-                // 确保保存完整的流配置
+                // ��保保存完整的流配置
                 configs[id] = {
                     id: config.id,
                     name: config.name,
@@ -321,7 +325,7 @@ class StreamManager extends EventEmitter {
             '-rw_timeout', '5000000',  // 读写超时
             '-timeout', '5000000',     // 连接超时
             '-fflags', '+genpts+igndts+discardcorrupt',  // 容错处理
-            '-analyzeduration', '2000000',  // 分���时长
+            '-analyzeduration', '2000000',  // 分时长
             '-probesize', '1000000',   // 探测大小
             '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             '-headers', 'Accept: */*\r\n',
@@ -439,7 +443,7 @@ class StreamManager extends EventEmitter {
                     startTime: new Date()
                 });
 
-                // 等待播放���表文件创建
+                // 等待播放表文件创建
                 const checkInterval = setInterval(() => {
                     if (fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
                         clearInterval(checkInterval);
@@ -506,9 +510,9 @@ class StreamManager extends EventEmitter {
                 this.restartStream(streamId);
                 clearInterval(checkInterval);
             }
-        }, 5000); // 每5秒检查一次
+        }, 5000); // 每5秒��查一次
 
-        // 保存检查间隔的引用，��便后续清理
+        // 保存检查间隔的引用，便后续清理
         this.healthChecks.set(streamId, checkInterval);
     }
 
@@ -724,7 +728,7 @@ class StreamManager extends EventEmitter {
                 const streamPath = path.join(streamsDir, dir);
                 const stats = fs.statSync(streamPath);
                 
-                // 如果目录超过24小时未被访问且不活跃��则删除
+                // 如果目录超过24小时未被访问且不活跃则删除
                 const isOld = (Date.now() - stats.atimeMs) > 24 * 60 * 60 * 1000;
                 const isInactive = !this.streamProcesses.has(dir);
                 
@@ -974,33 +978,92 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 添加更新流量统计的方法
+    // 修改更新流量统计的方法
     updateTrafficStats() {
         // 遍历所有活跃流计算流量
         for (const [streamId, process] of this.streamProcesses.entries()) {
             if (process && process.ffmpeg) {
-                // 假设每个活跃流每秒接收2MB，发送1MB
-                this.totalTraffic.received += 2 * 1024 * 1024; // 2MB
-                this.totalTraffic.sent += 1024 * 1024;        // 1MB
+                try {
+                    const outputPath = path.join(__dirname, '../streams', streamId);
+                    if (fs.existsSync(outputPath)) {
+                        // 计算目录中所有.ts文件的大小
+                        const files = fs.readdirSync(outputPath);
+                        const tsFiles = files.filter(f => f.endsWith('.ts'));
+                        let totalSize = 0n;
+                        
+                        for (const file of tsFiles) {
+                            const stats = fs.statSync(path.join(outputPath, file));
+                            totalSize += BigInt(stats.size);
+                        }
+
+                        // 更新流量统计
+                        this.totalTraffic.received += 2n * 1024n * 1024n; // 接收流量（每秒2MB）
+                        this.totalTraffic.sent += totalSize;              // 实际发送的文件大小
+                    }
+                } catch (error) {
+                    logger.error(`Error updating traffic stats for stream ${streamId}:`, error);
+                }
             }
         }
     }
 
-    // 获取流量统计
+    // 添加保存统计数据的方法
+    async saveStats() {
+        try {
+            const statsPath = path.join(__dirname, '../config/stats.json');
+            const stats = {
+                startTime: this.startTime,
+                traffic: {
+                    sent: this.totalTraffic.sent.toString(),
+                    received: this.totalTraffic.received.toString()
+                }
+            };
+            
+            fs.writeFileSync(statsPath, JSON.stringify(stats, null, 2));
+        } catch (error) {
+            logger.error('Error saving stats:', error);
+        }
+    }
+
+    // 修改获取流量统计的方法
     getTrafficStats() {
         return {
             sent: this.formatBytes(this.totalTraffic.sent),
-            received: this.formatBytes(this.totalTraffic.received)
+            received: this.formatBytes(this.totalTraffic.received),
+            uptime: Date.now() - this.startTime
         };
     }
 
-    // 格式化字节数
+    // 改进格式化字节数的方法
     formatBytes(bytes) {
+        if (typeof bytes === 'bigint') {
+            bytes = Number(bytes);
+        }
+        
         if (bytes === 0) return '0 B';
+        
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        
+        // 保留两位小数
+        const value = bytes / Math.pow(k, i);
+        return value.toFixed(2) + ' ' + sizes[i];
+    }
+
+    // 在加载时恢复统计数据
+    loadStats() {
+        try {
+            const statsPath = path.join(__dirname, '../config/stats.json');
+            if (fs.existsSync(statsPath)) {
+                const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
+                this.startTime = stats.startTime;
+                this.totalTraffic.sent = BigInt(stats.traffic.sent);
+                this.totalTraffic.received = BigInt(stats.traffic.received);
+            }
+        } catch (error) {
+            logger.error('Error loading stats:', error);
+        }
     }
 }
 

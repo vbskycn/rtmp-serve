@@ -36,7 +36,7 @@ router.post('/api/streams', async (req, res) => {
             });
         }
 
-        // 生成streamId (优先使用customId，否则生成随机ID)
+        // 生成streamId (优先使用customId，否则生成随���ID)
         const streamId = generateStreamId(name, url, customId);
         const streamData = {
             id: streamId,
@@ -272,7 +272,7 @@ function parseM3U(content) {
         line = line.trim();
         if (!line) continue;
 
-        // 检查是否是分类行
+        // 检查是否是分类���
         if (line.endsWith('#genre#')) {
             currentCategory = line.split(',')[0].trim();
             continue;
@@ -405,10 +405,9 @@ router.get('/api/stats', (req, res) => {
     try {
         const trafficStats = streamManager.getTrafficStats();
         const stats = {
-            uptime: process.uptime() * 1000, // 转换为毫秒
+            uptime: Date.now() - streamManager.startTime, // 使用实际的启动时间
             totalStreams: streamManager.streams.size,
             activeStreams: streamManager.streamProcesses.size,
-            totalBandwidth: streamManager.streamProcesses.size * 2, // 假设每个流2MB/s
             traffic: {
                 sent: trafficStats.sent,
                 received: trafficStats.received
