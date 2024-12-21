@@ -146,6 +146,10 @@
                         <label class="form-label">源地址</label>
                         <input type="text" class="form-control" id="streamUrl" required>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label">自定义ID（可选）</label>
+                        <input type="text" class="form-control" id="streamCustomId" placeholder="留空将自动生成">
+                    </div>
                     <button type="submit" class="btn btn-primary">
                         <i class="fa fa-plus"></i> 添加流
                     </button>
@@ -315,7 +319,8 @@
             
             const streamData = {
                 name: document.getElementById('streamName').value,
-                url: document.getElementById('streamUrl').value
+                url: document.getElementById('streamUrl').value,
+                customId: document.getElementById('streamCustomId').value
             };
 
             try {

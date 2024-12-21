@@ -3,13 +3,13 @@
   "version": "1.0.0",
   "description": "Stream proxy server",
   "main": "src/server.js",
-  "dependencies": {
-    "express": "^4.17.1",
-    "cors": "^2.8.5",
-    "fluent-ffmpeg": "^2.1.2",
-    "axios": "^0.24.0"
-  },
   "scripts": {
     "start": "node src/server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.17.1",
+    "pinyin": "^2.11.2",
+    "winston": "^3.3.3"
   }
 }

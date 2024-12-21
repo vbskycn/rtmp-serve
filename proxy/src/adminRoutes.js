@@ -2,27 +2,41 @@ const express = require('express');
 const router = express.Router();
 const { StreamManager } = require('./streamManager');
 const logger = require('./utils/logger');
-const pinyin = require('pinyin');  // 需要先安装：npm install pinyin
 
 // 创建 StreamManager 实例
 const streamManager = new StreamManager();
 
-// 生成拼音ID
-function generateStreamId(name) {
-    // 使用 pinyin 转换中文为拼音，只保留字母
-    const pinyinName = pinyin(name, {
-        style: pinyin.STYLE_NORMAL,
-        heteronym: false
-    }).flat().join('');
-    
-    // 移除所有非字母字符
-    return 'stream_' + pinyinName.toLowerCase().replace(/[^a-z]/g, '');
+// 生成流ID
+function generateStreamId(name, url, customId = '') {
+    // 如果提供了自定义ID，直接使用
+    if (customId) {
+        return 'stream_' + customId;
+    }
+
+    // 尝试从URL中提取ID
+    try {
+        const urlParts = url.split('/');
+        const lastPart = urlParts[urlParts.length - 1];
+        if (lastPart && lastPart.length > 3) {
+            return 'stream_' + lastPart;
+        }
+    } catch (error) {
+        logger.debug('Failed to extract ID from URL:', error);
+    }
+
+    // 生成随机ID（6位字母数字组合）
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let randomId = '';
+    for (let i = 0; i < 6; i++) {
+        randomId += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return 'stream_' + randomId;
 }
 
 // 添加单个流
 router.post('/api/streams', async (req, res) => {
     try {
-        const { name, url } = req.body;
+        const { name, url, customId } = req.body;
         
         if (!name || !url) {
             return res.json({
@@ -32,7 +46,7 @@ router.post('/api/streams', async (req, res) => {
         }
 
         const streamData = {
-            id: generateStreamId(name),
+            id: generateStreamId(name, url, customId),
             name: name,
             url: url,
             kodiprop: '',
@@ -112,7 +126,7 @@ router.delete('/api/streams/:id', async (req, res) => {
     }
 });
 
-// 重���流
+// 重启流
 router.post('/api/streams/:id/restart', async (req, res) => {
     try {
         const { id } = req.params;
