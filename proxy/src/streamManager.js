@@ -272,29 +272,49 @@ class StreamManager {
             licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
         }
 
-        // 构建 yt-dlp 参数
-        const args = [
-            '--allow-unplayable-formats',
-            '--no-check-certificates',
-            '--no-part',
-            '--no-mtime',
-            '--no-progress',
-            '--quiet',
-            '--no-warnings',
-            '--format', 'v5000000_33',  // 直接指定格式
-            '--output', '-'  // 输出到标准输出
-        ];
+        // 先用 yt-dlp 获取真实地址
+        const realUrl = await new Promise((resolve, reject) => {
+            const args = [
+                '--no-check-certificates',
+                '--no-warnings',
+                '--quiet',
+                '--get-url',
+                '--format', 'v5000000_33'
+            ];
 
-        if (licenseKey) {
-            args.push(
-                '--add-header',
-                `X-AxDRM-Message: ${licenseKey}`,
-                '--add-header',
-                'Content-Type: application/dash+xml'
-            );
-        }
+            if (licenseKey) {
+                args.push(
+                    '--add-header',
+                    `X-AxDRM-Message: ${licenseKey}`,
+                    '--add-header',
+                    'Content-Type: application/dash+xml'
+                );
+            }
 
-        args.push(streamConfig.url);
+            args.push(streamConfig.url);
+
+            const ytdlp = spawn('yt-dlp', args);
+            let url = '';
+            let error = '';
+
+            ytdlp.stdout.on('data', (data) => {
+                url += data.toString();
+            });
+
+            ytdlp.stderr.on('data', (data) => {
+                error += data.toString();
+            });
+
+            ytdlp.on('close', (code) => {
+                if (code === 0 && url.trim()) {
+                    resolve(url.trim());
+                } else {
+                    reject(new Error(`Failed to get real URL: ${error}`));
+                }
+            });
+        });
+
+        logger.info(`Got real URL for stream ${streamId}`);
 
         return new Promise((resolve, reject) => {
             try {
@@ -306,7 +326,7 @@ class StreamManager {
 
                     // 发送 HTTP 响应头
                     socket.write('HTTP/1.1 200 OK\r\n');
-                    socket.write('Content-Type: video/mp2t\r\n');  // 使用 MPEG-TS 格式
+                    socket.write('Content-Type: video/mp2t\r\n');
                     socket.write('Cache-Control: no-cache\r\n');
                     socket.write('Connection: keep-alive\r\n');
                     socket.write('Access-Control-Allow-Origin: *\r\n');
@@ -323,23 +343,23 @@ class StreamManager {
                     });
                 });
 
-                const ytdlp = spawn('yt-dlp', args);
+                // 使用 FFmpeg 处理流
                 const ffmpeg = spawn('ffmpeg', [
-                    '-i', 'pipe:0',          // 从标准输入读取
-                    '-c:v', 'copy',          // 复制视频流
-                    '-c:a', 'aac',           // 转换音频为 AAC
-                    '-b:a', '128k',          // 音频比特率
-                    '-f', 'mpegts',          // 输出格式为 MPEG-TS
-                    '-muxdelay', '0',        // 最小化延迟
+                    '-reconnect', '1',
+                    '-reconnect_streamed', '1',
+                    '-reconnect_delay_max', '5',
+                    '-i', realUrl,
+                    '-c:v', 'copy',
+                    '-c:a', 'aac',
+                    '-b:a', '128k',
+                    '-f', 'mpegts',
+                    '-muxdelay', '0',
                     '-muxpreload', '0',
-                    '-reset_timestamps', '1', // 重置时间戳
-                    'pipe:1'                 // 输出到标准输出
+                    '-reset_timestamps', '1',
+                    'pipe:1'
                 ]);
 
-                let ytdlpError = '';
                 let ffmpegError = '';
-
-                ytdlp.stdout.pipe(ffmpeg.stdin);
 
                 ffmpeg.stdout.on('data', (data) => {
                     for (const client of clients) {
@@ -354,32 +374,14 @@ class StreamManager {
                     }
                 });
 
-                ytdlp.stderr.on('data', (data) => {
-                    ytdlpError += data.toString();
-                    logger.debug(`yt-dlp stderr: ${data.toString()}`);
-                });
-
                 ffmpeg.stderr.on('data', (data) => {
                     ffmpegError += data.toString();
                     logger.debug(`ffmpeg stderr: ${data.toString()}`);
                 });
 
-                ytdlp.on('error', (error) => {
-                    logger.error(`yt-dlp error for stream ${streamId}:`, error);
-                    this.restartStream(streamId);
-                });
-
                 ffmpeg.on('error', (error) => {
                     logger.error(`ffmpeg error for stream ${streamId}:`, error);
                     this.restartStream(streamId);
-                });
-
-                ytdlp.on('exit', (code) => {
-                    if (code !== 0) {
-                        logger.error(`yt-dlp exited with code ${code} for stream ${streamId}`);
-                        logger.error(`yt-dlp stderr: ${ytdlpError}`);
-                        this.restartStream(streamId);
-                    }
                 });
 
                 ffmpeg.on('exit', (code) => {
@@ -392,7 +394,6 @@ class StreamManager {
 
                 // 保存进程和服务器引用
                 this.streamProcesses.set(streamId, {
-                    ytdlp,
                     ffmpeg,
                     server,
                     clients,
