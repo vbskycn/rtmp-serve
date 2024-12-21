@@ -83,10 +83,10 @@ class StreamManager {
             });
 
             // 保存配置
-            await this.saveConfig();
+            await this.saveStreams();
 
             // 启动流
-            await this.startStream(streamData.id);
+            await this.startStreaming(streamData.id);
 
             return true;
         } catch (error) {
@@ -413,13 +413,13 @@ class StreamManager {
             logger.debug(`ffmpeg stderr: ${message}`);
         });
 
-        // 保存进程引用
+        // 保存程引用
         this.streamProcesses.set(streamId, {
             ytdlp,
             ffmpeg
         });
 
-        // ���理进程结束
+        // 理进程结束
         ytdlp.on('close', (code) => {
             logger.info(`yt-dlp process exited with code ${code}`);
             if (code !== 0) {
@@ -486,7 +486,7 @@ class StreamManager {
         this.healthChecks.set(streamId, checkInterval);
     }
 
-    // 添加重启流的方法
+    // 添加重启流��方法
     async restartStream(streamId) {
         try {
             await this.stopStreaming(streamId);
