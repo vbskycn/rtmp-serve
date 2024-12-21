@@ -35,7 +35,14 @@ class StreamManager {
                 const data = fs.readFileSync(this.configPath, 'utf8');
                 const configs = JSON.parse(data);
                 for (const [id, config] of Object.entries(configs)) {
-                    this.streams.set(id, config);
+                    this.streams.set(id, {
+                        ...config,
+                        stats: {
+                            startTime: null,
+                            uptime: 0,
+                            errors: 0
+                        }
+                    });
                     this.streamStats.set(id, {
                         totalRequests: 0,
                         lastAccessed: null,
@@ -52,16 +59,32 @@ class StreamManager {
     }
 
     // 保存流配置
-    saveStreams() {
+    async saveStreams() {
         try {
             const configs = {};
             for (const [id, config] of this.streams.entries()) {
-                configs[id] = config;
+                // 只保存必要的配置信息，不保存运行时状态
+                configs[id] = {
+                    name: config.name,
+                    url: config.url,
+                    kodiprop: config.kodiprop,
+                    tvg: config.tvg
+                };
             }
+            
+            // 确保配置目录存在
+            const configDir = path.dirname(this.configPath);
+            if (!fs.existsSync(configDir)) {
+                fs.mkdirSync(configDir, { recursive: true });
+            }
+            
+            // 写入配置文件
             fs.writeFileSync(this.configPath, JSON.stringify(configs, null, 2));
             logger.info(`Saved ${this.streams.size} streams to config`);
+            return true;
         } catch (error) {
             logger.error('Error saving streams config:', error);
+            throw error;
         }
     }
 
@@ -486,7 +509,7 @@ class StreamManager {
         this.healthChecks.set(streamId, checkInterval);
     }
 
-    // 添加重启流��方法
+    // 添加重启流的方法
     async restartStream(streamId) {
         try {
             await this.stopStreaming(streamId);
