@@ -111,7 +111,7 @@ class StreamManager extends EventEmitter {
         try {
             const configs = {};
             for (const [id, config] of this.streams.entries()) {
-                // 确保保存完整的流配��
+                // 确保保存完整的流配置
                 configs[id] = {
                     id: config.id,
                     name: config.name,
@@ -469,7 +469,7 @@ class StreamManager extends EventEmitter {
                             retryCount++;
                             logger.info(`Retrying stream ${streamId} (attempt ${retryCount}/${maxRetries})`);
                             setTimeout(() => {
-                                // 保持手动启动状态进行重试
+                                // 保持手动启动状态进���重试
                                 const wasManuallyStarted = this.manuallyStartedStreams.has(streamId);
                                 this.restartStream(streamId, wasManuallyStarted);
                             }, retryDelay);
@@ -574,7 +574,7 @@ class StreamManager extends EventEmitter {
                 return;
             }
 
-            // 检查失败次数
+            // 检查失败���数
             const failureCount = this.failureCount.get(streamId) || 0;
             if (failureCount >= 3) {
                 logger.info(`Stream ${streamId} has failed too many times, marking as invalid`);
@@ -676,7 +676,7 @@ class StreamManager extends EventEmitter {
 
     async stopStreaming(streamId) {
         try {
-            // 记录是否是手动启动的流，但不立即删除标记
+            // 记录是否是手动启动的流
             const wasManuallyStarted = this.manuallyStartedStreams.has(streamId);
             
             // 获取进程信息
@@ -695,10 +695,8 @@ class StreamManager extends EventEmitter {
                 // 清理进程引用
                 this.streamProcesses.delete(streamId);
                 
-                // 只有在确认进程已经完全停止后才移除手动启动标记
-                if (!processes.isManualStart) {
-                    this.manuallyStartedStreams.delete(streamId);
-                }
+                // 无条件移除手动启动标记
+                this.manuallyStartedStreams.delete(streamId);
                 
                 // 重置统计信息
                 const stats = this.streamStats.get(streamId);
@@ -729,7 +727,7 @@ class StreamManager extends EventEmitter {
                                 fs.unlinkSync(path.join(outputPath, file));
                             }
                         }
-                        // 尝试删除目��
+                        // 尝试删除目录
                         fs.rmdirSync(outputPath);
                     } catch (error) {
                         logger.error(`Error cleaning up files for stream ${streamId}:`, error);
@@ -882,7 +880,7 @@ class StreamManager extends EventEmitter {
         if (count > 0) {
             this.activeViewers.set(streamId, count - 1);
             
-            // 只有不是手动启动的��才设置自动停止定时器
+            // 只有不是手动启动的才设置自动停止定时器
             if (count - 1 === 0 && !this.manuallyStartedStreams.has(streamId)) {
                 logger.debug(`No viewers left for auto-started stream ${streamId}, starting auto-stop timer`);
                 const timer = setTimeout(async () => {
@@ -909,7 +907,7 @@ class StreamManager extends EventEmitter {
                 const uptime = Date.now() - process.startTime.getTime();
                 stats.uptime = uptime;
                 
-                // 更新流配置中的统计信息
+                // 更新流配��中的统计信息
                 const stream = this.streams.get(streamId);
                 if (stream && stream.stats) {
                     stream.stats.uptime = uptime;
