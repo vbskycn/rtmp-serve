@@ -15,6 +15,70 @@
             height: 100vh;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
+        }
+
+        .main-container {
+            display: flex;
+            height: calc(100vh - 60px);
+            margin-top: 60px;
+        }
+
+        .playlist-container {
+            width: 300px;
+            background: rgba(0, 0, 0, 0.9);
+            overflow-y: auto;
+            border-right: 1px solid #333;
+            padding: 10px;
+        }
+
+        .category-title {
+            padding: 10px;
+            background: #2c3e50;
+            margin-bottom: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .stream-list {
+            margin-left: 15px;
+            display: none;
+        }
+
+        .stream-list.active {
+            display: block;
+        }
+
+        .stream-item {
+            padding: 8px;
+            cursor: pointer;
+            border-radius: 4px;
+            margin-bottom: 2px;
+            transition: background-color 0.2s;
+        }
+
+        .stream-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .stream-item.active {
+            background: #3498db;
+        }
+
+        .player-wrapper {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #000;
+            position: relative;
+        }
+
+        #videoPlayer {
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
         }
 
         .header {
@@ -39,21 +103,6 @@
             font-size: 1.2em;
             margin: 0;
             color: #fff;
-        }
-
-        .player-container {
-            flex: 1;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            position: relative;
-            margin-top: 60px;
-        }
-
-        #videoPlayer {
-            max-width: 100%;
-            max-height: calc(100vh - 60px);
-            background: #000;
         }
 
         .controls {
@@ -133,6 +182,38 @@
             border-radius: 4px;
             display: none;
         }
+
+        /* 添加响应式设计 */
+        @media (max-width: 768px) {
+            .playlist-container {
+                position: fixed;
+                left: -300px;
+                transition: left 0.3s;
+                z-index: 1000;
+                height: 100vh;
+            }
+
+            .playlist-container.show {
+                left: 0;
+            }
+
+            .toggle-playlist {
+                display: block !important;
+            }
+        }
+
+        .toggle-playlist {
+            display: none;
+            position: fixed;
+            left: 10px;
+            bottom: 70px;
+            z-index: 1001;
+            background: rgba(0, 0, 0, 0.7);
+            border: none;
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
@@ -143,9 +224,19 @@
         </button>
     </div>
 
-    <div class="player-container">
-        <video id="videoPlayer" controls></video>
+    <div class="main-container">
+        <div class="playlist-container">
+            <div id="playlist"></div>
+        </div>
+
+        <div class="player-wrapper">
+            <video id="videoPlayer" controls></video>
+        </div>
     </div>
+
+    <button class="toggle-playlist" onclick="togglePlaylist()">
+        <i class="fa fa-list"></i>
+    </button>
 
     <div class="controls">
         <button class="control-btn" onclick="reloadPlayer()">
@@ -174,8 +265,12 @@
         const urlParams = new URLSearchParams(window.location.search);
         const streamId = urlParams.get('id');
         let hls;
+        let autoReconnectTimer = null;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 10;
+        const RECONNECT_DELAY = 5000; // 5秒后重试
 
-        // 初始化播放器
+        // 修改初始化播放器函数
         async function initPlayer() {
             try {
                 // 获取流信息
@@ -187,10 +282,25 @@
                 const playUrl = `/play/${streamId}`;
 
                 if (Hls.isSupported()) {
+                    if (hls) {
+                        hls.destroy();
+                    }
+
                     hls = new Hls({
                         debug: false,
                         enableWorker: true,
                         lowLatencyMode: true,
+                        manifestLoadingTimeOut: 10000,    // 加载超时时间
+                        manifestLoadingMaxRetry: 3,       // 最大重试次数
+                        levelLoadingTimeOut: 10000,       // 级别加载超时
+                        levelLoadingMaxRetry: 3,          // 级别加载重试
+                        fragLoadingTimeOut: 20000,        // 片段加载超时
+                        fragLoadingMaxRetry: 3,           // 片段加载重试
+                        recovery: {
+                            enabled: true,                // 启用恢复机制
+                            maxBufferHole: 0.5,           // 最大缓冲区空洞
+                            maxStarvationDelay: 5         // 最大饥饿延迟
+                        }
                     });
 
                     hls.loadSource(playUrl);
@@ -199,12 +309,28 @@
                     hls.on(Hls.Events.MANIFEST_PARSED, () => {
                         video.play();
                         document.querySelector('.loading').style.display = 'none';
+                        document.querySelector('.error-message').style.display = 'none';
+                        reconnectAttempts = 0; // 重置重连次数
                     });
 
+                    // 监听错误事件
                     hls.on(Hls.Events.ERROR, (event, data) => {
+                        console.error('HLS Error:', data);
                         if (data.fatal) {
-                            document.querySelector('.error-message').style.display = 'block';
-                            document.querySelector('.loading').style.display = 'none';
+                            switch (data.type) {
+                                case Hls.ErrorTypes.NETWORK_ERROR:
+                                    // 网络错误，尝试重连
+                                    handleStreamError();
+                                    break;
+                                case Hls.ErrorTypes.MEDIA_ERROR:
+                                    // 媒体错误，尝试恢复
+                                    handleMediaError();
+                                    break;
+                                default:
+                                    // 其他致命错误
+                                    handleFatalError();
+                                    break;
+                            }
                         }
                     });
 
@@ -226,15 +352,54 @@
                 }
             } catch (error) {
                 console.error('Error initializing player:', error);
-                document.querySelector('.error-message').style.display = 'block';
-                document.querySelector('.loading').style.display = 'none';
+                handleStreamError();
             }
         }
 
-        // 重新加载播放器
-        function reloadPlayer() {
+        // 处理流错误
+        function handleStreamError() {
+            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                reconnectAttempts++;
+                document.querySelector('.error-message').textContent = 
+                    `播放中断，正在尝试重连... (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`;
+                document.querySelector('.error-message').style.display = 'block';
+                document.querySelector('.loading').style.display = 'block';
+
+                // 清除之前的重连定时器
+                if (autoReconnectTimer) {
+                    clearTimeout(autoReconnectTimer);
+                }
+
+                // 设置新的重连定时器
+                autoReconnectTimer = setTimeout(() => {
+                    reloadPlayer();
+                }, RECONNECT_DELAY);
+            } else {
+                handleFatalError();
+            }
+        }
+
+        // 处理媒体错误
+        function handleMediaError() {
             if (hls) {
-                hls.destroy();
+                hls.recoverMediaError();
+            }
+            document.querySelector('.error-message').textContent = '正在恢复播放...';
+            document.querySelector('.error-message').style.display = 'block';
+        }
+
+        // 处理致命错误
+        function handleFatalError() {
+            document.querySelector('.error-message').textContent = '播放失败，请刷新页面重试';
+            document.querySelector('.error-message').style.display = 'block';
+            document.querySelector('.loading').style.display = 'none';
+        }
+
+        // 修改重新加载函数
+        function reloadPlayer() {
+            if (autoReconnectTimer) {
+                clearTimeout(autoReconnectTimer);
+                autoReconnectTimer = null;
             }
             document.querySelector('.loading').style.display = 'block';
             document.querySelector('.error-message').style.display = 'none';
@@ -295,6 +460,88 @@
                 fullscreenBtn.classList.add('fa-expand');
             }
         });
+
+        // 添加播放列表相关代码
+        async function loadPlaylist() {
+            try {
+                const response = await fetch('/api/streams');
+                const streams = await response.json();
+                
+                // 按分类分组
+                const categories = {};
+                streams.forEach(stream => {
+                    const category = stream.category || '未分类';
+                    if (!categories[category]) {
+                        categories[category] = [];
+                    }
+                    categories[category].push(stream);
+                });
+
+                // 渲染播放列表
+                const playlistContainer = document.getElementById('playlist');
+                playlistContainer.innerHTML = '';
+
+                for (const [category, streams] of Object.entries(categories)) {
+                    const categoryDiv = document.createElement('div');
+                    categoryDiv.className = 'category';
+                    
+                    const categoryTitle = document.createElement('div');
+                    categoryTitle.className = 'category-title';
+                    categoryTitle.innerHTML = `<i class="fa fa-folder"></i> ${category}`;
+                    categoryTitle.onclick = () => toggleCategory(categoryTitle);
+
+                    const streamList = document.createElement('div');
+                    streamList.className = 'stream-list';
+
+                    streams.forEach(stream => {
+                        const streamItem = document.createElement('div');
+                        streamItem.className = 'stream-item';
+                        if (stream.id === streamId) {
+                            streamItem.classList.add('active');
+                            streamList.classList.add('active');
+                        }
+                        streamItem.textContent = stream.name;
+                        streamItem.onclick = () => switchStream(stream.id);
+                        streamList.appendChild(streamItem);
+                    });
+
+                    categoryDiv.appendChild(categoryTitle);
+                    categoryDiv.appendChild(streamList);
+                    playlistContainer.appendChild(categoryDiv);
+                }
+            } catch (error) {
+                console.error('Error loading playlist:', error);
+            }
+        }
+
+        function toggleCategory(element) {
+            const streamList = element.nextElementSibling;
+            streamList.classList.toggle('active');
+        }
+
+        async function switchStream(newStreamId) {
+            streamId = newStreamId;
+            // 更新URL参数
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.set('id', streamId);
+            window.history.pushState({}, '', newUrl);
+            
+            // 更新活动状态
+            document.querySelectorAll('.stream-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            document.querySelector(`.stream-item[data-id="${streamId}"]`)?.classList.add('active');
+            
+            // 重新加载播放器
+            await initPlayer();
+        }
+
+        function togglePlaylist() {
+            document.querySelector('.playlist-container').classList.toggle('show');
+        }
+
+        // 在初始化时加载播放列表
+        loadPlaylist();
 
         // 启动播放器
         initPlayer();
