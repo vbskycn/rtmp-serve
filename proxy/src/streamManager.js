@@ -202,6 +202,18 @@ class StreamManager {
                           streamConfig.url.includes('/dash/') ||
                           streamConfig.url.includes('dash-');
 
+            // 获取 manifestType
+            let manifestType = null;
+            if (streamConfig.kodiprop) {
+                const match = streamConfig.kodiprop.match(/manifest_type=([^#\n]*)/);
+                if (match) {
+                    manifestType = match[1];
+                }
+            }
+            if (isDash) {
+                manifestType = 'mpd';
+            }
+
             if (isDash) {
                 logger.info(`Detected DASH stream, using yt-dlp for: ${streamId}`);
                 await this.startStreamingWithYtdlp(streamId, streamConfig);
@@ -291,8 +303,8 @@ class StreamManager {
                 inputOptions,
                 outputOptions,
                 url: streamConfig.url,
-                manifestType,
-                licenseKey: licenseKey ? '(present)' : '(not present)'
+                manifestType: manifestType || 'unknown',
+                licenseKey: streamConfig.kodiprop?.includes('license_key') ? '(present)' : '(not present)'
             });
 
             // 创建新的 ffmpeg 进程
@@ -441,7 +453,7 @@ class StreamManager {
             `${outputPath}/playlist.m3u8`
         ]);
 
-        // 连接进程
+        // 连接进���
         ytdlp.stdout.pipe(ffmpeg.stdin);
 
         // 错误处理
