@@ -12,6 +12,7 @@ class StreamManager {
         this.streamStats = new Map();
         this.healthChecks = new Map();
         this.configPath = path.join(__dirname, '../config/streams.json');
+        this.serverPorts = new Map();
         
         // 创建配置目录
         const configDir = path.dirname(this.configPath);
@@ -148,22 +149,21 @@ class StreamManager {
                 logger.warn(`Stream not found: ${streamId}`);
                 return null;
             }
-            
-            // 更新访问统计
-            const stats = this.streamStats.get(streamId);
-            if (stats) {
-                stats.totalRequests++;
-                stats.lastAccessed = new Date();
+
+            // 获取端口
+            const port = this.serverPorts.get(streamId);
+            if (!port) {
+                logger.warn(`Port not found for stream: ${streamId}`);
+                return null;
             }
 
-            // 检查流是否正在运行，如果没有运行则启动它
+            // 检查流是否正在运行
             if (!this.streamProcesses.has(streamId)) {
                 logger.info(`Starting stream ${streamId} on demand`);
                 await this.startStreaming(streamId);
             }
 
-            // 返回流服务器的地址
-            return `http://127.0.0.1:${stream.serverPort}`;
+            return `http://127.0.0.1:${port}`;
         } catch (error) {
             logger.error(`Error getting stream URL: ${streamId}`, error);
             return null;
@@ -239,74 +239,30 @@ class StreamManager {
 
     async startStreamingWithYtdlp(streamId, streamConfig) {
         const { spawn } = require('child_process');
-        const outputPath = path.join(__dirname, '../streams', streamId);
+        const net = require('net');
         
-        if (!fs.existsSync(outputPath)) {
-            fs.mkdirSync(outputPath, { recursive: true });
-        }
-
         // 如果已经有进程在运行，先停止它
         if (this.streamProcesses.has(streamId)) {
             await this.stopStreaming(streamId);
         }
 
+        // 先创建服务器并获取端口
+        const server = net.createServer();
+        const port = await new Promise((resolve) => {
+            server.listen(0, '127.0.0.1', () => {
+                const port = server.address().port;
+                resolve(port);
+            });
+        });
+
+        // 保存端口信息
+        this.serverPorts.set(streamId, port);
+        logger.info(`Created stream server on port ${port} for stream ${streamId}`);
+
         // 解析 license_key
         let licenseKey = null;
         if (streamConfig.kodiprop?.includes('license_key')) {
             licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
-        }
-
-        // 首先获取可用格式
-        const formatArgs = [
-            '--no-check-certificates',
-            '--allow-unplayable-formats',
-            '--list-formats'
-        ];
-
-        if (licenseKey) {
-            formatArgs.push(
-                '--add-header',
-                `X-AxDRM-Message: ${licenseKey}`,
-                '--add-header',
-                'Content-Type: application/dash+xml'
-            );
-        }
-
-        formatArgs.push(streamConfig.url);
-
-        // 获取可用格式
-        let format = 'best';
-        try {
-            const formatProcess = spawn('yt-dlp', formatArgs);
-            let formatOutput = '';
-            
-            await new Promise((resolve, reject) => {
-                formatProcess.stdout.on('data', (data) => {
-                    formatOutput += data.toString();
-                });
-                
-                formatProcess.stderr.on('data', (data) => {
-                    logger.debug(`Format check stderr: ${data}`);
-                });
-                
-                formatProcess.on('close', (code) => {
-                    if (code === 0) {
-                        // 解析输出找到最佳格式
-                        const lines = formatOutput.split('\n');
-                        for (const line of lines) {
-                            if (line.includes('v5000000_33')) {
-                                format = 'v5000000_33';
-                                break;
-                            }
-                        }
-                        resolve();
-                    } else {
-                        reject(new Error(`Format check failed with code ${code}`));
-                    }
-                });
-            });
-        } catch (error) {
-            logger.error(`Error checking formats: ${error}`);
         }
 
         // 构建 yt-dlp 参数
@@ -320,10 +276,9 @@ class StreamManager {
             '--no-warnings',
             '--live-from-start',
             '--no-playlist-reverse',
-            '--format', format,  // 使用找到的格式
+            '--output', '-'  // 输出到标准输出
         ];
 
-        // 添加 DRM 解密头
         if (licenseKey) {
             args.push(
                 '--add-header',
@@ -333,39 +288,12 @@ class StreamManager {
             );
         }
 
-        // 添加 User-Agent
-        args.push(
-            '--add-header',
-            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        );
-
-        // 添加源 URL
         args.push(streamConfig.url);
-
-        logger.info(`Starting yt-dlp for stream: ${streamId} with URL: ${streamConfig.url}`);
-        logger.debug(`yt-dlp args: ${args.join(' ')}`);
 
         return new Promise((resolve, reject) => {
             try {
-                // 启动 yt-dlp 进程
-                const ytdlp = spawn('yt-dlp', args, {
-                    stdio: ['ignore', 'pipe', 'pipe']  // 忽略标准输入，管道输出和错误
-                });
-                let ytdlpError = '';
-                
-                // 创建一个 TCP 服务器来处理直播流
-                const net = require('net');
-                const server = net.createServer();
                 const clients = new Set();
                 
-                server.listen(0, '127.0.0.1', () => {
-                    const port = server.address().port;
-                    logger.info(`Stream server listening on port ${port} for stream ${streamId}`);
-                    
-                    // 保存服务器信息��流配置中
-                    this.streams.get(streamId).serverPort = port;
-                });
-
                 server.on('connection', (socket) => {
                     clients.add(socket);
                     logger.debug(`New client connected to stream ${streamId}`);
@@ -381,9 +309,10 @@ class StreamManager {
                     });
                 });
 
-                // 处理 yt-dlp 输出
+                const ytdlp = spawn('yt-dlp', args);
+                let ytdlpError = '';
+
                 ytdlp.stdout.on('data', (data) => {
-                    // 向所有连接的客户端发送数据
                     for (const client of clients) {
                         try {
                             if (!client.destroyed) {
@@ -397,20 +326,9 @@ class StreamManager {
                 });
 
                 ytdlp.stderr.on('data', (data) => {
-                    const message = data.toString();
-                    ytdlpError += message;
-                    logger.debug(`yt-dlp stderr: ${message}`);
+                    ytdlpError += data.toString();
                 });
 
-                // 保存进程和服务器引用
-                this.streamProcesses.set(streamId, {
-                    ytdlp,
-                    server,
-                    clients,
-                    startTime: new Date()
-                });
-
-                // 错误处理
                 ytdlp.on('error', (error) => {
                     logger.error(`yt-dlp error for stream ${streamId}:`, error);
                     this.restartStream(streamId);
@@ -424,17 +342,23 @@ class StreamManager {
                     }
                 });
 
-                // 标记流为已启动
-                resolve();
+                // 保存进程和服务器引用
+                this.streamProcesses.set(streamId, {
+                    ytdlp,
+                    server,
+                    clients,
+                    port,
+                    startTime: new Date()
+                });
 
+                resolve();
             } catch (error) {
-                logger.error(`Failed to start stream ${streamId}:`, error);
                 reject(error);
             }
         });
     }
 
-    // 添加清理旧分��的方法
+    // 添加清理旧分的方法
     async cleanupOldSegments(outputPath) {
         try {
             const files = fs.readdirSync(outputPath);
@@ -586,6 +510,7 @@ class StreamManager {
                     }
                 }
                 this.streamProcesses.delete(streamId);
+                this.serverPorts.delete(streamId);
                 logger.info(`Stream stopped: ${streamId}`);
             }
         } catch (error) {
