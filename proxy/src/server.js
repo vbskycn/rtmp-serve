@@ -35,24 +35,23 @@ app.use(express.static(path.join(__dirname, '../admin')));
 // 设置管理路由
 app.use(adminRoutes);
 
-// 播放���由
+// 播放路由
 app.get('/play/:streamId', async (req, res) => {
     try {
         const { streamId } = req.params;
-        const streamUrl = await streamManager.getStreamUrl(streamId);
+        const stream = streamManager.streams.get(streamId);
         
-        if (!streamUrl) {
+        if (!stream) {
             return res.status(404).send('Stream not found');
         }
-        
-        // 直接代理流数据
-        const http = require('http');
-        http.get(streamUrl, (stream) => {
-            stream.pipe(res);
-        }).on('error', (error) => {
-            logger.error('Error proxying stream:', error);
-            res.status(500).send('Stream error');
-        });
+
+        // 如果流没有运行，启动它
+        if (!streamManager.streamProcesses.has(streamId)) {
+            await streamManager.startStreaming(streamId);
+        }
+
+        // 重定向到 HLS 播放列表
+        res.redirect(`/streams/${streamId}/playlist.m3u8`);
     } catch (error) {
         logger.error('Error serving stream:', error);
         res.status(500).send('Internal Server Error');
@@ -76,9 +75,17 @@ app.get('/streams/:streamId/playlist.m3u8', async (req, res) => {
         }
         
         if (fs.existsSync(playlistPath)) {
+            // 读取并修改 m3u8 文件内容
+            let content = fs.readFileSync(playlistPath, 'utf8');
+            
+            // 替换分片路径为完整 URL
+            content = content.replace(/segment_\d+\.ts/g, (match) => {
+                return `/streams/${streamId}/${match}`;
+            });
+
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
             res.setHeader('Cache-Control', 'no-cache');
-            res.sendFile(playlistPath);
+            res.send(content);
         } else {
             res.status(404).send('Stream not found');
         }
