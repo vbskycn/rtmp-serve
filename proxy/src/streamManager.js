@@ -243,48 +243,29 @@ class StreamManager {
             licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
         }
 
-        // 构建 yt-dlp 参数
+        // 构建 yt-dlp 参数，使用与测试命令相同的参数
         const args = [
-            '--no-check-certificates',
             '--allow-unplayable-formats',
-            '--no-part',
-            '--no-mtime',
-            '--live-from-start',
-            '--no-playlist-reverse',
-            '--force-generic-extractor',
-            '--concurrent-fragments', '1',
+            '--no-check-certificates'
         ];
 
         // 添加 DRM 解密头
         if (licenseKey) {
             args.push(
                 '--add-header',
-                `X-AxDRM-Message: ${licenseKey}`,
-                '--add-header',
-                'Content-Type: application/dash+xml'
+                `X-AxDRM-Message: ${licenseKey}`
             );
         }
 
-        // 添加 User-Agent
+        // 添加其他必要参数
         args.push(
-            '--add-header',
-            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        );
-
-        // 设置格式和输出
-        args.push(
-            '--format', 'best[protocol=dash]/best[protocol=hls]/best',  // 优先选择 DASH 或 HLS 格式
-            '--no-check-formats',
-            '--retries', '3',
-            '--fragment-retries', '3',
             '--no-part',
             '--no-mtime',
-            '--verbose',
-            '--dump-pages',
             '--no-progress',
+            '--quiet',
             '--no-warnings',
-            '--no-simulate',  // 实际下载而不是模拟
-            '--output', '-'   // 输出到标准输出
+            '--no-simulate',
+            '--output', '-'
         );
 
         // 添加源 URL
@@ -299,7 +280,6 @@ class StreamManager {
                 const ytdlp = spawn('yt-dlp', args);
                 let ytdlpError = '';
                 let ffmpegError = '';
-                let ytdlpOutput = '';
                 
                 // 启动 FFmpeg 进程
                 const ffmpeg = spawn('ffmpeg', [
@@ -322,11 +302,6 @@ class StreamManager {
                     logger.debug(`yt-dlp stderr: ${message}`);
                 });
 
-                ytdlp.stdout.on('data', (data) => {
-                    ytdlpOutput += data.toString();
-                    logger.debug(`yt-dlp stdout: ${data.toString()}`);
-                });
-
                 ffmpeg.stderr.on('data', (data) => {
                     const message = data.toString();
                     ffmpegError += message;
@@ -347,7 +322,6 @@ class StreamManager {
                 const timeout = setTimeout(() => {
                     if (!fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
                         logger.error(`Stream ${streamId} failed to start within timeout.`);
-                        logger.error(`yt-dlp output: ${ytdlpOutput}`);
                         logger.error(`yt-dlp errors: ${ytdlpError}`);
                         logger.error(`ffmpeg errors: ${ffmpegError}`);
                         this.stopStreaming(streamId);
@@ -368,7 +342,6 @@ class StreamManager {
                 // 错误处理
                 ytdlp.on('error', (error) => {
                     logger.error(`yt-dlp error for stream ${streamId}:`, error);
-                    logger.error(`yt-dlp output: ${ytdlpOutput}`);
                     logger.error(`yt-dlp stderr: ${ytdlpError}`);
                     clearInterval(checkInterval);
                     clearTimeout(timeout);
@@ -378,7 +351,6 @@ class StreamManager {
                 ytdlp.on('exit', (code) => {
                     logger.info(`yt-dlp process exited with code ${code} for stream ${streamId}`);
                     if (code !== 0) {
-                        logger.error(`yt-dlp output: ${ytdlpOutput}`);
                         logger.error(`yt-dlp stderr: ${ytdlpError}`);
                     }
                 });
@@ -541,7 +513,7 @@ class StreamManager {
                 const stats = this.streamStats.get(streamId);
                 const outputPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
                 
-                // 检查文件是否存���且最近5分钟内更新
+                // 检查文件是否存在且最近5分钟内更新
                 const fileStats = fs.statSync(outputPath);
                 const isHealthy = (Date.now() - fileStats.mtimeMs) < 5 * 60 * 1000;
                 
