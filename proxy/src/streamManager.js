@@ -196,163 +196,9 @@ class StreamManager {
             stats.errors = 0;
             configStats.errors = 0;
 
-            // 检查是否是 DASH/MPD 流
-            const isDash = streamConfig.url.includes('.mpd') || 
-                          streamConfig.kodiprop?.includes('manifest_type=mpd') ||
-                          streamConfig.url.includes('/dash/') ||
-                          streamConfig.url.includes('dash-');
-
-            // 获取 manifestType
-            let manifestType = null;
-            if (streamConfig.kodiprop) {
-                const match = streamConfig.kodiprop.match(/manifest_type=([^#\n]*)/);
-                if (match) {
-                    manifestType = match[1];
-                }
-            }
-            if (isDash) {
-                manifestType = 'mpd';
-            }
-
-            if (isDash) {
-                logger.info(`Detected DASH stream, using yt-dlp for: ${streamId}`);
-                await this.startStreamingWithYtdlp(streamId, streamConfig);
-                return;
-            }
-
-            // 检查流的可访问性
-            try {
-                const response = await axios.head(streamConfig.url, {
-                    timeout: 5000,
-                    maxRedirects: 5,
-                    validateStatus: null,
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                    }
-                });
-
-                if (response.status === 404) {
-                    throw new Error('Stream URL returned 404 Not Found');
-                }
-
-                if (response.status >= 400) {
-                    throw new Error(`Stream URL returned status ${response.status}`);
-                }
-
-                // 如果有重定向，使用最终的 URL
-                if (response.request?.res?.responseUrl) {
-                    streamConfig.url = response.request.res.responseUrl;
-                }
-            } catch (error) {
-                logger.error(`Error checking stream URL: ${streamId}`, { error });
-                // 如果 URL 检查失败，尝试使用 yt-dlp
-                logger.info(`Falling back to yt-dlp for: ${streamId}`);
-                await this.startStreamingWithYtdlp(streamId, streamConfig);
-                return;
-            }
-
-            const outputPath = path.join(__dirname, '../streams', streamId);
-            if (!fs.existsSync(outputPath)) {
-                fs.mkdirSync(outputPath, { recursive: true });
-            }
-
-            // FFmpeg 输入选项
-            const inputOptions = [
-                '-reconnect', '1',
-                '-reconnect_streamed', '1',
-                '-reconnect_delay_max', '5',
-                '-timeout', '15000000',
-                '-allowed_extensions', 'ALL',
-                '-y',
-                '-nostdin',
-                '-loglevel', 'warning',  // 改为 warning 级别减少日志
-                '-protocol_whitelist', 'file,http,https,tcp,tls,crypto,data',
-                '-re',
-                '-fflags', '+genpts+igndts',
-                '-analyzeduration', '15000000',
-                '-probesize', '15000000'
-            ];
-
-            // 如果有 license key，添加相关头信息
-            if (streamConfig.kodiprop?.includes('license_key')) {
-                const licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
-                if (licenseKey) {
-                    inputOptions.push(
-                        '-headers', 
-                        `X-AxDRM-Message: ${licenseKey}\r\nContent-Type: application/dash+xml\r\n`
-                    );
-                }
-            }
-
-            // 修改输出选项
-            const outputOptions = [
-                '-c:v', 'copy',
-                '-c:a', 'copy',
-                '-f', 'hls',
-                '-hls_time', '2',
-                '-hls_list_size', '6',
-                '-hls_flags', 'delete_segments+append_list+independent_segments',
-                '-hls_segment_type', 'mpegts',
-                '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
-                '-max_muxing_queue_size', '2048',
-                '-avoid_negative_ts', 'make_zero'
-            ];
-
-            logger.info(`Starting stream with options:`, {
-                streamId,
-                inputOptions,
-                outputOptions,
-                url: streamConfig.url,
-                manifestType: manifestType || 'unknown',
-                licenseKey: streamConfig.kodiprop?.includes('license_key') ? '(present)' : '(not present)'
-            });
-
-            // 创建新的 ffmpeg 进程
-            const process = ffmpeg(streamConfig.url)
-                .inputOptions(inputOptions)
-                .outputOptions(outputOptions)
-                .output(`${outputPath}/playlist.m3u8`)
-                .on('start', (commandLine) => {
-                    logger.info(`FFmpeg command: ${commandLine}`);
-                })
-                .on('stderr', (stderrLine) => {
-                    // 记录所有输出以便调试
-                    logger.debug(`FFmpeg output: ${stderrLine}`);
-                    
-                    if (stderrLine.includes('Error') || 
-                        stderrLine.includes('Failed') || 
-                        stderrLine.includes('SIGSEGV') ||
-                        stderrLine.includes('Invalid') ||
-                        stderrLine.includes('No such')) {
-                        logger.error(`FFmpeg stderr: ${stderrLine}`);
-                    }
-                })
-                .on('error', (err) => {
-                    logger.error(`Stream ${streamId} error:`, { 
-                        error: err.message,
-                        stack: err.stack,
-                        ffmpegError: err.toString()
-                    });
-                    
-                    if (stats) stats.errors++;
-                    if (configStats) configStats.errors++;
-                    
-                    this.streamProcesses.delete(streamId);
-                    
-                    if (err.message.includes('SIGSEGV')) {
-                        logger.info('Attempting to use yt-dlp as fallback');
-                        this.startStreamingWithYtdlp(streamId, streamConfig);
-                    } else {
-                        const retryDelay = 5000;
-                        setTimeout(() => this.startStreaming(streamId), retryDelay);
-                    }
-                });
-
-            process.run();
-            this.streamProcesses.set(streamId, process);
-            logger.info(`Stream started: ${streamId}`);
-
-            await this.waitForStream(streamId, outputPath);
+            // 默认使用 yt-dlp 处理所有流
+            logger.info(`Using yt-dlp for stream: ${streamId}`);
+            await this.startStreamingWithYtdlp(streamId, streamConfig);
 
         } catch (error) {
             logger.error(`Error starting stream: ${streamId}`, { 
@@ -378,7 +224,7 @@ class StreamManager {
         }
     }
 
-    async startStreamingWithYtdlp(streamId, streamConfig, licenseKey) {
+    async startStreamingWithYtdlp(streamId, streamConfig) {
         const { spawn } = require('child_process');
         const outputPath = path.join(__dirname, '../streams', streamId);
         
@@ -388,7 +234,6 @@ class StreamManager {
 
         // 构建 yt-dlp 参数
         const args = [
-            '--verbose',                    // 添加详细输出
             '--no-check-certificates',
             '--allow-unplayable-formats',
             '--no-part',
@@ -400,13 +245,16 @@ class StreamManager {
         ];
 
         // 添加 DRM 解密头
-        if (streamConfig.inputstream?.adaptive?.license_key) {
-            args.push(
-                '--add-header',
-                `X-AxDRM-Message: ${streamConfig.inputstream.adaptive.license_key}`,
-                '--add-header',
-                'Content-Type: application/dash+xml'
-            );
+        if (streamConfig.kodiprop?.includes('license_key')) {
+            const licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
+            if (licenseKey) {
+                args.push(
+                    '--add-header',
+                    `X-AxDRM-Message: ${licenseKey}`,
+                    '--add-header',
+                    'Content-Type: application/dash+xml'
+                );
+            }
         }
 
         // 添加 User-Agent
@@ -453,7 +301,7 @@ class StreamManager {
             `${outputPath}/playlist.m3u8`
         ]);
 
-        // 连接进���
+        // 连接进程
         ytdlp.stdout.pipe(ffmpeg.stdin);
 
         // 错误处理
@@ -467,18 +315,18 @@ class StreamManager {
             logger.debug(`ffmpeg stderr: ${message}`);
         });
 
-        // 保存程引用
+        // 保存进程引用
         this.streamProcesses.set(streamId, {
             ytdlp,
             ffmpeg
         });
 
-        // 理进程结束
+        // 处理进程结束
         ytdlp.on('close', (code) => {
             logger.info(`yt-dlp process exited with code ${code}`);
             if (code !== 0) {
                 logger.error(`yt-dlp failed for stream: ${streamId}`);
-                this.restartStream(streamId);
+                setTimeout(() => this.restartStream(streamId), 5000);
             }
         });
 
@@ -486,7 +334,7 @@ class StreamManager {
             logger.info(`ffmpeg process exited with code ${code}`);
             if (code !== 0) {
                 logger.error(`ffmpeg failed for stream: ${streamId}`);
-                this.restartStream(streamId);
+                setTimeout(() => this.restartStream(streamId), 5000);
             }
         });
 
