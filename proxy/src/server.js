@@ -7,6 +7,19 @@ const { setupAdminRoutes } = require('./adminRoutes');
 const app = express();
 const port = process.env.PORT || 3000;
 
+// 添加错误处理中间件
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).send('Something broke!');
+});
+
+// 添加请求超时处理
+app.use((req, res, next) => {
+    req.setTimeout(5000000);
+    res.setTimeout(5000000);
+    next();
+});
+
 // 设置 ffmpeg 路径
 ffmpeg.setFfmpegPath(require('ffmpeg-static'));
 

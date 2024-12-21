@@ -109,13 +109,33 @@ class StreamManager {
             stats.startTime = new Date();
             stats.errors = 0;
 
+            // 修改 inputOptions，添加更多的错误处理选项
             const inputOptions = [
                 '-reconnect', '1',
                 '-reconnect_streamed', '1',
                 '-reconnect_delay_max', '5',
                 '-timeout', '15000000',
                 '-allowed_extensions', 'ALL',
-                '-y'
+                '-y',
+                '-nostdin',
+                '-xerror',
+                '-loglevel', 'warning',
+                '-rw_timeout', '15000000',
+                '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            ];
+
+            // 修改输出选项
+            const outputOptions = [
+                '-c:v', 'copy',
+                '-c:a', 'copy',
+                '-f', 'hls',
+                '-hls_time', '2',
+                '-hls_list_size', '6',
+                '-hls_flags', 'delete_segments+append_list+independent_segments',
+                '-hls_segment_type', 'mpegts',
+                '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
+                '-max_muxing_queue_size', '1024',
+                '-avoid_negative_ts', 'make_zero'
             ];
 
             // 检查是否是 MPD 流
@@ -189,18 +209,6 @@ class StreamManager {
                 }
             }
 
-            // 修改输出选项以处理 HEVC/H.265
-            const outputOptions = [
-                '-c:v', 'copy',
-                '-c:a', 'copy',
-                '-f', 'hls',
-                '-hls_time', '2',
-                '-hls_list_size', '6',
-                '-hls_flags', 'delete_segments+append_list+independent_segments',
-                '-hls_segment_type', 'mpegts',
-                '-hls_segment_filename', `${outputPath}/segment_%d.ts`
-            ];
-
             // 如果是加密流，添加解密选项
             if (streamConfig.inputstream?.adaptive?.license_type === 'clearkey') {
                 outputOptions.push(
@@ -232,11 +240,12 @@ class StreamManager {
                     logger.info(`FFmpeg command: ${commandLine}`);
                 })
                 .on('stderr', (stderrLine) => {
-                    // 只记录重要的错误信息
-                    if (stderrLine.includes('Error') || stderrLine.includes('Failed')) {
+                    if (stderrLine.includes('Error') || 
+                        stderrLine.includes('Failed') || 
+                        stderrLine.includes('SIGSEGV')) {
                         logger.error(`FFmpeg stderr: ${stderrLine}`);
-                    } else {
-                        logger.debug(`FFmpeg stderr: ${stderrLine}`);
+                        // 如果检测到严重错误，立即重启流
+                        this.restartStream(streamId);
                     }
                 })
                 .on('progress', (progress) => {
@@ -266,7 +275,7 @@ class StreamManager {
             this.streamProcesses.set(streamId, process);
             logger.info(`Stream started: ${streamId}`);
 
-            // 等待检查流是否成功启动
+            // ��待检查流是否成功启动
             await this.waitForStream(streamId, outputPath);
 
         } catch (error) {
