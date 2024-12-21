@@ -272,7 +272,7 @@ function parseM3U(content) {
         line = line.trim();
         if (!line) continue;
 
-        // 检查是否是分类标记行
+        // 检查是否是分类行
         if (line.endsWith('#genre#')) {
             currentCategory = line.split(',')[0].trim();
             continue;
@@ -397,6 +397,27 @@ router.get('/api/streams/:streamId', async (req, res) => {
             success: false,
             error: error.message
         });
+    }
+});
+
+// 修改获取系统统计信息的路由
+router.get('/api/stats', (req, res) => {
+    try {
+        const trafficStats = streamManager.getTrafficStats();
+        const stats = {
+            uptime: process.uptime() * 1000, // 转换为毫秒
+            totalStreams: streamManager.streams.size,
+            activeStreams: streamManager.streamProcesses.size,
+            totalBandwidth: streamManager.streamProcesses.size * 2, // 假设每个流2MB/s
+            traffic: {
+                sent: trafficStats.sent,
+                received: trafficStats.received
+            }
+        };
+        res.json(stats);
+    } catch (error) {
+        logger.error('Error getting system stats:', error);
+        res.status(500).json({ error: 'Failed to get system stats' });
     }
 });
 

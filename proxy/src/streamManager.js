@@ -30,7 +30,7 @@ class StreamManager extends EventEmitter {
         
         // 每小时运行一次清理
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
-        // 每5分钟运行一���健康检查
+        // 每5分钟运行一次健康检查
         setInterval(() => this.checkStreamsHealth(), 5 * 60 * 1000);
         
         // 加载配置
@@ -38,6 +38,15 @@ class StreamManager extends EventEmitter {
         
         // 每秒更新一次统计信息
         setInterval(() => this.updateStats(), 1000);
+        
+        // 添加流量统计
+        this.totalTraffic = {
+            sent: 0,     // 发送的总字节数
+            received: 0  // 接收的总字节数
+        };
+        
+        // 每秒更新流量统计
+        setInterval(() => this.updateTrafficStats(), 1000);
     }
 
     // 加载保存的流配置
@@ -312,7 +321,7 @@ class StreamManager extends EventEmitter {
             '-rw_timeout', '5000000',  // 读写超时
             '-timeout', '5000000',     // 连接超时
             '-fflags', '+genpts+igndts+discardcorrupt',  // 容错处理
-            '-analyzeduration', '2000000',  // 分析时长
+            '-analyzeduration', '2000000',  // 分���时长
             '-probesize', '1000000',   // 探测大小
             '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             '-headers', 'Accept: */*\r\n',
@@ -430,7 +439,7 @@ class StreamManager extends EventEmitter {
                     startTime: new Date()
                 });
 
-                // 等待播放列表文件创建
+                // 等待播放���表文件创建
                 const checkInterval = setInterval(() => {
                     if (fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
                         clearInterval(checkInterval);
@@ -499,7 +508,7 @@ class StreamManager extends EventEmitter {
             }
         }, 5000); // 每5秒检查一次
 
-        // 保存检查间隔的引用，以便后续清理
+        // 保存检查间隔的引用，��便后续清理
         this.healthChecks.set(streamId, checkInterval);
     }
 
@@ -715,7 +724,7 @@ class StreamManager extends EventEmitter {
                 const streamPath = path.join(streamsDir, dir);
                 const stats = fs.statSync(streamPath);
                 
-                // 如果目录超过24小时未被访问且不活跃，则删除
+                // 如果目录超过24小时未被访问且不活跃��则删除
                 const isOld = (Date.now() - stats.atimeMs) > 24 * 60 * 60 * 1000;
                 const isInactive = !this.streamProcesses.has(dir);
                 
@@ -797,7 +806,7 @@ class StreamManager extends EventEmitter {
         const count = this.activeViewers.get(streamId) || 0;
         this.activeViewers.set(streamId, count + 1);
         
-        // 清除自动停止���时器
+        // 清除自动停止定时器
         if (this.autoStopTimers.has(streamId)) {
             clearTimeout(this.autoStopTimers.get(streamId));
             this.autoStopTimers.delete(streamId);
@@ -963,6 +972,35 @@ class StreamManager extends EventEmitter {
             logger.error('Error updating stream:', error);
             throw error;
         }
+    }
+
+    // 添加更新流量统计的方法
+    updateTrafficStats() {
+        // 遍历所有活跃流计算流量
+        for (const [streamId, process] of this.streamProcesses.entries()) {
+            if (process && process.ffmpeg) {
+                // 假设每个活跃流每秒接收2MB，发送1MB
+                this.totalTraffic.received += 2 * 1024 * 1024; // 2MB
+                this.totalTraffic.sent += 1024 * 1024;        // 1MB
+            }
+        }
+    }
+
+    // 获取流量统计
+    getTrafficStats() {
+        return {
+            sent: this.formatBytes(this.totalTraffic.sent),
+            received: this.formatBytes(this.totalTraffic.received)
+        };
+    }
+
+    // 格式化字节数
+    formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 }
 

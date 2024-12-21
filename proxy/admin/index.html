@@ -109,7 +109,7 @@
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">流媒体管理系统v1.1.25</h1>
+        <h1 class="text-center mb-4">流媒体管理系统v1.1.26</h1>
 
         <!-- 仪表盘 -->
         <div class="dashboard">
@@ -128,6 +128,14 @@
             <div class="stat-card">
                 <div class="stat-value" id="systemUptime">0天</div>
                 <div class="stat-label">系统运行时间</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="trafficReceived">0 B</div>
+                <div class="stat-label">总接收流量</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="trafficSent">0 B</div>
+                <div class="stat-label">总发送流量</div>
             </div>
         </div>
 
@@ -256,6 +264,31 @@
                 const tbody = document.querySelector('#streamTable');
                 tbody.innerHTML = '';
 
+                // 更新仪表盘
+                document.getElementById('totalStreams').textContent = streams.length;
+                
+                // 获取活跃流的数量
+                const activeStreams = streams.filter(stream => {
+                    return stream.processRunning || stream.stats?.startTime;
+                });
+                document.getElementById('activeStreams').textContent = activeStreams.length;
+
+                // 计算总带宽使用（假设每个活跃流使用2MB/s）
+                const totalBandwidth = activeStreams.length * 2;
+                document.getElementById('totalBandwidth').textContent = `${totalBandwidth} MB/s`;
+
+                // 获取系统运行时间
+                try {
+                    const statsResponse = await fetch('/api/stats');
+                    const statsData = await statsResponse.json();
+                    const uptime = formatUptime(statsData.uptime);
+                    document.getElementById('systemUptime').textContent = uptime;
+                    document.getElementById('trafficReceived').textContent = statsData.traffic.received;
+                    document.getElementById('trafficSent').textContent = statsData.traffic.sent;
+                } catch (error) {
+                    console.error('Error loading system stats:', error);
+                }
+
                 // 按分类分组
                 const groupedStreams = {};
                 streams.forEach(stream => {
@@ -266,9 +299,6 @@
                     groupedStreams[category].push(stream);
                 });
 
-                // 更新仪表盘
-                document.getElementById('totalStreams').textContent = streams.length;
-                
                 // 渲染分组后的流列表
                 for (const [category, categoryStreams] of Object.entries(groupedStreams)) {
                     // 添加分类标题行
@@ -346,7 +376,7 @@
                                     <i class="fa fa-stop"></i> 停止
                                 </button>
                                 <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
-                                    <i class="fa fa-trash"></i> 删除
+                                    <i class="fa fa-trash"></i> ��除
                                 </button>
                             </td>
                         `;
@@ -561,7 +591,7 @@
             }
         }
 
-        // 批量导入处理
+        // 批量导入处
         document.getElementById('batchImportForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
