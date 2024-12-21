@@ -2,5 +2,8 @@
     "server": {
         "host": "47.243.164.1",
         "port": 3000
+    },
+    "stream": {
+        "autoStopTimeout": 180000  // 3分钟，单位毫秒
     }
 } 

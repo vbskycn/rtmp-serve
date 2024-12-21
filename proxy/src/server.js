@@ -35,7 +35,7 @@ app.use(express.static(path.join(__dirname, '../admin')));
 // 设置管理路由
 app.use(adminRoutes);
 
-// 播放路由
+// 播放���由
 app.get('/play/:streamId', async (req, res) => {
     try {
         const { streamId } = req.params;
@@ -75,12 +75,20 @@ app.get('/streams/:streamId/playlist.m3u8', async (req, res) => {
         }
         
         if (fs.existsSync(playlistPath)) {
+            // 添加观看者
+            streamManager.addViewer(streamId);
+            
             // 读取并修改 m3u8 文件内容
             let content = fs.readFileSync(playlistPath, 'utf8');
             
             // 替换分片路径为完整 URL
             content = content.replace(/segment_\d+\.ts/g, (match) => {
                 return `/streams/${streamId}/${match}`;
+            });
+
+            // 监听连接关闭
+            res.on('close', () => {
+                streamManager.removeViewer(streamId);
             });
 
             res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');

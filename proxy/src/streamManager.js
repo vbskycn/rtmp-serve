@@ -14,6 +14,8 @@ class StreamManager {
         this.configPath = path.join(__dirname, '../config/streams.json');
         this.serverPorts = new Map();
         this.failureCount = new Map();
+        this.activeViewers = new Map();
+        this.autoStopTimers = new Map();
         
         // 创建配置目录
         const configDir = path.dirname(this.configPath);
@@ -28,6 +30,9 @@ class StreamManager {
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
         // 每5分钟运行一次健康检查
         setInterval(() => this.checkStreamsHealth(), 5 * 60 * 1000);
+        
+        // 加载配置
+        this.config = require('../config/config.json');
     }
 
     // 加载保存的流配置
@@ -164,23 +169,11 @@ class StreamManager {
             if (!this.streamProcesses.has(streamId)) {
                 logger.info(`Starting stream ${streamId} on demand`);
                 await this.startStreaming(streamId);
-                
-                // 等待端口分配
-                let attempts = 0;
-                while (!this.serverPorts.has(streamId) && attempts < 10) {
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    attempts++;
-                }
             }
 
-            // 获取端口
-            const port = this.serverPorts.get(streamId);
-            if (!port) {
-                logger.error(`Port not found for stream: ${streamId}`);
-                return null;
-            }
-
-            return `http://127.0.0.1:${port}`;
+            // 添加观看者
+            this.addViewer(streamId);
+            return `/streams/${streamId}/playlist.m3u8`;
         } catch (error) {
             logger.error(`Error getting stream URL: ${streamId}`, error);
             return null;
@@ -581,6 +574,15 @@ class StreamManager {
 
     async stopStreaming(streamId) {
         try {
+            // 清除自动停止定时器
+            if (this.autoStopTimers.has(streamId)) {
+                clearTimeout(this.autoStopTimers.get(streamId));
+                this.autoStopTimers.delete(streamId);
+            }
+            
+            // 清除观看者计数
+            this.activeViewers.delete(streamId);
+            
             const processes = this.streamProcesses.get(streamId);
             if (processes) {
                 // 停止 FFmpeg 进程
@@ -594,11 +596,22 @@ class StreamManager {
                 // 清理流程序引用
                 this.streamProcesses.delete(streamId);
                 
-                // 清理统计信息
+                // 更新统计信息和状态
                 const stats = this.streamStats.get(streamId);
                 if (stats) {
                     stats.startTime = null;
                     stats.errors = 0;
+                    stats.lastStopped = new Date();  // 添加停止时间记录
+                }
+
+                // 更新流配置中的状态
+                const stream = this.streams.get(streamId);
+                if (stream) {
+                    stream.stats = {
+                        ...stream.stats,
+                        startTime: null,
+                        lastStopped: new Date()
+                    };
                 }
                 
                 // 清理文件
@@ -612,6 +625,9 @@ class StreamManager {
                         }
                     }
                 }
+                
+                // 保存配置以更新状态
+                await this.saveStreams();
                 
                 logger.info(`Stream stopped: ${streamId}`);
                 return true;
@@ -735,6 +751,49 @@ class StreamManager {
         const hasPlaylist = fs.existsSync(playlistPath);
         
         return hasProcess || hasRecentStats || hasPlaylist;
+    }
+
+    // 添加观看者
+    addViewer(streamId) {
+        const count = this.activeViewers.get(streamId) || 0;
+        this.activeViewers.set(streamId, count + 1);
+        
+        // 清除自动停止定时器
+        if (this.autoStopTimers.has(streamId)) {
+            clearTimeout(this.autoStopTimers.get(streamId));
+            this.autoStopTimers.delete(streamId);
+            logger.debug(`Cleared auto-stop timer for stream ${streamId}`);
+        }
+    }
+
+    // 移除观看者
+    removeViewer(streamId) {
+        const count = this.activeViewers.get(streamId) || 0;
+        if (count > 0) {
+            this.activeViewers.set(streamId, count - 1);
+            
+            // 如果没有观看者了，启动自动停止定时器
+            if (count - 1 === 0) {
+                logger.debug(`No viewers left for stream ${streamId}, starting auto-stop timer`);
+                const timer = setTimeout(async () => {
+                    logger.info(`Auto-stopping inactive stream: ${streamId}`);
+                    await this.stopStreaming(streamId);  // 使用 await 确保完全停止
+                    this.autoStopTimers.delete(streamId);
+                    
+                    // 强制刷新状态
+                    const stats = this.streamStats.get(streamId);
+                    if (stats) {
+                        stats.startTime = null;
+                        stats.lastStopped = new Date();
+                    }
+                    
+                    // 触发状态更新
+                    this.emit('streamStopped', streamId);
+                }, this.config.stream.autoStopTimeout);
+                
+                this.autoStopTimers.set(streamId, timer);
+            }
+        }
     }
 }
 
