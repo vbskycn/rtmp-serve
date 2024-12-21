@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>流媒体代理管理系统使用说明</title>
+    <style>
+        body {
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        
+        .code-block {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            overflow-x: auto;
+        }
+        
+        .note {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        
+        .important {
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+            padding: 15px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>流媒体代理管理系统使用说明</h1>
+
+    <h2>1. 系统要求</h2>
+    
+    <h3>1.1 基础环境</h3>
+    <ul>
+        <li>Node.js 12.0 或以上版本</li>
+        <li>FFmpeg (必需)</li>
+        <li>支持 RTMP 的流媒体服务器(可选,用于推流功能)</li>
+    </ul>
+
+    <h3>1.2 FFmpeg 安装说明</h3>
+    
+    <p><strong>Ubuntu/Debian:</strong></p>
+    <div class="code-block">
+        sudo apt update<br>
+        sudo apt install ffmpeg
+    </div>
+
+    <p><strong>CentOS/RHEL:</strong></p>
+    <div class="code-block">
+        sudo yum install epel-release<br>
+        sudo yum install ffmpeg ffmpeg-devel
+    </div>
+
+    <p><strong>macOS:</strong></p>
+    <div class="code-block">
+        brew install ffmpeg
+    </div>
+
+    <h2>2. 安装步骤</h2>
+
+    <h3>2.1 获取代码并安装依赖</h3>
+    <div class="code-block">
+        # 克隆代码<br>
+        git clone [项目地址]<br><br>
+        # 进入项目目录<br>
+        cd stream-proxy<br><br>
+        # 安装依赖<br>
+        npm install
+    </div>
+
+    <h3>2.2 配置文件</h3>
+    <p>在 <code>config/config.json</code> 中配置以下内容:</p>
+    <div class="code-block">
+        {<br>
+        &nbsp;&nbsp;"server": {<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;"host": "localhost",  // 服务器地址<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;"port": 3000         // 服务器端口<br>
+        &nbsp;&nbsp;},<br>
+        &nbsp;&nbsp;"rtmp": {<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;"pushServer": "rtmp://ali.push.yximgs.com/live/",  // RTMP推流地址<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;"pullServer": "http://ali.hlspull.yximgs.com/live/" // RTMP拉流地址<br>
+        &nbsp;&nbsp;}<br>
+        }
+    </div>
+
+    <div class="important">
+        <strong>重要提示:</strong> 请确保配置文件中的 RTMP 地址已替换为您自己的服务器地址。
+    </div>
+
+    <h2>3. 启动服务</h2>
+    <div class="code-block">
+        npm start
+    </div>
+
+    <h2>4. 功能说明</h2>
+
+    <h3>4.1 基础功能</h3>
+    <ul>
+        <li>流媒体代理和转发</li>
+        <li>HLS 格式转码</li>
+        <li>RTMP 推流支持</li>
+        <li>流媒体状态监控</li>
+        <li>流量统计</li>
+    </ul>
+
+    <h3>4.2 管理界面功能</h3>
+
+    <h4>4.2.1 流管理</h4>
+    <ul>
+        <li><strong>添加流</strong>
+            <ul>
+                <li>支持单个添加和批量导入</li>
+                <li>可设置分类、名称、源地址</li>
+                <li>支持自定义流ID</li>
+            </ul>
+        </li>
+        <li><strong>流操作</strong>
+            <ul>
+                <li>启动/停止流</li>
+                <li>手动推流模式</li>
+                <li>编辑流信息</li>
+                <li>删除流</li>
+                <li>批量操��(重启、停止、删除)</li>
+            </ul>
+        </li>
+        <li><strong>播放控制</strong>
+            <ul>
+                <li>支持网页播放</li>
+                <li>提供 HLS 播放地址</li>
+                <li>RTMP 推流地址获取</li>
+            </ul>
+        </li>
+    </ul>
+
+    <h4>4.2.2 导出功能</h4>
+    <ul>
+        <li>M3U 格式导出</li>
+        <li>TXT 格式导出</li>
+        <li>远程推流列表导出(M3U/TXT)</li>
+    </ul>
+
+    <h3>4.3 特殊功能说明</h3>
+
+    <h4>手动推流模式</h4>
+    <ol>
+        <li>点击"手动启动"按钮将流切换到推流模式</li>
+        <li>获取推流地址和播放地址</li>
+        <li>推流状态会在界面上显示</li>
+    </ol>
+
+    <div class="note">
+        <strong>注意:</strong> 手动推流模式会同时生成 HLS 和 RTMP 格式的流,可能会消耗更多服务器资源。
+    </div>
+
+    <h2>5. 常见问题</h2>
+    <ul>
+        <li><strong>问题:</strong> FFmpeg 进程异常退出<br>
+            <strong>解决:</strong> 检查源地址是否可用,确保服务器有足够的带宽和处理能力</li>
+        <li><strong>问题:</strong> 无法获取播放地址<br>
+            <strong>解决:</strong> 确认流是否正常启动,检查网络连接和防火墙设置</li>
+        <li><strong>问题:</strong> RTMP 推流失败<br>
+            <strong>解决:</strong> 验证 RTMP 服务器配置是否正确,检查推流地址是否可用</li>
+    </ul>
+
+    <h2>6. 更新记录</h2>
+    <ul>
+        <li><strong>v1.3.8</strong>
+            <ul>
+                <li>添加远程推流功能</li>
+                <li>优化界面响应速度</li>
+                <li>修复流状态显示问题</li>
+            </ul>
+        </li>
+    </ul>
+
+</body>
+</html> 
