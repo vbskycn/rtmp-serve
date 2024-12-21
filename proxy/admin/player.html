@@ -6,6 +6,7 @@
     <script src="https://cdn.jsdelivr.net/npm/video.js@7.20.3/dist/video.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@videojs/http-streaming@2.14.2/dist/videojs-http-streaming.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/videojs-contrib-quality-levels@2.1.0/dist/videojs-contrib-quality-levels.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flv.js@1.6.2/dist/flv.min.js"></script>
     <style>
         body { 
             margin: 0; 
@@ -79,7 +80,7 @@
             // 设置播放源
             player.src({
                 src: `/play/${streamId}`,
-                type: 'video/mp4',
+                type: 'video/x-flv',
                 withCredentials: false
             });
 
@@ -118,6 +119,16 @@
             player.play().catch(function(error) {
                 console.error("播放失败:", error);
             });
+
+            if (flvjs.isSupported()) {
+                const flvPlayer = flvjs.createPlayer({
+                    type: 'flv',
+                    url: `/play/${streamId}`
+                });
+                flvPlayer.attachMediaElement(document.getElementById('player'));
+                flvPlayer.load();
+                flvPlayer.play();
+            }
         }
     </script>
 </body>

@@ -284,8 +284,8 @@ class StreamManager {
             '--live-from-start',
             '--no-playlist-reverse',
             '--format', 'v5000000_33',  // 直接指定格式
-            '--downloader', 'ffmpeg',    // 使用 ffmpeg 作为下载器
-            '--downloader-args', 'ffmpeg:-c copy -f mpegts pipe:1'  // 直接输出 MPEG-TS
+            '--remux-video', 'flv',     // 直接输出 FLV 格式
+            '--output', '-'             // 输出到标准输出
         ];
 
         if (licenseKey) {
@@ -304,6 +304,7 @@ class StreamManager {
         return new Promise((resolve, reject) => {
             try {
                 const clients = new Set();
+                let headerSent = false;
                 
                 server.on('connection', (socket) => {
                     clients.add(socket);
@@ -311,7 +312,7 @@ class StreamManager {
 
                     // 发送 HTTP 响应头
                     socket.write('HTTP/1.1 200 OK\r\n');
-                    socket.write('Content-Type: video/mp2t\r\n');
+                    socket.write('Content-Type: video/x-flv\r\n');
                     socket.write('Cache-Control: no-cache\r\n');
                     socket.write('Connection: keep-alive\r\n');
                     socket.write('Access-Control-Allow-Origin: *\r\n');
