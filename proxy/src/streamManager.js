@@ -169,6 +169,15 @@ class StreamManager {
             }
 
             // 初始化或更新统计信息
+            if (!streamConfig.stats) {
+                streamConfig.stats = {
+                    startTime: null,
+                    uptime: 0,
+                    errors: 0
+                };
+            }
+
+            // 初始化或更新 streamStats
             if (!this.streamStats.has(streamId)) {
                 this.streamStats.set(streamId, {
                     totalRequests: 0,
@@ -179,9 +188,15 @@ class StreamManager {
                 });
             }
 
+            // 更新两个统计对象
             const stats = this.streamStats.get(streamId);
-            stats.startTime = new Date();
+            const configStats = streamConfig.stats;
+            
+            const now = new Date();
+            stats.startTime = now;
+            configStats.startTime = now;
             stats.errors = 0;
+            configStats.errors = 0;
 
             // 解析 KODIPROP 属性
             let licenseKey = null;
@@ -238,7 +253,7 @@ class StreamManager {
                 throw error;
             }
 
-            // ���础输入选项
+            // 基础输入选项
             const inputOptions = [
                 '-reconnect', '1',
                 '-reconnect_streamed', '1',
@@ -329,10 +344,12 @@ class StreamManager {
                         stack: err.stack,
                         ffmpegError: err.toString()
                     });
-                    stats.errors++;
+                    
+                    if (stats) stats.errors++;
+                    if (configStats) configStats.errors++;
+                    
                     this.streamProcesses.delete(streamId);
                     
-                    // 如果是 SIGSEGV 错误，可能需要尝试使用 yt-dlp
                     if (err.message.includes('SIGSEGV')) {
                         logger.info('Attempting to use yt-dlp as fallback');
                         this.startStreamingWithYtdlp(streamId, streamConfig);
@@ -356,9 +373,16 @@ class StreamManager {
             
             // 更新错误统计
             const stats = this.streamStats.get(streamId);
+            const configStats = this.streams.get(streamId)?.stats;
+            
             if (stats) {
                 stats.errors++;
                 stats.startTime = null;
+            }
+            
+            if (configStats) {
+                configStats.errors++;
+                configStats.startTime = null;
             }
             
             throw error;
