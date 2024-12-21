@@ -30,7 +30,7 @@ class StreamManager extends EventEmitter {
         
         // 每小时运行一次清理
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
-        // 每5分钟运行一次健康检查
+        // 每5分钟运行一���健康检查
         setInterval(() => this.checkStreamsHealth(), 5 * 60 * 1000);
         
         // 加载配置
@@ -75,22 +75,27 @@ class StreamManager extends EventEmitter {
         try {
             const configs = {};
             for (const [id, config] of this.streams.entries()) {
+                // 确保保存完整的流配置
                 configs[id] = {
+                    id: config.id,
                     name: config.name,
                     url: config.url,
-                    category: config.category,
-                    kodiprop: config.kodiprop,
-                    tvg: config.tvg
+                    category: config.category || '未分类',
+                    kodiprop: config.kodiprop || '',
+                    tvg: config.tvg || {
+                        id: '',
+                        name: config.name,
+                        logo: '',
+                        group: config.category || ''
+                    }
                 };
             }
             
-            // 确保配置目录存在
             const configDir = path.dirname(this.configPath);
             if (!fs.existsSync(configDir)) {
                 fs.mkdirSync(configDir, { recursive: true });
             }
             
-            // 写入配置文件
             fs.writeFileSync(this.configPath, JSON.stringify(configs, null, 2));
             logger.info(`Saved ${this.streams.size} streams to config`);
             return true;
@@ -107,19 +112,20 @@ class StreamManager extends EventEmitter {
                 throw new Error('缺少必要的流信息');
             }
 
-            // 从URL中提取ID部分
-            const urlParts = streamData.url.split('/');
-            const lastPart = urlParts[urlParts.length - 1];
-            
-            // 生成streamId
+            // 生成或使用提供的streamId
             let streamId;
             if (streamData.id) {
                 streamId = streamData.id;
             } else if (streamData.customId) {
                 streamId = `stream_${streamData.customId}`;
             } else {
-                // 不再检查文件扩展名，直接使用URL最后部分作为ID
-                streamId = `stream_${lastPart}`;
+                // 生成6位随机ID
+                const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+                let randomId = '';
+                for (let i = 0; i < 6; i++) {
+                    randomId += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                streamId = `stream_${randomId}`;
             }
 
             // 检查是否已存在相同的流
@@ -135,7 +141,7 @@ class StreamManager extends EventEmitter {
                 logger.info(`Updated existing stream: ${streamId}`);
             } else {
                 // 添加新流
-                this.streams.set(streamId, {
+                const newStream = {
                     id: streamId,
                     name: streamData.name,
                     url: streamData.url,
@@ -151,7 +157,10 @@ class StreamManager extends EventEmitter {
                         uptime: 0,
                         errors: 0
                     }
-                });
+                };
+
+                // 保存到流集合
+                this.streams.set(streamId, newStream);
 
                 // 初始化统计信息
                 this.streamStats.set(streamId, {
@@ -161,10 +170,11 @@ class StreamManager extends EventEmitter {
                     uptime: 0,
                     startTime: null
                 });
+
                 logger.info(`Added new stream: ${streamId}`);
             }
 
-            // 保存配置
+            // 立即保存配置到文件
             await this.saveStreams();
 
             return {
@@ -429,7 +439,7 @@ class StreamManager extends EventEmitter {
                     }
                 }, 1000);
 
-                // 设置检查���时
+                // 设置检查时
                 setTimeout(() => {
                     clearInterval(checkInterval);
                     if (!fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
@@ -646,7 +656,7 @@ class StreamManager extends EventEmitter {
                 // 清理文件
                 const outputPath = path.join(__dirname, '../streams', streamId);
                 if (fs.existsSync(outputPath)) {
-                    // 删除所有���片文件
+                    // 删除所有片文件
                     const files = fs.readdirSync(outputPath);
                     for (const file of files) {
                         if (file.endsWith('.ts') || file.endsWith('.m3u8')) {
@@ -787,7 +797,7 @@ class StreamManager extends EventEmitter {
         const count = this.activeViewers.get(streamId) || 0;
         this.activeViewers.set(streamId, count + 1);
         
-        // 清除自动停止定时器
+        // 清除自动停止���时器
         if (this.autoStopTimers.has(streamId)) {
             clearTimeout(this.autoStopTimers.get(streamId));
             this.autoStopTimers.delete(streamId);
