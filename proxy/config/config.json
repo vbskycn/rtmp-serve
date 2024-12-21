@@ -3,7 +3,8 @@
         "host": "47.243.164.1",
         "port": 3000
     },
-    "stream": {
-        "autoStopTimeout": 180000
+    "rtmp": {
+        "pushServer": "rtmp://ali.push.yximgs.com/live/",
+        "pullServer": "http://ali.hlspull.yximgs.com/live/"
     }
 } 

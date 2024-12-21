@@ -344,33 +344,29 @@ class StreamManager extends EventEmitter {
             '-i', streamConfig.url
         ];
 
-        // 构建 FFmpeg 输出参数
+        // 构建 FFmpeg 输出参数，添加推流输出
         const outputArgs = [
-            '-sn',                          // 禁用字幕
-            '-map', '0:v:0',               // 选择第一个视频流
-            '-map', '0:a:0',               // 选择第一个音频流
-            '-c:v', 'copy',                // 视频流直接复制
-            '-c:a', 'aac',                 // 音频转换为 AAC
-            '-b:a', '128k',                // 音频码率
-            '-ac', '2',                    // 双声道
-            '-ar', '44100',                // 音频采样率
-            '-f', 'hls',                   // HLS 格式
-            '-hls_time', '2',              // 每个分片2秒
-            '-hls_list_size', '6',         // 保留6个分片
+            // HLS输出
+            '-c:v', 'copy',
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            '-ac', '2',
+            '-ar', '44100',
+            '-f', 'hls',
+            '-hls_time', '2',
+            '-hls_list_size', '6',
             '-hls_flags', 'delete_segments+append_list+discont_start+independent_segments',
             '-hls_segment_type', 'mpegts',
             '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
-            '-start_number', '0',
-            '-preset', 'veryfast',         // 使用快速编码预设
-            '-tune', 'zerolatency',        // 优化低延迟
-            '-max_muxing_queue_size', '2048',
-            '-hls_init_time', '2',
-            '-hls_time', '2',
-            '-hls_segment_type', 'mpegts',
-            '-g', '48',                    // GOP大小
-            '-sc_threshold', '0',          // 禁用场景切换检测
-            '-strict', 'experimental',
-            `${outputPath}/playlist.m3u8`  // 播放列表路径
+            `${outputPath}/playlist.m3u8`,
+            
+            // RTMP推流输出（如果是手动启动的流）
+            ...(this.manuallyStartedStreams.has(streamId) ? [
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-f', 'flv',
+                `${this.config.rtmp.pushServer}${streamId}`
+            ] : [])
         ];
 
         // 合并所有参数
@@ -534,7 +530,7 @@ class StreamManager extends EventEmitter {
             }
         }, 5000); // 每5秒检查一次
 
-        // 保存���查间隔的引用，便后续清理
+        // 保存查间隔的引用，便后续清理
         this.healthChecks.set(streamId, checkInterval);
     }
 

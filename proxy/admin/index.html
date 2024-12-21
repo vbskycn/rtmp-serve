@@ -109,7 +109,7 @@
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">流媒体管理系统v1.2.12</h1>
+        <h1 class="text-center mb-4">流媒体管理系统v1.2.14</h1>
 
         <!-- 仪表盘 -->
         <div class="dashboard">
@@ -309,8 +309,11 @@
                     // 添加该分类下的所有流
                     categoryStreams.forEach(stream => {
                         const tr = document.createElement('tr');
-                        const streamId = stream.id.replace('stream_', '');
+                        const streamId = stream.id;
                         const playUrl = `http://${serverConfig.server.host}:${serverConfig.server.port}/play/${stream.id}`;
+                        
+                        // 检查是否是手动启动的流
+                        const isManuallyStarted = stream.manuallyStarted;
                         
                         // 修改状态判断逻辑
                         let statusClass = 'inactive';
@@ -358,6 +361,11 @@
                                         <button class="btn btn-outline-success btn-sm" onclick="window.open('player.html?id=${stream.id}', '_blank')">
                                             <i class="fa fa-play"></i> 播放
                                         </button>
+                                        ${isManuallyStarted ? `
+                                            <button class="btn btn-outline-info btn-sm" onclick="copyRtmpInfo('${stream.id}')">
+                                                <i class="fa fa-external-link"></i> 推流信息
+                                            </button>
+                                        ` : ''}
                                     </div>
                                 </div>
                             </td>
@@ -372,7 +380,7 @@
                                     <i class="fa fa-stop"></i> 停止
                                 </button>
                                 <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
-                                    <i class="fa fa-trash"></i> ��除
+                                    <i class="fa fa-trash"></i> 删除
                                 </button>
                             </td>
                         `;
@@ -930,6 +938,28 @@
                     console.error('Error exporting TXT:', error);
                     alert('导出TXT失败');
                 });
+        }
+
+        // 添加复制推流信息的函数
+        function copyRtmpInfo(streamId) {
+            const rtmpInfo = `推流地址：rtmp://ali.push.yximgs.com/live/${streamId}\n` +
+                            `播放地址：http://ali.hlspull.yximgs.com/live/${streamId}.flv`;
+            
+            // 创建文本框并复制
+            const textarea = document.createElement('textarea');
+            textarea.value = rtmpInfo;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            
+            // 显示提示
+            const toast = document.createElement('div');
+            toast.className = 'alert alert-success position-fixed bottom-0 end-0 m-3';
+            toast.style.zIndex = '9999';
+            toast.textContent = '推流信息已复制到剪贴板';
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 2000);
         }
     </script>
 
