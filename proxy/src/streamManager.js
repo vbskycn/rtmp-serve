@@ -265,7 +265,7 @@ class StreamManager {
             licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
         }
 
-        // 构建 yt-dlp 参数，使用与测试命令相同的参数
+        // 构建 yt-dlp 参数
         const args = [
             '--allow-unplayable-formats',
             '--no-check-certificates'
@@ -294,7 +294,6 @@ class StreamManager {
         args.push(streamConfig.url);
 
         logger.info(`Starting yt-dlp for stream: ${streamId} with URL: ${streamConfig.url}`);
-        logger.debug(`yt-dlp args: ${args.join(' ')}`);
 
         return new Promise((resolve, reject) => {
             try {
@@ -314,6 +313,10 @@ class StreamManager {
                     '-hls_flags', 'delete_segments+append_list+independent_segments',
                     '-hls_segment_type', 'mpegts',
                     '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
+                    '-max_muxing_queue_size', '2048',
+                    '-hls_init_time', '2',
+                    '-hls_time', '2',
+                    '-hls_playlist_type', 'event',
                     `${outputPath}/playlist.m3u8`
                 ]);
 
@@ -330,6 +333,25 @@ class StreamManager {
                     logger.debug(`ffmpeg stderr: ${message}`);
                 });
 
+                // 处理管道错误
+                ytdlp.stdout.on('error', (error) => {
+                    if (error.code === 'EPIPE') {
+                        logger.warn(`Stream ${streamId} pipe broken, restarting...`);
+                        this.restartStream(streamId);
+                    } else {
+                        logger.error(`yt-dlp stdout error: ${error}`);
+                    }
+                });
+
+                ffmpeg.stdin.on('error', (error) => {
+                    if (error.code === 'EPIPE') {
+                        logger.warn(`Stream ${streamId} pipe broken, restarting...`);
+                        this.restartStream(streamId);
+                    } else {
+                        logger.error(`ffmpeg stdin error: ${error}`);
+                    }
+                });
+
                 // 连接进程
                 ytdlp.stdout.pipe(ffmpeg.stdin);
 
@@ -344,8 +366,6 @@ class StreamManager {
                 const timeout = setTimeout(() => {
                     if (!fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
                         logger.error(`Stream ${streamId} failed to start within timeout.`);
-                        logger.error(`yt-dlp errors: ${ytdlpError}`);
-                        logger.error(`ffmpeg errors: ${ffmpegError}`);
                         this.stopStreaming(streamId);
                         reject(new Error('Stream start timeout'));
                     }
@@ -364,32 +384,16 @@ class StreamManager {
                 // 错误处理
                 ytdlp.on('error', (error) => {
                     logger.error(`yt-dlp error for stream ${streamId}:`, error);
-                    logger.error(`yt-dlp stderr: ${ytdlpError}`);
                     clearInterval(checkInterval);
                     clearTimeout(timeout);
-                    reject(error);
-                });
-
-                ytdlp.on('exit', (code) => {
-                    logger.info(`yt-dlp process exited with code ${code} for stream ${streamId}`);
-                    if (code !== 0) {
-                        logger.error(`yt-dlp stderr: ${ytdlpError}`);
-                    }
+                    this.restartStream(streamId);
                 });
 
                 ffmpeg.on('error', (error) => {
                     logger.error(`ffmpeg error for stream ${streamId}:`, error);
-                    logger.error(`ffmpeg stderr: ${ffmpegError}`);
                     clearInterval(checkInterval);
                     clearTimeout(timeout);
-                    reject(error);
-                });
-
-                ffmpeg.on('exit', (code) => {
-                    logger.info(`ffmpeg process exited with code ${code} for stream ${streamId}`);
-                    if (code !== 0) {
-                        logger.error(`ffmpeg stderr: ${ffmpegError}`);
-                    }
+                    this.restartStream(streamId);
                 });
 
             } catch (error) {
@@ -424,10 +428,13 @@ class StreamManager {
         this.healthChecks.set(streamId, checkInterval);
     }
 
-    // 添加重启流的方法
+    // 修改重启流的方法
     async restartStream(streamId) {
         try {
+            logger.info(`Restarting stream: ${streamId}`);
             await this.stopStreaming(streamId);
+            // 添加短暂延迟确保进程完全停止
+            await new Promise(resolve => setTimeout(resolve, 1000));
             await this.startStreaming(streamId);
             logger.info(`Stream restarted: ${streamId}`);
         } catch (error) {
@@ -544,7 +551,7 @@ class StreamManager {
                     await this.restartStream(streamId);
                 }
                 
-                // 如果错���次数过多，也重启流
+                // 如果错误次数过多，也重启流
                 if (stats.errors > 5) {
                     logger.warn(`Too many errors for stream: ${streamId}`);
                     await this.restartStream(streamId);
