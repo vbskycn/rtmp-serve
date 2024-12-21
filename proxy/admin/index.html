@@ -157,7 +157,7 @@
             </div>
         </div>
 
-        <!-- 在添加流的卡片后面添加新的量导入卡片 -->
+        <!-- 在添加流的卡片后面添加新的量���入卡片 -->
         <div class="card">
             <div class="card-header">
                 <h5 class="mb-0"><i class="fa fa-upload"></i> 批量导入流</h5>
@@ -237,7 +237,7 @@
                 // 更新仪表盘
                 document.getElementById('totalStreams').textContent = streams.length;
                 document.getElementById('activeStreams').textContent = 
-                    streams.filter(s => s.stats?.startTime || streamManager.streamProcesses.has(s.id)).length;
+                    streams.filter(s => s.stats?.startTime).length;
 
                 streams.forEach(stream => {
                     const tr = document.createElement('tr');
@@ -253,8 +253,8 @@
                         statusClass = 'error';
                         statusText = '已失效';
                     } 
-                    // 检查流是否有进程在运行
-                    else if (stream.stats?.startTime || streamManager.streamProcesses.has(stream.id)) {
+                    // 检查流是否在运行
+                    else if (stream.stats?.startTime) {
                         statusClass = 'active';
                         statusText = '运行中';
                     }
@@ -329,7 +329,7 @@
                 });
             } catch (error) {
                 console.error('Error loading streams:', error);
-                alert('加载流列表失败');
+                alert('加载流列表失败: ' + error.message);
             }
         }
 
