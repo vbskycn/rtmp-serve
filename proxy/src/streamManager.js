@@ -13,6 +13,7 @@ class StreamManager {
         this.healthChecks = new Map();
         this.configPath = path.join(__dirname, '../config/streams.json');
         this.serverPorts = new Map();
+        this.failureCount = new Map();
         
         // 创建配置目录
         const configDir = path.dirname(this.configPath);
@@ -197,13 +198,11 @@ class StreamManager {
                 throw new Error('Stream not found');
             }
 
-            // ���始化统计信息
-            if (!streamConfig.stats) {
-                streamConfig.stats = {
-                    startTime: null,
-                    uptime: 0,
-                    errors: 0
-                };
+            // 更新统计信息
+            const stats = this.streamStats.get(streamId);
+            if (stats) {
+                stats.startTime = new Date();
+                stats.errors = 0;
             }
 
             if (!this.streamStats.has(streamId)) {
@@ -319,21 +318,20 @@ class StreamManager {
                     ffmpegError += message;
 
                     // 检查是否是致命错误
-                    const isFatalError = message.includes('Server returned 400') || 
-                                       message.includes('Server returned 403') ||
-                                       message.includes('Server returned 404') ||
-                                       message.includes('Server returned 500') ||
-                                       message.includes('Invalid data found') ||
-                                       message.includes('Error opening input') ||
-                                       message.includes('Protocol not found');
+                    const isFatalError = message.includes('Server returned 404') || 
+                                       message.includes('Failed to open segment') ||
+                                       message.includes('Error when loading first segment');
 
                     if (isFatalError) {
-                        logger.error(`Fatal error for stream ${streamId}: ${message}`);
-                        this.stopStreaming(streamId);
-                        const stats = this.streamStats.get(streamId);
-                        if (stats) {
-                            stats.errors++;
-                            stats.lastError = message;
+                        // 增加失败计数
+                        const currentCount = this.failureCount.get(streamId) || 0;
+                        this.failureCount.set(streamId, currentCount + 1);
+
+                        // 如果失败次数超过阈值，标记流为失效
+                        if (currentCount >= 10) {  // 10次失败后标记为失效
+                            logger.error(`Stream ${streamId} marked as invalid after ${currentCount} failures`);
+                            this.markStreamAsInvalid(streamId);
+                            this.stopStreaming(streamId);
                         }
                     } else if (message.includes('Error') || 
                         message.includes('Invalid') || 
@@ -466,13 +464,20 @@ class StreamManager {
     // 修改重启流的方法
     async restartStream(streamId) {
         try {
+            const stream = this.streams.get(streamId);
+            if (!stream || stream.invalid) {
+                logger.info(`Skipping restart of invalid stream: ${streamId}`);
+                return;
+            }
+
             logger.info(`Restarting stream: ${streamId}`);
-            // 先强制停止
             await this.forceStopStreaming(streamId);
-            // 等待一段时间
             await new Promise(resolve => setTimeout(resolve, 2000));
-            // 重新启动
             await this.startStreaming(streamId);
+            
+            // 重置失败计数
+            this.failureCount.set(streamId, 0);
+            
             logger.info(`Stream restarted: ${streamId}`);
         } catch (error) {
             logger.error(`Error restarting stream: ${streamId}`, { error });
@@ -602,10 +607,14 @@ class StreamManager {
     async checkStreamsHealth() {
         for (const [streamId, process] of this.streamProcesses.entries()) {
             try {
+                const stream = this.streams.get(streamId);
+                if (stream?.invalid) {
+                    continue;  // 跳过失效的流
+                }
+
                 const stats = this.streamStats.get(streamId);
                 const outputPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
                 
-                // 只有在文件不存在时才认为流不健康
                 if (!fs.existsSync(outputPath)) {
                     logger.warn(`Unhealthy stream detected: ${streamId}`);
                     await this.restartStream(streamId);
@@ -613,7 +622,7 @@ class StreamManager {
                 }
                 
                 // 如果错误次数过多，重启流
-                if (stats && stats.errors > 10) {  // 增加错误容忍度
+                if (stats && stats.errors > 10) {
                     logger.warn(`Too many errors for stream: ${streamId}`);
                     await this.restartStream(streamId);
                 }
@@ -677,6 +686,34 @@ class StreamManager {
             logger.error(`Error force stopping stream: ${streamId}`, error);
             throw error;
         }
+    }
+
+    // 添加标记流为失效的方法
+    async markStreamAsInvalid(streamId) {
+        const stream = this.streams.get(streamId);
+        if (stream) {
+            stream.invalid = true;
+            stream.lastError = 'Stream marked as invalid due to repeated failures';
+            stream.lastErrorTime = new Date();
+            await this.saveStreams();
+        }
+    }
+
+    // 添加检查流状态的方法
+    isStreamActive(streamId) {
+        // 检查是否有进程在运行
+        const hasProcess = this.streamProcesses.has(streamId);
+        
+        // 检查是否有最近的统计信息
+        const stats = this.streamStats.get(streamId);
+        const hasRecentStats = stats?.startTime && 
+            (Date.now() - new Date(stats.startTime).getTime()) < 30000;  // 30秒内有活动
+        
+        // 检查是否有播放列表文件
+        const playlistPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
+        const hasPlaylist = fs.existsSync(playlistPath);
+        
+        return hasProcess || hasRecentStats || hasPlaylist;
     }
 }
 

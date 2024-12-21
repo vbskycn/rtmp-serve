@@ -80,7 +80,7 @@
             gap: 20px;
             margin-bottom: 20px;
         }
-        .stat-card {
+        .stat-card
             background: white;
             padding: 20px;
             border-radius: 8px;
@@ -109,7 +109,7 @@
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">流媒体管理系统v1.1.3</h1>
+        <h1 class="text-center mb-4">流媒体管理系统v1.1.6</h1>
 
         <!-- 仪表盘 -->
         <div class="dashboard">
@@ -157,7 +157,7 @@
             </div>
         </div>
 
-        <!-- 在添加流的卡片后面添加新的批量导入卡片 -->
+        <!-- 在添加流的卡片后面添加新的量导入卡片 -->
         <div class="card">
             <div class="card-header">
                 <h5 class="mb-0"><i class="fa fa-upload"></i> 批量导入流</h5>
@@ -237,12 +237,32 @@
                 // 更新仪表盘
                 document.getElementById('totalStreams').textContent = streams.length;
                 document.getElementById('activeStreams').textContent = 
-                    streams.filter(s => s.stats?.startTime).length;
+                    streams.filter(s => s.stats?.startTime || streamManager.streamProcesses.has(s.id)).length;
 
                 streams.forEach(stream => {
                     const tr = document.createElement('tr');
                     const streamId = stream.id.replace('stream_', '');
                     const playUrl = `http://47.243.164.1:3000/play/${stream.id}`;
+                    
+                    // 修改状态判断逻辑
+                    let statusClass = 'inactive';
+                    let statusText = '已停止';
+                    
+                    // 检查流是否失效
+                    if (stream.invalid) {
+                        statusClass = 'error';
+                        statusText = '已失效';
+                    } 
+                    // 检查流是否有进程在运行
+                    else if (stream.stats?.startTime || streamManager.streamProcesses.has(stream.id)) {
+                        statusClass = 'active';
+                        statusText = '运行中';
+                    }
+
+                    // 添加状态样式
+                    const statusStyle = stream.invalid ? 'background-color: #dc3545;' :
+                                      (statusClass === 'active' ? 'background-color: #28a745;' : 'background-color: #6c757d;');
+
                     tr.innerHTML = `
                         <td>
                             <input type="checkbox" class="stream-checkbox" value="${stream.id}" onchange="updateBatchButtons()">
@@ -252,8 +272,8 @@
                             ${stream.name}
                         </td>
                         <td>
-                            <span class="status ${stream.stats?.startTime ? 'active' : 'inactive'}">
-                                ${stream.stats?.startTime ? '运行中' : '已停止'}
+                            <span class="status ${statusClass}" style="${statusStyle}">
+                                ${statusText}
                             </span>
                         </td>
                         <td>
@@ -450,7 +470,7 @@
         // 初始加载
         loadStreams();
         // 定期刷新
-        setInterval(loadStreams, 10000);
+        setInterval(loadStreams, 5000);
 
         // 添加更新流ID的函数
         async function updateStreamId(oldId, newId) {
