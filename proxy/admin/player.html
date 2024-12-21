@@ -324,7 +324,7 @@
                         levelLoadingTimeOut: 10000,       // 级别加载超时
                         levelLoadingMaxRetry: 3,          // 级别加载重试
                         fragLoadingTimeOut: 20000,        // 片段加载超时
-                        fragLoadingMaxRetry: 3,           // 片段加载重试
+                        fragLoadingMaxRetry: 3,           // 片段��载重试
                         recovery: {
                             enabled: true,                // 启用恢复机制
                             maxBufferHole: 0.5,           // 最大缓冲区空洞
@@ -399,7 +399,7 @@
                     clearTimeout(autoReconnectTimer);
                 }
 
-                // 设置新的���连定时器
+                // 设置新的重连定时器
                 autoReconnectTimer = setTimeout(() => {
                     reloadPlayer();
                 }, RECONNECT_DELAY);
@@ -435,16 +435,16 @@
             initPlayer();
         }
 
-        // 切换全屏
+        // 修改切换全屏函数
         function toggleFullscreen() {
-            const container = document.querySelector('.player-container');
+            const video = document.getElementById('videoPlayer');
             if (!document.fullscreenElement) {
-                if (container.requestFullscreen) {
-                    container.requestFullscreen();
-                } else if (container.webkitRequestFullscreen) {
-                    container.webkitRequestFullscreen();
-                } else if (container.msRequestFullscreen) {
-                    container.msRequestFullscreen();
+                if (video.requestFullscreen) {
+                    video.requestFullscreen();
+                } else if (video.webkitRequestFullscreen) {
+                    video.webkitRequestFullscreen();
+                } else if (video.msRequestFullscreen) {
+                    video.msRequestFullscreen();
                 }
                 document.body.classList.add('fullscreen');
             } else {
@@ -458,6 +458,94 @@
                 document.body.classList.remove('fullscreen');
             }
         }
+
+        // 修改切换频道函数
+        async function switchStream(newStreamId) {
+            try {
+                // 停止当前播放器
+                if (hls) {
+                    hls.destroy();
+                    hls = null;
+                }
+                
+                // 更新streamId
+                streamId = newStreamId;
+                
+                // 更新URL参数
+                const newUrl = new URL(window.location.href);
+                newUrl.searchParams.set('id', streamId);
+                window.history.pushState({}, '', newUrl);
+                
+                // 更新活动状态
+                document.querySelectorAll('.stream-item').forEach(item => {
+                    item.classList.remove('active');
+                    if (item.dataset.streamId === streamId) {
+                        item.classList.add('active');
+                        // 展开对应的分类
+                        const streamList = item.parentElement;
+                        streamList.classList.add('active');
+                    }
+                });
+                
+                // 显示加载动画
+                document.querySelector('.loading').style.display = 'block';
+                document.querySelector('.error-message').style.display = 'none';
+                
+                // 重置视频元素
+                const video = document.getElementById('videoPlayer');
+                video.src = '';
+                video.load();
+                
+                // 重新初始化播放器
+                await initPlayer();
+                
+            } catch (error) {
+                console.error('Error switching stream:', error);
+                document.querySelector('.error-message').textContent = '切换频道失败，请重试';
+                document.querySelector('.error-message').style.display = 'block';
+                document.querySelector('.loading').style.display = 'none';
+            }
+        }
+
+        // 修改全屏状态变化监听
+        document.addEventListener('fullscreenchange', () => {
+            const fullscreenBtn = document.querySelector('.control-btn i.fa-expand');
+            if (document.fullscreenElement) {
+                fullscreenBtn.classList.remove('fa-expand');
+                fullscreenBtn.classList.add('fa-compress');
+                document.body.classList.add('fullscreen');
+            } else {
+                fullscreenBtn.classList.remove('fa-compress');
+                fullscreenBtn.classList.add('fa-expand');
+                document.body.classList.remove('fullscreen');
+            }
+        });
+
+        // 修改全屏样式
+        const style = document.createElement('style');
+        style.textContent = `
+            .fullscreen #videoPlayer {
+                width: 100vw !important;
+                height: 100vh !important;
+                max-width: 100vw !important;
+                max-height: 100vh !important;
+                margin: 0 !important;
+            }
+            
+            .fullscreen .player-wrapper {
+                padding: 0 !important;
+            }
+            
+            .fullscreen .main-container {
+                margin-top: 0 !important;
+            }
+            
+            .fullscreen .header,
+            .fullscreen .controls {
+                z-index: 2147483647;
+            }
+        `;
+        document.head.appendChild(style);
 
         // 自动隐藏控制栏
         function showControls() {
@@ -477,18 +565,6 @@
 
         // 监听鼠标移动
         document.addEventListener('mousemove', showControls);
-
-        // 监听全屏变化
-        document.addEventListener('fullscreenchange', () => {
-            const fullscreenBtn = document.querySelector('.control-btn i.fa-expand');
-            if (document.fullscreenElement) {
-                fullscreenBtn.classList.remove('fa-expand');
-                fullscreenBtn.classList.add('fa-compress');
-            } else {
-                fullscreenBtn.classList.remove('fa-compress');
-                fullscreenBtn.classList.add('fa-expand');
-            }
-        });
 
         // 添加播放列表相关代码
         async function loadPlaylist() {
@@ -549,51 +625,11 @@
             streamList.classList.toggle('active');
         }
 
-        async function switchStream(newStreamId) {
-            try {
-                // 更新streamId
-                streamId = newStreamId;
-                
-                // 更新URL参数
-                const newUrl = new URL(window.location.href);
-                newUrl.searchParams.set('id', streamId);
-                window.history.pushState({}, '', newUrl);
-                
-                // 更新活动状态
-                document.querySelectorAll('.stream-item').forEach(item => {
-                    item.classList.remove('active');
-                });
-                
-                // 找到对应的流项并添加active类
-                const streamItems = document.querySelectorAll('.stream-item');
-                for (const item of streamItems) {
-                    if (item.dataset.streamId === streamId) {
-                        item.classList.add('active');
-                        // 展开对应的分类
-                        const streamList = item.parentElement;
-                        streamList.classList.add('active');
-                    }
-                }
-                
-                // 显示加载动画
-                document.querySelector('.loading').style.display = 'block';
-                document.querySelector('.error-message').style.display = 'none';
-                
-                // 重新加载播放器
-                await initPlayer();
-                
-            } catch (error) {
-                console.error('Error switching stream:', error);
-                document.querySelector('.error-message').textContent = '切换频道失败，请重试';
-                document.querySelector('.error-message').style.display = 'block';
-            }
-        }
-
         function togglePlaylist() {
             document.querySelector('.playlist-container').classList.toggle('show');
         }
 
-        // 在初始化时加载播放列��
+        // 在初始化时加载播放列表
         loadPlaylist();
 
         // 启动播放器
