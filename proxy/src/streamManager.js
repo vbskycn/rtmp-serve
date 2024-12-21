@@ -369,9 +369,15 @@ class StreamManager {
                     '-mpegts_copyts', '1',
                     '-mpegts_flags', '+initial_discontinuity',
                     '-avoid_negative_ts', 'make_zero',
+                    '-fflags', '+genpts+igndts',
                     '-max_delay', '5000000',
                     '-muxdelay', '0.1',
                     '-flush_packets', '1',
+                    '-protocol_whitelist', 'file,http,https,tcp,tls,crypto,pipe,data',
+                    '-allowed_extensions', 'ALL',
+                    '-segment_time_metadata', '1',
+                    '-analyzeduration', '10000000',
+                    '-probesize', '10000000',
                     'pipe:1'
                 ]);
 
@@ -401,6 +407,11 @@ class StreamManager {
 
                 ffmpeg.stderr.on('data', (data) => {
                     const message = data.toString();
+                    if (message.includes('Invalid mvhd time scale') || 
+                        message.includes('Application provided duration')) {
+                        return;
+                    }
+                    
                     if (message.includes('Error') || 
                         message.includes('Invalid') || 
                         message.includes('Failed') ||
@@ -413,14 +424,17 @@ class StreamManager {
 
                 ffmpeg.on('error', (error) => {
                     logger.error(`ffmpeg error for stream ${streamId}:`, error);
-                    this.restartStream(streamId);
+                    setTimeout(() => {
+                        this.restartStream(streamId);
+                    }, 5000);
                 });
 
                 ffmpeg.on('exit', (code) => {
                     if (code !== 0) {
                         logger.error(`ffmpeg exited with code ${code} for stream ${streamId}`);
-                        logger.error(`ffmpeg stderr: ${ffmpegError}`);
-                        this.restartStream(streamId);
+                        setTimeout(() => {
+                            this.restartStream(streamId);
+                        }, 5000);
                     }
                 });
 
@@ -463,7 +477,7 @@ class StreamManager {
         }
     }
 
-    // 添加文件监控方法
+    // 添加��件监控方法
     monitorStreamFile(streamId, filePath) {
         const checkInterval = setInterval(() => {
             try {
@@ -482,7 +496,7 @@ class StreamManager {
                 this.restartStream(streamId);
                 clearInterval(checkInterval);
             }
-        }, 5000); // 每5���检查一次
+        }, 5000); // 每5秒检查一次
 
         // 保存检查间隔的引用，以便后续清理
         this.healthChecks.set(streamId, checkInterval);
