@@ -198,13 +198,7 @@ class StreamManager {
                 throw new Error('Stream not found');
             }
 
-            // 更新统计信息
-            const stats = this.streamStats.get(streamId);
-            if (stats) {
-                stats.startTime = new Date();
-                stats.errors = 0;
-            }
-
+            // 初始化统计信息
             if (!this.streamStats.has(streamId)) {
                 this.streamStats.set(streamId, {
                     totalRequests: 0,
@@ -215,14 +209,20 @@ class StreamManager {
                 });
             }
 
+            // 获取统计信息引用
             const stats = this.streamStats.get(streamId);
             const configStats = streamConfig.stats;
             
+            // 更新统计信息
             const now = new Date();
-            stats.startTime = now;
-            configStats.startTime = now;
-            stats.errors = 0;
-            configStats.errors = 0;
+            if (stats) {
+                stats.startTime = now;
+                stats.errors = 0;
+            }
+            if (configStats) {
+                configStats.startTime = now;
+                configStats.errors = 0;
+            }
 
             // 使用 FFmpeg 处理流
             await this.startStreamingWithFFmpeg(streamId, streamConfig);
@@ -669,7 +669,7 @@ class StreamManager {
                     processes.ffmpeg.kill('SIGKILL');
                 }
                 
-                // 立即清理资源
+                // 立即清理��源
                 this.streamProcesses.delete(streamId);
                 
                 // 清理文件
