@@ -279,6 +279,7 @@ class StreamManager {
                 '--no-warnings',
                 '--quiet',
                 '--get-url',
+                '--allow-unplayable-formats',
                 '--format', 'v5000000_33'
             ];
 
@@ -287,11 +288,15 @@ class StreamManager {
                     '--add-header',
                     `X-AxDRM-Message: ${licenseKey}`,
                     '--add-header',
-                    'Content-Type: application/dash+xml'
+                    'Content-Type: application/dash+xml',
+                    '--add-header',
+                    'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
                 );
             }
 
             args.push(streamConfig.url);
+
+            logger.debug(`yt-dlp args for URL resolution: ${args.join(' ')}`);
 
             const ytdlp = spawn('yt-dlp', args);
             let url = '';
@@ -303,12 +308,15 @@ class StreamManager {
 
             ytdlp.stderr.on('data', (data) => {
                 error += data.toString();
+                logger.debug(`yt-dlp stderr during URL resolution: ${data.toString()}`);
             });
 
             ytdlp.on('close', (code) => {
                 if (code === 0 && url.trim()) {
+                    logger.info(`Successfully resolved real URL for stream ${streamId}`);
                     resolve(url.trim());
                 } else {
+                    logger.error(`Failed to resolve URL with error: ${error}`);
                     reject(new Error(`Failed to get real URL: ${error}`));
                 }
             });
@@ -348,6 +356,11 @@ class StreamManager {
                     '-reconnect', '1',
                     '-reconnect_streamed', '1',
                     '-reconnect_delay_max', '5',
+                    '-headers', [
+                        `X-AxDRM-Message: ${licenseKey}`,
+                        'Content-Type: application/dash+xml',
+                        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    ].join('\r\n'),
                     '-i', realUrl,
                     '-c:v', 'copy',
                     '-c:a', 'aac',
