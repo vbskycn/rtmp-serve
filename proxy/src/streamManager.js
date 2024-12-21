@@ -284,6 +284,13 @@ class StreamManager {
             '--live-from-start',
             '--no-playlist-reverse',
             '--format', 'v5000000_33',  // 直接指定格式
+            '--extract-audio',          // 提取音频
+            '--extract-video',          // 提取视频
+            '--audio-format', 'aac',    // 音频格式
+            '--video-format', 'mp4',    // 视频格式
+            '--merge-output-format', 'mp4',  // 合并为 MP4
+            '--no-keep-video',          // 不保留原始视频
+            '--no-keep-audio',          // 不保留原始音频
             '--no-download-archive',    // 不使用下载存档
             '--no-write-info-json',     // 不写入信息文件
             '--no-write-description',   // 不写入描述文件
@@ -319,7 +326,6 @@ class StreamManager {
         return new Promise((resolve, reject) => {
             try {
                 const clients = new Set();
-                let headerSent = false;
                 
                 server.on('connection', (socket) => {
                     clients.add(socket);
@@ -327,7 +333,7 @@ class StreamManager {
 
                     // 发送 HTTP 响应头
                     socket.write('HTTP/1.1 200 OK\r\n');
-                    socket.write('Content-Type: video/x-flv\r\n');
+                    socket.write('Content-Type: video/mp4\r\n');  // 修改为 MP4 格式
                     socket.write('Cache-Control: no-cache\r\n');
                     socket.write('Connection: keep-alive\r\n');
                     socket.write('Access-Control-Allow-Origin: *\r\n');
@@ -351,6 +357,7 @@ class StreamManager {
                         PYTHONUNBUFFERED: '1'  // 禁用 Python 输出缓冲
                     }
                 });
+
                 let ytdlpError = '';
 
                 ytdlp.stdout.on('data', (data) => {
@@ -386,22 +393,6 @@ class StreamManager {
                             this.restartStream(streamId);
                         }, 5000);
                     }
-                });
-
-                // 添加进程资源限制
-                let cpuUsage = 0;
-                const cpuCheck = setInterval(() => {
-                    const usage = process.cpuUsage();
-                    cpuUsage = (usage.user + usage.system) / 1000000;  // 转换为秒
-                    if (cpuUsage > 80) {  // CPU 使用率超过 80%
-                        logger.warn(`High CPU usage (${cpuUsage.toFixed(2)}%) for stream ${streamId}`);
-                        // 可以在这里添加降速或其他处理逻辑
-                    }
-                }, 5000);
-
-                // 清理资源
-                ytdlp.on('exit', () => {
-                    clearInterval(cpuCheck);
                 });
 
                 // 保存进程和服务器引用
