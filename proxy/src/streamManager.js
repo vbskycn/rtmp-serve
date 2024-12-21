@@ -23,39 +23,17 @@ class StreamManager {
             // 解析 KODIPROP 属性
             if (config.kodiprop) {
                 const props = config.kodiprop.split('\n');
+                config.inputstream = { adaptive: {} };
+                
                 for (const prop of props) {
                     if (prop.startsWith('#KODIPROP:')) {
                         const [key, value] = prop.substring(10).split('=');
-                        if (!config.inputstream) {
-                            config.inputstream = { adaptive: {} };
-                        }
                         const parts = key.split('.');
                         if (parts.length === 3 && parts[0] === 'inputstream' && parts[1] === 'adaptive') {
                             config.inputstream.adaptive[parts[2]] = value;
                         }
                     }
                 }
-            }
-
-            // 检查是否是 MPD 流
-            const isMPD = config.url.includes('.mpd') || 
-                         config.manifest_type === 'mpd' ||
-                         config.inputstream?.adaptive?.manifest_type === 'mpd';
-
-            if (isMPD) {
-                logger.info(`Detected MPD stream: ${id}`);
-                if (!config.inputstream) {
-                    config.inputstream = { adaptive: {} };
-                }
-                config.inputstream.adaptive.manifest_type = 'mpd';
-            }
-
-            // 如果有 license_key，确保它被正确设置
-            if (config.license_key && !config.inputstream?.adaptive?.license_key) {
-                if (!config.inputstream) {
-                    config.inputstream = { adaptive: {} };
-                }
-                config.inputstream.adaptive.license_key = config.license_key;
             }
 
             this.streams.set(id, config);
@@ -100,11 +78,6 @@ class StreamManager {
                 throw new Error('Stream not found');
             }
 
-            const outputPath = path.join(__dirname, '../streams', streamId);
-            if (!fs.existsSync(outputPath)) {
-                fs.mkdirSync(outputPath, { recursive: true });
-            }
-
             // 解析 KODIPROP 属性
             let licenseKey = null;
             let manifestType = null;
@@ -118,6 +91,18 @@ class StreamManager {
                         manifestType = prop.split('=')[1];
                     }
                 }
+            }
+
+            // 如果是 MPD 流，直接使用 yt-dlp
+            if (manifestType === 'mpd' || streamConfig.url.includes('.mpd')) {
+                logger.info(`Using yt-dlp for MPD stream: ${streamId}`);
+                await this.startStreamingWithYtdlp(streamId, streamConfig, licenseKey);
+                return;
+            }
+
+            const outputPath = path.join(__dirname, '../streams', streamId);
+            if (!fs.existsSync(outputPath)) {
+                fs.mkdirSync(outputPath, { recursive: true });
             }
 
             const stats = this.streamStats.get(streamId);
@@ -272,35 +257,116 @@ class StreamManager {
         }
     }
 
-    // 添加使用 yt-dlp 的备用方法
-    async startStreamingWithYtdlp(streamId, streamConfig) {
-        // 这个方法将在 FFmpeg 失败时尝试使用 yt-dlp
-        // 需要先安装 yt-dlp: apt-get install yt-dlp
+    async startStreamingWithYtdlp(streamId, streamConfig, licenseKey) {
         const { spawn } = require('child_process');
         const outputPath = path.join(__dirname, '../streams', streamId);
+        
+        // 确保输出目录存在
+        if (!fs.existsSync(outputPath)) {
+            fs.mkdirSync(outputPath, { recursive: true });
+        }
 
+        // 构建 yt-dlp 命令参数
         const args = [
-            '--allow-unplayable-formats',
             '--no-check-certificates',
-            '--add-header', `X-AxDRM-Message: ${streamConfig.license_key}`,
-            streamConfig.url,
-            '-o', `${outputPath}/stream.ts`
+            '--no-part',                    // 不使用临时文件
+            '--no-mtime',                   // 不修改文件时间戳
+            '--no-playlist',                // 不处理播放列表
+            '--no-write-playlist-metafiles', // 不写入元数据文件
+            '--live-from-start',            // 从直播开始处开始下载
+            '--force-generic-extractor',    // 强制使用通用提取器
+            '--downloader', 'ffmpeg',       // 使用 ffmpeg 作为下载器
+            '--retries', 'infinite',        // 无限重试
+            '--fragment-retries', 'infinite',
+            '--hls-use-mpegts',            // 使用 MPEGTS 容器
+            '--concurrent-fragments', '1'    // 并发下载片段数
         ];
 
-        const ytdlp = spawn('yt-dlp', args);
+        // 如果有 license key，添加到请求头
+        if (streamConfig.inputstream?.adaptive?.license_key) {
+            args.push(
+                '--add-header',
+                `X-AxDRM-Message: ${streamConfig.inputstream.adaptive.license_key}`
+            );
+        }
 
+        // 添加 User-Agent
+        args.push(
+            '--add-header',
+            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        );
+
+        // 设置输出格式
+        args.push(
+            '--format', 'best',             // 选择最佳质量
+            '--output', `${outputPath}/stream.ts`, // 输出文件
+            streamConfig.url                // 流地址
+        );
+
+        logger.info(`Starting yt-dlp with args:`, { args });
+
+        // 启动 yt-dlp 进程
+        const ytdlp = spawn('yt-dlp', args);
+        this.streamProcesses.set(streamId, ytdlp);
+
+        // 处理输出
         ytdlp.stdout.on('data', (data) => {
             logger.debug(`yt-dlp stdout: ${data}`);
         });
 
         ytdlp.stderr.on('data', (data) => {
-            logger.error(`yt-dlp stderr: ${data}`);
+            const message = data.toString();
+            if (message.includes('ERROR') || message.includes('Failed')) {
+                logger.error(`yt-dlp stderr: ${message}`);
+            } else {
+                logger.debug(`yt-dlp stderr: ${message}`);
+            }
         });
 
-        ytdlp.on('close', (code) => {
+        // 处理进程结束
+        ytdlp.on('close', async (code) => {
+            logger.info(`yt-dlp process exited with code ${code}`);
+            this.streamProcesses.delete(streamId);
+
             if (code !== 0) {
-                logger.error(`yt-dlp process exited with code ${code}`);
+                logger.error(`yt-dlp failed for stream: ${streamId}`);
+                // 5秒后重试
+                setTimeout(() => this.startStreaming(streamId), 5000);
             }
+        });
+
+        // 创建 HLS 播放列表
+        const playlistContent = `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:10
+#EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:10.0,
+stream.ts`;
+
+        fs.writeFileSync(path.join(outputPath, 'playlist.m3u8'), playlistContent);
+
+        // 等待文件创建
+        return new Promise((resolve, reject) => {
+            const maxAttempts = 30;
+            let attempts = 0;
+            const checkFile = () => {
+                const streamPath = path.join(outputPath, 'stream.ts');
+                if (fs.existsSync(streamPath)) {
+                    const stats = fs.statSync(streamPath);
+                    if (stats.size > 0) {
+                        logger.info(`Stream ${streamId} started successfully`);
+                        resolve();
+                        return;
+                    }
+                }
+                attempts++;
+                if (attempts >= maxAttempts) {
+                    reject(new Error('Failed to create stream file'));
+                } else {
+                    setTimeout(checkFile, 1000);
+                }
+            };
+            checkFile();
         });
     }
 
@@ -342,7 +408,11 @@ class StreamManager {
         try {
             const process = this.streamProcesses.get(streamId);
             if (process) {
-                process.kill();
+                if (process.kill) {
+                    process.kill();
+                } else if (process.stop) {
+                    process.stop();
+                }
                 this.streamProcesses.delete(streamId);
                 
                 const stats = this.streamStats.get(streamId);
