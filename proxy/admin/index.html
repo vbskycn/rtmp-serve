@@ -2,8 +2,8 @@
 <html>
 <head>
     <title>流媒体管理系统</title>
-    <link href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://lf9-cdn-tos.bytecdntp.com/cdn/expire-1-M/twitter-bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://lf9-cdn-tos.bytecdntp.com/cdn/expire-1-M/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet">
     <style>
         body {
             font-family: "Microsoft YaHei", Arial, sans-serif;
@@ -396,7 +396,7 @@
         </div>
     </div>
 
-    <script src="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
+    <script src="https://lf9-cdn-tos.bytecdntp.com/cdn/expire-1-M/twitter-bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
     <script>
         // 在 <script> 标签开始处添加置获取
         let serverConfig = null;
@@ -481,7 +481,7 @@
                         // 检查流是否失效
                         if (stream.invalid) {
                             statusClass = 'error';
-                            statusText = '已失效';
+                            statusText = '已失��';
                         } 
                         // 检查流是否在运行（包括通过播放链接启动的）
                         else if (stream.processRunning || stream.stats?.startTime) {
@@ -495,7 +495,7 @@
 
                         // 添加推流状态样式
                         const rtmpStatusStyle = isManuallyStarted ? 'background-color: #28a745;' : 'background-color: #6c757d;';
-                        const rtmpStatusText = isManuallyStarted ? '推流��' : '未推流';
+                        const rtmpStatusText = isManuallyStarted ? '推流' : '未推流';
 
                         tr.innerHTML = `
                             <td>
@@ -631,7 +631,7 @@
                 });
                 const result = await response.json();
                 if (result.success) {
-                    alert('流已���启');
+                    alert('流已启动');
                     loadStreams();
                 } else {
                     alert('重启流失败: ' + result.error);
@@ -861,7 +861,7 @@
             updateBatchButtons();
         }
 
-        // 更新��量操作按钮状态
+        // 更新量操作按钮状态
         function updateBatchButtons() {
             const selectedCount = getSelectedStreams().length;
             document.getElementById('batchRestartBtn').disabled = selectedCount === 0;
