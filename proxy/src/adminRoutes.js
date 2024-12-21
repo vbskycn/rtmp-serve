@@ -86,7 +86,7 @@ router.get('/api/streams', async (req, res) => {
     try {
         const streams = [];
         for (const [id, config] of streamManager.streams.entries()) {
-            // 检查��的状态
+            // 检查的状态
             const isRunning = await checkStreamStatus(id);
             
             streams.push({
@@ -308,6 +308,41 @@ router.get('/api/config', (req, res) => {
     } catch (error) {
         logger.error('Error loading config:', error);
         res.status(500).json({ error: 'Failed to load config' });
+    }
+});
+
+// 添加更新流的路由
+router.put('/api/streams/:streamId', async (req, res) => {
+    try {
+        const { streamId } = req.params;
+        const result = await streamManager.updateStream(streamId, req.body);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// 添加获取单个流信息的路由
+router.get('/api/streams/:streamId', async (req, res) => {
+    try {
+        const { streamId } = req.params;
+        const stream = streamManager.streams.get(streamId);
+        if (!stream) {
+            res.status(404).json({
+                success: false,
+                error: 'Stream not found'
+            });
+            return;
+        }
+        res.json(stream);
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
     }
 });
 

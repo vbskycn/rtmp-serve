@@ -75,10 +75,10 @@ class StreamManager extends EventEmitter {
         try {
             const configs = {};
             for (const [id, config] of this.streams.entries()) {
-                // 只保存必要的配置信息，不保存运行时状态
                 configs[id] = {
                     name: config.name,
                     url: config.url,
+                    category: config.category,
                     kodiprop: config.kodiprop,
                     tvg: config.tvg
                 };
@@ -103,13 +103,21 @@ class StreamManager extends EventEmitter {
     async addStream(streamData) {
         try {
             // 验证必要的字段
-            if (!streamData.id || !streamData.name || !streamData.url) {
+            if (!streamData.name || !streamData.url) {
                 throw new Error('缺少必要的流信息');
             }
 
+            // ���成流ID（如果没有提供）
+            const streamId = streamData.customId ? 
+                           `stream_${streamData.customId}` : 
+                           `stream_${Date.now()}`;
+
             // 添加流到管理器
-            this.streams.set(streamData.id, {
-                ...streamData,
+            this.streams.set(streamId, {
+                id: streamId,
+                name: streamData.name,
+                url: streamData.url,
+                category: streamData.category || '未分类',
                 stats: {
                     startTime: null,
                     uptime: 0,
@@ -118,7 +126,7 @@ class StreamManager extends EventEmitter {
             });
 
             // 初始化统计信息
-            this.streamStats.set(streamData.id, {
+            this.streamStats.set(streamId, {
                 totalRequests: 0,
                 lastAccessed: null,
                 errors: 0,
@@ -129,10 +137,10 @@ class StreamManager extends EventEmitter {
             // 保存配置
             await this.saveStreams();
 
-            // 不再自动启动流
-            // await this.startStreaming(streamData.id);
-
-            return true;
+            return {
+                success: true,
+                streamId: streamId
+            };
         } catch (error) {
             logger.error('添加流失败:', error);
             throw error;
@@ -729,7 +737,7 @@ class StreamManager extends EventEmitter {
 
     // 添加检查流状态的方法
     isStreamActive(streamId) {
-        // 检查是��有进程在运行
+        // 检查是否有进程在运行
         const hasProcess = this.streamProcesses.has(streamId);
         
         // 检查是否有最近的统计信息
@@ -763,7 +771,7 @@ class StreamManager extends EventEmitter {
         if (count > 0) {
             this.activeViewers.set(streamId, count - 1);
             
-            // 如果没有观看者了，启动自动停止定时器
+            // 如果没有观看者，启动自动停止定时器
             if (count - 1 === 0) {
                 logger.debug(`No viewers left for stream ${streamId}, starting auto-stop timer`);
                 const timer = setTimeout(async () => {
@@ -792,7 +800,7 @@ class StreamManager extends EventEmitter {
         for (const [streamId, process] of this.streamProcesses.entries()) {
             const stats = this.streamStats.get(streamId);
             if (stats && process.startTime) {
-                // 更新运行时间
+                // 更新���行时间
                 const uptime = Date.now() - process.startTime.getTime();
                 stats.uptime = uptime;
                 
@@ -802,6 +810,81 @@ class StreamManager extends EventEmitter {
                     stream.stats.uptime = uptime;
                 }
             }
+        }
+    }
+
+    // 修改导出配置方法以支持分类
+    exportConfig() {
+        const configs = [];
+        const streamsByCategory = new Map();
+
+        // 按分类分组
+        for (const [id, stream] of this.streams.entries()) {
+            const category = stream.category || '未分类';
+            if (!streamsByCategory.has(category)) {
+                streamsByCategory.set(category, []);
+            }
+            streamsByCategory.get(category).push(stream);
+        }
+
+        // 生成配置文件内容
+        for (const [category, streams] of streamsByCategory.entries()) {
+            configs.push(`${category},#genre#`); // 添加分类标记
+            for (const stream of streams) {
+                const playUrl = `http://${this.config.server.host}:${this.config.server.port}/play/${stream.id}`;
+                configs.push(`${stream.name},${stream.url}`);
+            }
+            configs.push(''); // 添加空行分隔��同分类
+        }
+
+        return configs.join('\n');
+    }
+
+    // 在 StreamManager 类中添加
+    async updateStream(streamId, streamData) {
+        try {
+            const stream = this.streams.get(streamId);
+            if (!stream) {
+                throw new Error('Stream not found');
+            }
+
+            // 更新流信息
+            stream.name = streamData.name;
+            stream.url = streamData.url;
+            stream.category = streamData.category;
+
+            // 如果ID发生变化
+            if (streamData.customId && `stream_${streamData.customId}` !== streamId) {
+                const newId = `stream_${streamData.customId}`;
+                
+                // 检查新ID是否已存在
+                if (this.streams.has(newId)) {
+                    throw new Error('新ID已存在');
+                }
+
+                // 使用新ID重新创建流
+                this.streams.delete(streamId);
+                stream.id = newId;
+                this.streams.set(newId, stream);
+
+                // 更新相关的映射
+                if (this.streamStats.has(streamId)) {
+                    const stats = this.streamStats.get(streamId);
+                    this.streamStats.delete(streamId);
+                    this.streamStats.set(newId, stats);
+                }
+            }
+
+            // 保存更新
+            await this.saveStreams();
+
+            return {
+                success: true,
+                message: '流更新成功'
+            };
+        } catch (error) {
+            logger.error('Error updating stream:', error);
+            throw error;
         }
     }
 }

@@ -80,7 +80,7 @@
             gap: 20px;
             margin-bottom: 20px;
         }
-        .stat-card
+        .stat-card {
             background: white;
             padding: 20px;
             border-radius: 8px;
@@ -139,6 +139,10 @@
             <div class="card-body">
                 <form id="addStreamForm">
                     <div class="mb-3">
+                        <label class="form-label">分类</label>
+                        <input type="text" class="form-control" id="streamCategory" placeholder="例如: 新闻、体育、综艺等">
+                    </div>
+                    <div class="mb-3">
                         <label class="form-label">流名称</label>
                         <input type="text" class="form-control" id="streamName" required>
                     </div>
@@ -165,11 +169,15 @@
             <div class="card-body">
                 <form id="batchImportForm">
                     <div class="mb-3">
-                        <label class="form-label">批量导入（每行一个，格式：流名称,源地址）</label>
-                        <textarea class="form-control" id="batchStreams" rows="6" placeholder="例如：
-民視新聞台,http://pix.zbds.top/litv/litv-ftv13
-中視新聞台,http://pix.zbds.top/litv/4gtv-4gtv074
-中天新聞台,http://pix.zbds.top/litv/4gtv-4gtv009"></textarea>
+                        <label class="form-label">批量导入（支持分类格式，例如: 分类名,#genre# 开头的新行）</label>
+                        <textarea class="form-control" id="batchStreams" rows="8" placeholder="例如：
+弯弯新聞,#genre#
+民視新聞台,http://example.com/stream1
+中視新聞台,http://example.com/stream2
+
+弯弯綜合,#genre#
+民視,http://example.com/stream3
+民視第一台,http://example.com/stream4"></textarea>
                     </div>
                     <button type="submit" class="btn btn-primary">
                         <i class="fa fa-upload"></i> 批量导入
@@ -246,90 +254,109 @@
                 const tbody = document.querySelector('#streamTable');
                 tbody.innerHTML = '';
 
+                // 按分类分组
+                const groupedStreams = {};
+                streams.forEach(stream => {
+                    const category = stream.category || '未分类';
+                    if (!groupedStreams[category]) {
+                        groupedStreams[category] = [];
+                    }
+                    groupedStreams[category].push(stream);
+                });
+
                 // 更新仪表盘
                 document.getElementById('totalStreams').textContent = streams.length;
-
-                // 获取活跃流的数量
-                const activeStreams = streams.filter(stream => {
-                    // 检查是否有进程在运行
-                    return stream.processRunning || stream.stats?.startTime;
-                });
-                document.getElementById('activeStreams').textContent = activeStreams.length;
-
-                streams.forEach(stream => {
-                    const tr = document.createElement('tr');
-                    const streamId = stream.id.replace('stream_', '');
-                    const playUrl = `http://${serverConfig.server.host}:${serverConfig.server.port}/play/${stream.id}`;
-                    
-                    // 修改状态判断逻辑
-                    let statusClass = 'inactive';
-                    let statusText = '已停止';
-                    
-                    // 检查流是否失效
-                    if (stream.invalid) {
-                        statusClass = 'error';
-                        statusText = '已失效';
-                    } 
-                    // 检查流是否在运行（包括通过播放链接启动的）
-                    else if (stream.processRunning || stream.stats?.startTime) {
-                        statusClass = 'active';
-                        statusText = '运行中';
-                    }
-
-                    // 添加状态样式
-                    const statusStyle = stream.invalid ? 'background-color: #dc3545;' :
-                                      (statusClass === 'active' ? 'background-color: #28a745;' : 'background-color: #6c757d;');
-
-                    tr.innerHTML = `
-                        <td>
-                            <input type="checkbox" class="stream-checkbox" value="${stream.id}" onchange="updateBatchButtons()">
-                        </td>
-                        <td>
-                            <img src="${stream.tvg?.logo || ''}" alt="" style="height: 20px; margin-right: 8px;">
-                            ${stream.name}
-                        </td>
-                        <td>
-                            <span class="status ${statusClass}" style="${statusStyle}">
-                                ${statusText}
-                            </span>
-                        </td>
-                        <td>
-                            <div class="input-group">
-                                <input type="text" class="form-control form-control-sm" value="${streamId}" 
-                                       onchange="updateStreamId('${stream.id}', this.value)">
-                            </div>
-                        </td>
-                        <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
-                            ${stream.url}
-                        </td>
-                        <td>
-                            <div class="d-flex align-items-center">
-                                <div class="input-group">
-                                    <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly 
-                                           style="font-family: monospace; background-color: #f8f9fa;">
-                                    <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${playUrl}')">
-                                        <i class="fa fa-copy"></i> 复制
-                                    </button>
-                                    <button class="btn btn-outline-success btn-sm" onclick="window.open('player.html?id=${stream.id}', '_blank')">
-                                        <i class="fa fa-play"></i> 播放
-                                    </button>
-                                </div>
-                            </div>
-                        </td>
-                        <td class="stream-actions">
-                            <button onclick="restartStream('${stream.id}')" class="btn btn-warning btn-sm">
-                                <i class="fa fa-refresh"></i> 重启
-                            </button>
-                            <button onclick="stopStream('${stream.id}')" class="btn btn-secondary btn-sm">
-                                <i class="fa fa-stop"></i> 停止
-                            </button>
-                            <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
-                                <i class="fa fa-trash"></i> 删除
-                            </button>
+                
+                // 渲染分组后的流列表
+                for (const [category, categoryStreams] of Object.entries(groupedStreams)) {
+                    // 添加分类标题行
+                    const categoryRow = document.createElement('tr');
+                    categoryRow.innerHTML = `
+                        <td colspan="7" class="bg-light">
+                            <strong>${category}</strong>
                         </td>
                     `;
-                    tbody.appendChild(tr);
-                });
+                    tbody.appendChild(categoryRow);
+
+                    // 添加该分类下的所有流
+                    categoryStreams.forEach(stream => {
+                        const tr = document.createElement('tr');
+                        const streamId = stream.id.replace('stream_', '');
+                        const playUrl = `http://${serverConfig.server.host}:${serverConfig.server.port}/play/${stream.id}`;
+                        
+                        // 修改状态判断逻辑
+                        let statusClass = 'inactive';
+                        let statusText = '已停止';
+                        
+                        // 检查流是否失效
+                        if (stream.invalid) {
+                            statusClass = 'error';
+                            statusText = '已失效';
+                        } 
+                        // 检查流是否在运行（包括通过播放链接启动的）
+                        else if (stream.processRunning || stream.stats?.startTime) {
+                            statusClass = 'active';
+                            statusText = '运行中';
+                        }
+
+                        // 添加状态样式
+                        const statusStyle = stream.invalid ? 'background-color: #dc3545;' :
+                                          (statusClass === 'active' ? 'background-color: #28a745;' : 'background-color: #6c757d;');
+
+                        tr.innerHTML = `
+                            <td>
+                                <input type="checkbox" class="stream-checkbox" value="${stream.id}" onchange="updateBatchButtons()">
+                            </td>
+                            <td>
+                                <img src="${stream.tvg?.logo || ''}" alt="" style="height: 20px; margin-right: 8px;">
+                                ${stream.name}
+                            </td>
+                            <td>
+                                <span class="status ${statusClass}" style="${statusStyle}">
+                                    ${statusText}
+                                </span>
+                            </td>
+                            <td>
+                                <div class="input-group">
+                                    <input type="text" class="form-control form-control-sm" value="${streamId}" 
+                                           onchange="updateStreamId('${stream.id}', this.value)">
+                                </div>
+                            </td>
+                            <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
+                                ${stream.url}
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div class="input-group">
+                                        <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly 
+                                               style="font-family: monospace; background-color: #f8f9fa;">
+                                        <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${playUrl}')">
+                                            <i class="fa fa-copy"></i> 复制
+                                        </button>
+                                        <button class="btn btn-outline-success btn-sm" onclick="window.open('player.html?id=${stream.id}', '_blank')">
+                                            <i class="fa fa-play"></i> 播放
+                                        </button>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="stream-actions">
+                                <button onclick="editStream('${stream.id}')" class="btn btn-info btn-sm">
+                                    <i class="fa fa-edit"></i> 编辑
+                                </button>
+                                <button onclick="restartStream('${stream.id}')" class="btn btn-warning btn-sm">
+                                    <i class="fa fa-refresh"></i> 重启
+                                </button>
+                                <button onclick="stopStream('${stream.id}')" class="btn btn-secondary btn-sm">
+                                    <i class="fa fa-stop"></i> 停止
+                                </button>
+                                <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
+                                    <i class="fa fa-trash"></i> 删除
+                                </button>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                }
             } catch (error) {
                 console.error('Error loading streams:', error);
                 alert('加载流列表失败: ' + error.message);
@@ -343,7 +370,8 @@
             const streamData = {
                 name: document.getElementById('streamName').value,
                 url: document.getElementById('streamUrl').value,
-                customId: document.getElementById('streamCustomId').value
+                customId: document.getElementById('streamCustomId').value,
+                category: document.getElementById('streamCategory').value
             };
 
             try {
@@ -544,10 +572,20 @@
             const batchText = document.getElementById('batchStreams').value;
             const lines = batchText.split('\n').filter(line => line.trim());
             
+            let currentCategory = '';
             let successCount = 0;
             let failCount = 0;
             
-            for (const line of lines) {
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                
+                // 检查是否是分类行
+                if (line.endsWith('#genre#')) {
+                    currentCategory = line.split(',')[0].trim();
+                    continue;
+                }
+                
+                // 处理常规流行
                 const [name, url] = line.split(',').map(s => s.trim());
                 
                 if (!name || !url) {
@@ -561,7 +599,11 @@
                         headers: {
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify({ name, url })
+                        body: JSON.stringify({
+                            name,
+                            url,
+                            category: currentCategory
+                        })
                     });
 
                     const result = await response.json();
@@ -700,6 +742,102 @@
             alert(`批量删除完成\n成功: ${success}\n失败: ${failed}`);
             loadStreams();
         }
+
+        // 打开编辑模态框
+        async function editStream(streamId) {
+            try {
+                const response = await fetch(`/api/streams/${streamId}`);
+                const stream = await response.json();
+                
+                // 填充表单
+                document.getElementById('editStreamId').value = streamId;
+                document.getElementById('editStreamCategory').value = stream.category || '';
+                document.getElementById('editStreamName').value = stream.name;
+                document.getElementById('editStreamUrl').value = stream.url;
+                document.getElementById('editStreamCustomId').value = streamId.replace('stream_', '');
+                
+                // 显示模态框
+                const modal = new bootstrap.Modal(document.getElementById('editStreamModal'));
+                modal.show();
+            } catch (error) {
+                console.error('Error loading stream details:', error);
+                alert('加载流信息失败');
+            }
+        }
+
+        // 保存编辑
+        async function saveStreamEdit() {
+            const streamId = document.getElementById('editStreamId').value;
+            const streamData = {
+                category: document.getElementById('editStreamCategory').value,
+                name: document.getElementById('editStreamName').value,
+                url: document.getElementById('editStreamUrl').value,
+                customId: document.getElementById('editStreamCustomId').value
+            };
+
+            try {
+                const response = await fetch(`/api/streams/${streamId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(streamData)
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    // 关闭模态框
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('editStreamModal'));
+                    modal.hide();
+                    
+                    // 刷新流列表
+                    loadStreams();
+                    alert('更新成功');
+                } else {
+                    alert('更新失败: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error updating stream:', error);
+                alert('更新失败');
+            }
+        }
     </script>
+
+    <!-- 在 body 标签结束前添加编辑模态框 -->
+    <div class="modal fade" id="editStreamModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">编辑流</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editStreamForm">
+                        <input type="hidden" id="editStreamId">
+                        <div class="mb-3">
+                            <label class="form-label">分类</label>
+                            <input type="text" class="form-control" id="editStreamCategory">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">名称</label>
+                            <input type="text" class="form-control" id="editStreamName" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">源地址</label>
+                            <input type="text" class="form-control" id="editStreamUrl" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">自定义ID</label>
+                            <input type="text" class="form-control" id="editStreamCustomId">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="saveStreamEdit()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html> 
