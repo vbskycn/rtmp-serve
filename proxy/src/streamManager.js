@@ -65,47 +65,32 @@ class StreamManager {
         }
     }
 
-    async addStream(id, config) {
+    async addStream(streamData) {
         try {
-            // 使用完整的名称作为ID
-            const streamId = config.name.trim();
-            
-            // 解析 KODIPROP 属性
-            if (config.kodiprop) {
-                const props = config.kodiprop.split('\n');
-                config.inputstream = { adaptive: {} };
-                
-                for (const prop of props) {
-                    if (prop.startsWith('#KODIPROP:')) {
-                        const [key, value] = prop.substring(10).split('=');
-                        const parts = key.split('.');
-                        if (parts.length === 3 && parts[0] === 'inputstream' && parts[1] === 'adaptive') {
-                            config.inputstream.adaptive[parts[2]] = value;
-                        }
-                    }
-                }
+            // 验证必要的字段
+            if (!streamData.id || !streamData.name || !streamData.url) {
+                throw new Error('缺少必要的流信息');
             }
 
-            this.streams.set(streamId, config);
-            this.streamStats.set(streamId, {
-                totalRequests: 0,
-                lastAccessed: null,
-                errors: 0,
-                uptime: 0,
-                startTime: null
+            // 添加流到管理器
+            this.streams.set(streamData.id, {
+                ...streamData,
+                stats: {
+                    startTime: null,
+                    uptime: 0,
+                    errors: 0
+                }
             });
-            
+
             // 保存配置
-            this.saveStreams();
-            
-            logger.info(`Stream added: ${streamId}`, { streamId, config });
-            
-            // 自动启动流
-            this.startStreaming(streamId).catch(error => {
-                logger.error(`Error auto-starting stream: ${streamId}`, { error });
-            });
+            await this.saveConfig();
+
+            // 启动流
+            await this.startStream(streamData.id);
+
+            return true;
         } catch (error) {
-            logger.error(`Error adding stream: ${id}`, { error });
+            logger.error('添加流失败:', error);
             throw error;
         }
     }
@@ -434,7 +419,7 @@ class StreamManager {
             ffmpeg
         });
 
-        // 处理进程结束
+        // ���理进程结束
         ytdlp.on('close', (code) => {
             logger.info(`yt-dlp process exited with code ${code}`);
             if (code !== 0) {

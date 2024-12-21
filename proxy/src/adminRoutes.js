@@ -1,56 +1,99 @@
 const express = require('express');
+const router = express.Router();
+const StreamManager = require('./streamManager');
 const logger = require('./utils/logger');
 
-function setupAdminRoutes(app, streamManager) {
-    app.use(express.json());
-
-    // 获取所有流列表
-    app.get('/api/streams', (req, res) => {
-        const streams = [];
-        for (const [id, config] of streamManager.streams.entries()) {
-            streams.push({
-                id,
-                ...config,
-                stats: streamManager.streamStats.get(id)
+// 添加单个流
+router.post('/api/streams', async (req, res) => {
+    try {
+        const { name, url, license_key } = req.body;
+        
+        if (!name || !url) {
+            return res.json({
+                success: false,
+                error: '名称和地址不能为空'
             });
         }
-        res.json(streams);
-    });
 
-    // 批量添加流
-    app.post('/api/streams/batch', async (req, res) => {
-        try {
-            const { m3u } = req.body;
-            const streams = parseM3U(m3u);
-            
-            for (const stream of streams) {
-                await streamManager.addStream(stream.name, {
-                    name: stream.name,
-                    url: stream.url,
-                    kodiprop: stream.kodiprop,
-                    tvg: stream.tvg
-                });
+        const streamData = {
+            id: generateStreamId(),
+            name: name,
+            url: url,
+            kodiprop: license_key ? `#KODIPROP:inputstream.adaptive.license_key=${license_key}` : '',
+            tvg: {
+                id: '',
+                name: name,
+                logo: '',
+                group: ''
             }
+        };
 
-            logger.info(`Batch added ${streams.length} streams`);
-            res.json({ success: true, count: streams.length });
-        } catch (error) {
-            logger.error('Error adding streams:', error);
-            res.status(500).json({ error: error.message });
-        }
-    });
+        await StreamManager.addStream(streamData);
+        
+        res.json({
+            success: true,
+            stream: streamData
+        });
+    } catch (error) {
+        logger.error('添加流失败:', error);
+        res.json({
+            success: false,
+            error: error.message || '添加流失败'
+        });
+    }
+});
 
-    // 删除流
-    app.delete('/api/streams/:id', async (req, res) => {
-        try {
-            const { id } = req.params;
-            await streamManager.deleteStream(id);
-            res.json({ success: true });
-        } catch (error) {
-            res.status(500).json({ error: error.message });
-        }
-    });
+// 生成唯一的流ID
+function generateStreamId() {
+    return 'stream_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 }
+
+// 获取所有流列表
+router.get('/api/streams', (req, res) => {
+    const streams = [];
+    for (const [id, config] of StreamManager.streams.entries()) {
+        streams.push({
+            id,
+            ...config,
+            stats: StreamManager.streamStats.get(id)
+        });
+    }
+    res.json(streams);
+});
+
+// 批量添加流
+router.post('/api/streams/batch', async (req, res) => {
+    try {
+        const { m3u } = req.body;
+        const streams = parseM3U(m3u);
+        
+        for (const stream of streams) {
+            await StreamManager.addStream(stream.name, {
+                name: stream.name,
+                url: stream.url,
+                kodiprop: stream.kodiprop,
+                tvg: stream.tvg
+            });
+        }
+
+        logger.info(`Batch added ${streams.length} streams`);
+        res.json({ success: true, count: streams.length });
+    } catch (error) {
+        logger.error('Error adding streams:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 删除流
+router.delete('/api/streams/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await StreamManager.deleteStream(id);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
 
 function parseM3U(content) {
     const streams = [];
@@ -93,4 +136,4 @@ function parseM3U(content) {
     return streams;
 }
 
-module.exports = { setupAdminRoutes }; 
+module.exports = router; 
