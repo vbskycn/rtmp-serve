@@ -109,7 +109,7 @@
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">流媒体管理系统v1.0.33</h1>
+        <h1 class="text-center mb-4">流媒体管理系统v1.0.34</h1>
 
         <!-- 仪表盘 -->
         <div class="dashboard">
@@ -231,9 +231,12 @@
                         </td>
                         <td>
                             <div class="d-flex align-items-center">
-                                <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${playUrl}')">
-                                    <i class="fa fa-copy"></i> 复制播放地址
-                                </button>
+                                <div class="input-group">
+                                    <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly>
+                                    <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${playUrl}')">
+                                        <i class="fa fa-copy"></i> 复制
+                                    </button>
+                                </div>
                             </div>
                         </td>
                         <td>
@@ -430,18 +433,35 @@
 
         // 修改复制到剪贴板函数
         function copyToClipboard(text) {
-            navigator.clipboard.writeText(text).then(() => {
-                // 使用 Bootstrap 的 toast 或者更简单的提示
+            // 创建临时输入框
+            const input = document.createElement('input');
+            input.style.position = 'fixed';
+            input.style.opacity = 0;
+            input.value = text;
+            document.body.appendChild(input);
+            
+            // 选择并复制
+            input.select();
+            input.setSelectionRange(0, 99999); // 用于移动设备
+            
+            try {
+                // 执行复制命令
+                document.execCommand('copy');
+                
+                // 显示提示
                 const toast = document.createElement('div');
                 toast.className = 'alert alert-success position-fixed bottom-0 end-0 m-3';
                 toast.style.zIndex = '9999';
                 toast.textContent = '播放地址已复制';
                 document.body.appendChild(toast);
                 setTimeout(() => toast.remove(), 2000);
-            }).catch(err => {
+            } catch (err) {
                 console.error('复制失败:', err);
                 alert('复制失败');
-            });
+            } finally {
+                // 移除临时输入框
+                document.body.removeChild(input);
+            }
         }
     </script>
 </body>
