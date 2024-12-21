@@ -2,14 +2,27 @@ const express = require('express');
 const router = express.Router();
 const { StreamManager } = require('./streamManager');
 const logger = require('./utils/logger');
+const pinyin = require('pinyin');  // 需要先安装：npm install pinyin
 
 // 创建 StreamManager 实例
 const streamManager = new StreamManager();
 
+// 生成拼音ID
+function generateStreamId(name) {
+    // 使用 pinyin 转换中文为拼音，只保留字母
+    const pinyinName = pinyin(name, {
+        style: pinyin.STYLE_NORMAL,
+        heteronym: false
+    }).flat().join('');
+    
+    // 移除所有非字母字符
+    return 'stream_' + pinyinName.toLowerCase().replace(/[^a-z]/g, '');
+}
+
 // 添加单个流
 router.post('/api/streams', async (req, res) => {
     try {
-        const { name, url, license_key } = req.body;
+        const { name, url } = req.body;
         
         if (!name || !url) {
             return res.json({
@@ -19,10 +32,10 @@ router.post('/api/streams', async (req, res) => {
         }
 
         const streamData = {
-            id: generateStreamId(),
+            id: generateStreamId(name),
             name: name,
             url: url,
-            kodiprop: license_key ? `#KODIPROP:inputstream.adaptive.license_key=${license_key}` : '',
+            kodiprop: '',
             tvg: {
                 id: '',
                 name: name,
@@ -51,11 +64,6 @@ router.post('/api/streams', async (req, res) => {
         });
     }
 });
-
-// 生成唯一的流ID
-function generateStreamId() {
-    return 'stream_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-}
 
 // 获取所有流列表
 router.get('/api/streams', (req, res) => {
@@ -104,7 +112,7 @@ router.delete('/api/streams/:id', async (req, res) => {
     }
 });
 
-// 重启流
+// 重���流
 router.post('/api/streams/:id/restart', async (req, res) => {
     try {
         const { id } = req.params;

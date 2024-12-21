@@ -109,7 +109,7 @@
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">流媒体管理系统v1.0.57</h1>
+        <h1 class="text-center mb-4">流媒体管理系统v1.1.1</h1>
 
         <!-- 仪表盘 -->
         <div class="dashboard">
@@ -146,12 +146,29 @@
                         <label class="form-label">源地址</label>
                         <input type="text" class="form-control" id="streamUrl" required>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">License Key (可选)</label>
-                        <input type="text" class="form-control" id="licenseKey" placeholder="请输入 license_key">
-                    </div>
                     <button type="submit" class="btn btn-primary">
                         <i class="fa fa-plus"></i> 添加流
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 在添加流的卡片后面添加新的批量导入卡片 -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fa fa-upload"></i> 批量导入流</h5>
+            </div>
+            <div class="card-body">
+                <form id="batchImportForm">
+                    <div class="mb-3">
+                        <label class="form-label">批量导入（每行一个，格式：流名称,源地址）</label>
+                        <textarea class="form-control" id="batchStreams" rows="6" placeholder="例如：
+民視新聞台,http://pix.zbds.top/litv/litv-ftv13
+中視新聞台,http://pix.zbds.top/litv/4gtv-4gtv074
+中天新聞台,http://pix.zbds.top/litv/4gtv-4gtv009"></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fa fa-upload"></i> 批量导入
                     </button>
                 </form>
             </div>
@@ -162,6 +179,15 @@
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="fa fa-list"></i> 流列表</h5>
                 <div class="btn-group">
+                    <button onclick="batchRestart()" class="btn btn-warning btn-sm" id="batchRestartBtn" disabled>
+                        <i class="fa fa-refresh"></i> 批量重启
+                    </button>
+                    <button onclick="batchStop()" class="btn btn-secondary btn-sm" id="batchStopBtn" disabled>
+                        <i class="fa fa-stop"></i> 批量停止
+                    </button>
+                    <button onclick="batchDelete()" class="btn btn-danger btn-sm" id="batchDeleteBtn" disabled>
+                        <i class="fa fa-trash"></i> 批量删除
+                    </button>
                     <button onclick="refreshStreams()" class="btn btn-light btn-sm">
                         <i class="fa fa-refresh"></i> 刷新
                     </button>
@@ -175,6 +201,9 @@
                     <table class="table table-hover">
                         <thead>
                             <tr>
+                                <th>
+                                    <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
+                                </th>
                                 <th>名称</th>
                                 <th>状态</th>
                                 <th>流ID</th>
@@ -208,9 +237,12 @@
 
                 streams.forEach(stream => {
                     const tr = document.createElement('tr');
-                    const streamId = stream.id.replace('stream_', '');  // 移除前缀
+                    const streamId = stream.id.replace('stream_', '');
                     const playUrl = `http://47.243.164.1:3000/play/${stream.id}`;
                     tr.innerHTML = `
+                        <td>
+                            <input type="checkbox" class="stream-checkbox" value="${stream.id}" onchange="updateBatchButtons()">
+                        </td>
                         <td>
                             <img src="${stream.tvg?.logo || ''}" alt="" style="height: 20px; margin-right: 8px;">
                             ${stream.name}
@@ -283,8 +315,7 @@
             
             const streamData = {
                 name: document.getElementById('streamName').value,
-                url: document.getElementById('streamUrl').value,
-                license_key: document.getElementById('licenseKey').value
+                url: document.getElementById('streamUrl').value
             };
 
             try {
@@ -470,6 +501,170 @@
                 // 移除临时输入框
                 document.body.removeChild(input);
             }
+        }
+
+        // 批量导入处理
+        document.getElementById('batchImportForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const batchText = document.getElementById('batchStreams').value;
+            const lines = batchText.split('\n').filter(line => line.trim());
+            
+            let successCount = 0;
+            let failCount = 0;
+            
+            for (const line of lines) {
+                const [name, url] = line.split(',').map(s => s.trim());
+                
+                if (!name || !url) {
+                    failCount++;
+                    continue;
+                }
+
+                try {
+                    const response = await fetch('/api/streams', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ name, url })
+                    });
+
+                    const result = await response.json();
+                    if (result.success) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } catch (error) {
+                    console.error('Error adding stream:', error);
+                    failCount++;
+                }
+            }
+
+            alert(`批量导入完成\n成功: ${successCount}\n失败: ${failCount}`);
+            if (successCount > 0) {
+                this.reset();
+                loadStreams();
+            }
+        });
+
+        // 全选/取消全选
+        function toggleSelectAll(checkbox) {
+            const checkboxes = document.getElementsByClassName('stream-checkbox');
+            for (let box of checkboxes) {
+                box.checked = checkbox.checked;
+            }
+            updateBatchButtons();
+        }
+
+        // 更新批量操作按钮状态
+        function updateBatchButtons() {
+            const selectedCount = getSelectedStreams().length;
+            document.getElementById('batchRestartBtn').disabled = selectedCount === 0;
+            document.getElementById('batchStopBtn').disabled = selectedCount === 0;
+            document.getElementById('batchDeleteBtn').disabled = selectedCount === 0;
+        }
+
+        // 获取选中的流
+        function getSelectedStreams() {
+            const checkboxes = document.getElementsByClassName('stream-checkbox');
+            return Array.from(checkboxes)
+                .filter(box => box.checked)
+                .map(box => box.value);
+        }
+
+        // 批量重启
+        async function batchRestart() {
+            const selectedStreams = getSelectedStreams();
+            if (!selectedStreams.length) return;
+            
+            if (!confirm(`确定要重启选中的 ${selectedStreams.length} 个流吗？`)) return;
+
+            let success = 0;
+            let failed = 0;
+            
+            for (const streamId of selectedStreams) {
+                try {
+                    const response = await fetch(`/api/streams/${streamId}/restart`, {
+                        method: 'POST'
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        success++;
+                    } else {
+                        failed++;
+                    }
+                } catch (error) {
+                    console.error(`Error restarting stream ${streamId}:`, error);
+                    failed++;
+                }
+            }
+            
+            alert(`批量重启完成\n成功: ${success}\n失败: ${failed}`);
+            loadStreams();
+        }
+
+        // 批量停止
+        async function batchStop() {
+            const selectedStreams = getSelectedStreams();
+            if (!selectedStreams.length) return;
+            
+            if (!confirm(`确定要停止选中的 ${selectedStreams.length} 个流吗？`)) return;
+
+            let success = 0;
+            let failed = 0;
+            
+            for (const streamId of selectedStreams) {
+                try {
+                    const response = await fetch(`/api/streams/${streamId}/stop`, {
+                        method: 'POST'
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        success++;
+                    } else {
+                        failed++;
+                    }
+                } catch (error) {
+                    console.error(`Error stopping stream ${streamId}:`, error);
+                    failed++;
+                }
+            }
+            
+            alert(`批量停止完成\n成功: ${success}\n失败: ${failed}`);
+            loadStreams();
+        }
+
+        // 批量删除
+        async function batchDelete() {
+            const selectedStreams = getSelectedStreams();
+            if (!selectedStreams.length) return;
+            
+            if (!confirm(`确定要删除选中的 ${selectedStreams.length} 个流吗？此操作不可恢复！`)) return;
+
+            let success = 0;
+            let failed = 0;
+            
+            for (const streamId of selectedStreams) {
+                try {
+                    const response = await fetch(`/api/streams/${streamId}`, {
+                        method: 'DELETE'
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        success++;
+                    } else {
+                        failed++;
+                    }
+                } catch (error) {
+                    console.error(`Error deleting stream ${streamId}:`, error);
+                    failed++;
+                }
+            }
+            
+            alert(`批量删除完成\n成功: ${success}\n失败: ${failed}`);
+            loadStreams();
         }
     </script>
 </body>
