@@ -174,7 +174,7 @@
         }
         
         .table th.name-column {
-            width: 150px;
+            width: 200px;
         }
         
         .table th.status-column {
@@ -186,7 +186,7 @@
         }
         
         .table th.source-column {
-            width: 180px;
+            width: 200px;
         }
         
         .table th.play-column {
@@ -207,17 +207,31 @@
 
         /* 修改输入组样式使其更紧凑 */
         .input-group-compact {
-            width: 280px;
+            width: 100%;
+            max-width: 100%;
         }
 
         .input-group-compact .form-control {
-            font-size: 0.8rem;
+            font-size: 0.85rem;
             padding: 0.25rem 0.5rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .input-group-compact .btn {
             padding: 0.25rem 0.5rem;
-            font-size: 0.8rem;
+            font-size: 0.85rem;
+        }
+
+        /* 添加输入框hover效果 */
+        .input-group-compact .form-control:hover {
+            overflow: visible;
+            text-overflow: clip;
+            background-color: #fff !important;
+            position: absolute;
+            z-index: 1000;
+            width: auto;
+            min-width: 100%;
         }
 
         /* 修改名称单元格样式 */
@@ -481,7 +495,7 @@
                         // 检查流是否失效
                         if (stream.invalid) {
                             statusClass = 'error';
-                            statusText = '已失��';
+                            statusText = '已失效';
                         } 
                         // 检查流是否在运行（包括通过播放链接启动的）
                         else if (stream.processRunning || stream.stats?.startTime) {
@@ -501,9 +515,14 @@
                             <td>
                                 <input type="checkbox" class="stream-checkbox" value="${stream.id}" onchange="updateBatchButtons()">
                             </td>
-                            <td class="text-truncate-cell">
-                                <img src="${stream.tvg?.logo || ''}" alt="" style="height: 20px; margin-right: 8px;">
-                                <span class="stream-name" title="${stream.name}">${stream.name}</span>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div class="input-group input-group-compact">
+                                        <img src="${stream.tvg?.logo || ''}" alt="" style="height: 20px; margin-right: 4px;">
+                                        <input type="text" class="form-control form-control-sm" value="${stream.name}" readonly 
+                                               style="font-family: monospace; background-color: #f8f9fa;">
+                                    </div>
+                                </div>
                             </td>
                             <td>
                                 <span class="status ${statusClass}" style="${statusStyle}">
@@ -515,8 +534,16 @@
                                     ${rtmpStatusText}
                                 </span>
                             </td>
-                            <td class="text-truncate-cell" title="${stream.url}">
-                                ${stream.url}
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div class="input-group input-group-compact">
+                                        <input type="text" class="form-control form-control-sm" value="${stream.url}" readonly 
+                                               style="font-family: monospace; background-color: #f8f9fa;">
+                                        <button class="btn btn-outline-secondary btn-sm" onclick="copyToClipboard('${stream.url}')">
+                                            <i class="fa fa-copy"></i>
+                                        </button>
+                                    </div>
+                                </div>
                             </td>
                             <td>
                                 <div class="d-flex align-items-center">
@@ -970,7 +997,7 @@
             loadStreams();
         }
 
-        // 打开编辑模态框
+        // 打开编辑���态框
         async function editStream(streamId) {
             try {
                 const response = await fetch(`/api/streams/${streamId}`);
@@ -1231,7 +1258,7 @@
         }
     </script>
 
-    <!-- 在 body 标签结束前添加编辑模态框 -->
+    <!-- 在 body 标签���束前添加编辑模态框 -->
     <div class="modal fade" id="editStreamModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
