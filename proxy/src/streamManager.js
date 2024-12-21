@@ -71,18 +71,26 @@ class StreamManager {
             stats.startTime = new Date();
             stats.errors = 0;
 
-            // 检查流的类型并设置适当的参数
-            const inputOptions = [];
+            // 更新 ffmpeg 选项
+            const inputOptions = [
+                '-reconnect', '1',
+                '-reconnect_streamed', '1',
+                '-reconnect_delay_max', '5',
+                '-rw_timeout', '15000000',
+                '-y',
+                '-thread_queue_size', '4096'
+            ];
+
             const outputOptions = [
-                '-c:v copy',
-                '-c:a copy',
-                '-f hls',
-                '-hls_time 4',
-                '-hls_list_size 3',
-                '-hls_flags delete_segments+append_list',
-                '-hls_segment_type mpegts',
-                '-hls_playlist_type event',
-                `-hls_segment_filename ${outputPath}/segment_%d.ts`
+                '-c:v', 'copy',
+                '-c:a', 'copy',
+                '-f', 'hls',
+                '-hls_time', '2',
+                '-hls_list_size', '6',
+                '-hls_flags', 'delete_segments+append_list',
+                '-hls_segment_type', 'mpegts',
+                '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
+                '-timeout', '15000000'
             ];
 
             // 如果是MPD流，添加特殊处理
@@ -97,7 +105,8 @@ class StreamManager {
             logger.info(`Starting stream with options:`, {
                 streamId,
                 inputOptions,
-                outputOptions
+                outputOptions,
+                url: streamConfig.url
             });
 
             const process = ffmpeg(streamConfig.url)
@@ -107,12 +116,17 @@ class StreamManager {
                 .on('start', (commandLine) => {
                     logger.info(`FFmpeg command: ${commandLine}`);
                 })
+                .on('stderr', (stderrLine) => {
+                    logger.debug(`FFmpeg stderr: ${stderrLine}`);
+                })
                 .on('progress', (progress) => {
                     logger.debug(`Stream progress: ${streamId}`, progress);
                 })
                 .on('end', () => {
                     logger.info(`Stream ${streamId} ended`);
                     this.streamProcesses.delete(streamId);
+                    // 流结束后自动重启
+                    setTimeout(() => this.startStreaming(streamId), 1000);
                 })
                 .on('error', (err) => {
                     logger.error(`Stream ${streamId} error:`, { 
@@ -122,6 +136,8 @@ class StreamManager {
                     });
                     stats.errors++;
                     this.streamProcesses.delete(streamId);
+                    // 错误后自动重试
+                    setTimeout(() => this.startStreaming(streamId), 5000);
                 });
 
             process.run();
@@ -136,30 +152,37 @@ class StreamManager {
                 error: error.message,
                 stack: error.stack 
             });
+            // 如果启动失败，5秒后重试
+            setTimeout(() => this.startStreaming(streamId), 5000);
             throw error;
         }
     }
 
     async waitForStream(streamId, outputPath) {
         return new Promise((resolve, reject) => {
-            const maxAttempts = 10;
+            const maxAttempts = 30; // 增加尝试次数
             let attempts = 0;
             
             const checkFile = () => {
                 const playlistPath = path.join(outputPath, 'playlist.m3u8');
                 if (fs.existsSync(playlistPath)) {
-                    logger.info(`Stream ${streamId} playlist file created successfully`);
-                    resolve();
-                } else {
-                    attempts++;
-                    if (attempts >= maxAttempts) {
-                        const error = new Error(`Failed to create stream after ${maxAttempts} attempts`);
-                        logger.error(`Stream ${streamId} failed to start`, { error });
-                        this.stopStreaming(streamId);
-                        reject(error);
-                    } else {
-                        setTimeout(checkFile, 1000);
+                    // 检查文件大小
+                    const stats = fs.statSync(playlistPath);
+                    if (stats.size > 0) {
+                        logger.info(`Stream ${streamId} playlist file created successfully`);
+                        resolve();
+                        return;
                     }
+                }
+                
+                attempts++;
+                if (attempts >= maxAttempts) {
+                    const error = new Error(`Failed to create stream after ${maxAttempts} attempts`);
+                    logger.error(`Stream ${streamId} failed to start`, { error });
+                    this.stopStreaming(streamId);
+                    reject(error);
+                } else {
+                    setTimeout(checkFile, 1000);
                 }
             };
             
@@ -233,7 +256,7 @@ class StreamManager {
                 const streamPath = path.join(streamsDir, dir);
                 const stats = fs.statSync(streamPath);
                 
-                // 如果目录超过24小时未被访问且��不活跃，则删除
+                // 如果目录超过24小时未被访问且不活跃，则删除
                 const isOld = (Date.now() - stats.atimeMs) > 24 * 60 * 60 * 1000;
                 const isInactive = !this.streamProcesses.has(dir);
                 
