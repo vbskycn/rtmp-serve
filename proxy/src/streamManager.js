@@ -308,15 +308,26 @@ class StreamManager {
                     '-c:v', 'copy',
                     '-c:a', 'copy',
                     '-f', 'hls',
-                    '-hls_time', '2',
+                    '-hls_time', '4',
                     '-hls_list_size', '6',
-                    '-hls_flags', 'delete_segments+append_list+independent_segments',
+                    '-hls_flags', 'delete_segments+append_list+independent_segments+program_date_time',
                     '-hls_segment_type', 'mpegts',
                     '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
                     '-max_muxing_queue_size', '2048',
-                    '-hls_init_time', '2',
-                    '-hls_time', '2',
+                    '-tune', 'zerolatency',
+                    '-preset', 'veryfast',
+                    '-sc_threshold', '0',
+                    '-sn',
+                    '-reconnect_streamed', '1',
+                    '-reconnect_delay_max', '2',
+                    '-strict', 'experimental',
+                    '-avoid_negative_ts', 'make_zero',
+                    '-start_number', '0',
+                    '-hls_init_time', '4',
+                    '-hls_time', '4',
                     '-hls_playlist_type', 'event',
+                    '-metadata', 'service_provider="Stream Service"',
+                    '-metadata', 'service_name="Live Stream"',
                     `${outputPath}/playlist.m3u8`
                 ]);
 
@@ -330,7 +341,16 @@ class StreamManager {
                 ffmpeg.stderr.on('data', (data) => {
                     const message = data.toString();
                     ffmpegError += message;
-                    logger.debug(`ffmpeg stderr: ${message}`);
+                    // 只记录重要的错误信息
+                    if (message.includes('Error') || 
+                        message.includes('Invalid') || 
+                        message.includes('Failed') ||
+                        message.includes('No such') ||
+                        message.includes('Cannot')) {
+                        logger.error(`ffmpeg stderr: ${message}`);
+                    } else {
+                        logger.debug(`ffmpeg stderr: ${message}`);
+                    }
                 });
 
                 // 处理管道错误
