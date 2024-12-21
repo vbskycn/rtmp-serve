@@ -109,7 +109,7 @@
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">流媒体管理系统v1.1.11</h1>
+        <h1 class="text-center mb-4">流媒体管理系统v1.1.14</h1>
 
         <!-- 仪表盘 -->
         <div class="dashboard">
@@ -157,7 +157,7 @@
             </div>
         </div>
 
-        <!-- 在添加流的卡片后面添加新的量���片 -->
+        <!-- 在添加流的卡片后面添加新的量片 -->
         <div class="card">
             <div class="card-header">
                 <h5 class="mb-0"><i class="fa fa-upload"></i> 批量导入流</h5>
@@ -213,7 +213,6 @@
                                 <th>流ID</th>
                                 <th>源地址</th>
                                 <th>播放地址</th>
-                                <th>统计信息</th>
                                 <th>操作</th>
                             </tr>
                         </thead>
@@ -316,16 +315,6 @@
                                     </button>
                                 </div>
                             </div>
-                        </td>
-                        <td>
-                            <span class="stats-badge">
-                                <i class="fa fa-clock-o"></i> 
-                                运行时间: ${formatUptime(stream.stats?.uptime || 0)}
-                            </span>
-                            <span class="stats-badge">
-                                <i class="fa fa-exclamation-triangle"></i>
-                                错误: ${stream.stats?.errors || 0}
-                            </span>
                         </td>
                         <td class="stream-actions">
                             <button onclick="restartStream('${stream.id}')" class="btn btn-warning btn-sm">
