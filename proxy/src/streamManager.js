@@ -3,9 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('./utils/logger');
 const axios = require('axios');
+const EventEmitter = require('events');
 
-class StreamManager {
+class StreamManager extends EventEmitter {
     constructor() {
+        super();
         this.streams = new Map();
         this.activeStreams = new Map();
         this.streamProcesses = new Map();
@@ -33,6 +35,9 @@ class StreamManager {
         
         // 加载配置
         this.config = require('../config/config.json');
+        
+        // 每秒更新一次统计信息
+        setInterval(() => this.updateStats(), 1000);
     }
 
     // 加载保存的流配置
@@ -192,18 +197,14 @@ class StreamManager {
             }
 
             // 初始化统计信息
-            if (!this.streamStats.has(streamId)) {
-                this.streamStats.set(streamId, {
-                    totalRequests: 0,
-                    lastAccessed: null,
-                    errors: 0,
-                    uptime: 0,
-                    startTime: null
-                });
+            const stats = this.streamStats.get(streamId);
+            if (stats) {
+                stats.startTime = new Date();
+                stats.uptime = 0;
+                stats.errors = 0;
             }
 
             // 获取统计信息引用
-            const stats = this.streamStats.get(streamId);
             const configStats = streamConfig.stats;
             
             // 更新统计信息
@@ -228,11 +229,8 @@ class StreamManager {
             
             // 更新错误统计
             const stats = this.streamStats.get(streamId);
-            const configStats = this.streams.get(streamId)?.stats;
-            
             if (stats) {
                 stats.errors++;
-                stats.startTime = null;
             }
             
             if (configStats) {
@@ -319,16 +317,9 @@ class StreamManager {
                         message.includes('Failed to reload playlist');
 
                     if (isFatalError) {
-                        // 增加失败计数
-                        const currentCount = this.failureCount.get(streamId) || 0;
-                        this.failureCount.set(streamId, currentCount + 1);
-
-                        // 如果失败次数超过阈值，标记流为失效并停止
-                        if (currentCount >= 3) {  // 降低失败阈值到3次
-                            logger.error(`Stream ${streamId} marked as invalid after ${currentCount} failures`);
-                            this.markStreamAsInvalid(streamId);
-                            this.stopStreaming(streamId);
-                            return;  // 立即返回，不再重试
+                        const stats = this.streamStats.get(streamId);
+                        if (stats) {
+                            stats.errors++;
                         }
                     }
 
@@ -416,7 +407,7 @@ class StreamManager {
         });
     }
 
-    // 添加清理旧分的方法
+    // 加清理旧分的方法
     async cleanupOldSegments(outputPath) {
         try {
             const files = fs.readdirSync(outputPath);
@@ -596,12 +587,12 @@ class StreamManager {
                 // 清理流程序引用
                 this.streamProcesses.delete(streamId);
                 
-                // 更新统计信息和状态
+                // 重置统计信息
                 const stats = this.streamStats.get(streamId);
                 if (stats) {
                     stats.startTime = null;
+                    stats.uptime = 0;
                     stats.errors = 0;
-                    stats.lastStopped = new Date();  // 添加停止时间记录
                 }
 
                 // 更新流配置中的状态
@@ -738,7 +729,7 @@ class StreamManager {
 
     // 添加检查流状态的方法
     isStreamActive(streamId) {
-        // 检查是否有进程在运行
+        // 检查是��有进程在运行
         const hasProcess = this.streamProcesses.has(streamId);
         
         // 检查是否有最近的统计信息
@@ -787,11 +778,29 @@ class StreamManager {
                         stats.lastStopped = new Date();
                     }
                     
-                    // 触发状态更新
-                    this.emit('streamStopped', streamId);
+                    // 触发状态更新事件
+                    this.emit('streamStatusChanged', streamId, 'stopped');
                 }, this.config.stream.autoStopTimeout);
                 
                 this.autoStopTimers.set(streamId, timer);
+            }
+        }
+    }
+
+    // 添加更新统计信息的方法
+    updateStats() {
+        for (const [streamId, process] of this.streamProcesses.entries()) {
+            const stats = this.streamStats.get(streamId);
+            if (stats && process.startTime) {
+                // 更新运行时间
+                const uptime = Date.now() - process.startTime.getTime();
+                stats.uptime = uptime;
+                
+                // 更新流配置中的统计信息
+                const stream = this.streams.get(streamId);
+                if (stream && stream.stats) {
+                    stream.stats.uptime = uptime;
+                }
             }
         }
     }
