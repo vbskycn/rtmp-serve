@@ -45,7 +45,30 @@ app.get('/stream/:streamId', async (req, res) => {
         await streamManager.startStreaming(streamId);
         
         // 返回 m3u8 播放列表
-        res.redirect(`/streams/${streamId}/playlist.m3u8`);
+        res.redirect(`/streams/${encodeURIComponent(streamId)}/playlist.m3u8`);
+    } catch (error) {
+        console.error(error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+// 添加直接访问 m3u8 的路由
+app.get('/streams/:streamId/playlist.m3u8', async (req, res) => {
+    const { streamId } = req.params;
+    try {
+        // 确保流存在
+        const streamUrl = await streamManager.getStreamUrl(streamId);
+        if (!streamUrl) {
+            return res.status(404).send('Stream not found');
+        }
+        
+        // 如果流未启动，则启动它
+        if (!streamManager.streamProcesses.has(streamId)) {
+            await streamManager.startStreaming(streamId);
+        }
+        
+        // 转发到静态文件
+        res.sendFile(path.join(__dirname, '../streams', streamId, 'playlist.m3u8'));
     } catch (error) {
         console.error(error);
         res.status(500).send('Internal Server Error');

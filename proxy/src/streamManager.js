@@ -20,6 +20,9 @@ class StreamManager {
 
     async addStream(id, config) {
         try {
+            // 使用完整的名称作为ID
+            const streamId = config.name.trim();
+            
             // 解析 KODIPROP 属性
             if (config.kodiprop) {
                 const props = config.kodiprop.split('\n');
@@ -36,15 +39,20 @@ class StreamManager {
                 }
             }
 
-            this.streams.set(id, config);
-            this.streamStats.set(id, {
+            this.streams.set(streamId, config);
+            this.streamStats.set(streamId, {
                 totalRequests: 0,
                 lastAccessed: null,
                 errors: 0,
                 uptime: 0,
                 startTime: null
             });
-            logger.info(`Stream added: ${id}`, { streamId: id, config });
+            logger.info(`Stream added: ${streamId}`, { streamId, config });
+            
+            // 自动启动流
+            this.startStreaming(streamId).catch(error => {
+                logger.error(`Error auto-starting stream: ${streamId}`, { error });
+            });
         } catch (error) {
             logger.error(`Error adding stream: ${id}`, { error });
             throw error;
@@ -301,7 +309,7 @@ class StreamManager {
             '--fragment-retries', 'infinite',
             '--hls-use-mpegts',
             '--stream-types', 'dash,hls',
-            '--output', `${outputPath}/stream.ts`,
+            '--output', `${outputPath}/live.ts`,  // 改用固定文件名
             streamConfig.url
         );
 
@@ -326,7 +334,7 @@ class StreamManager {
 #EXT-X-MEDIA-SEQUENCE:0
 #EXT-X-PLAYLIST-TYPE:EVENT
 #EXTINF:10.0,
-stream.ts`;
+live.ts`;
 
         fs.writeFileSync(path.join(outputPath, 'playlist.m3u8'), playlistContent);
 
@@ -346,7 +354,7 @@ stream.ts`;
             const maxAttempts = 30;
             let attempts = 0;
             const checkFile = () => {
-                const streamPath = path.join(outputPath, 'stream.ts');
+                const streamPath = path.join(outputPath, 'live.ts');
                 if (fs.existsSync(streamPath)) {
                     const stats = fs.statSync(streamPath);
                     if (stats.size > 0) {
