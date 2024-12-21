@@ -168,7 +168,7 @@ class StreamManager {
                 throw new Error('Stream not found');
             }
 
-            // 初始化或更新统计信息
+            // 初始化统计信息
             if (!streamConfig.stats) {
                 streamConfig.stats = {
                     startTime: null,
@@ -177,7 +177,6 @@ class StreamManager {
                 };
             }
 
-            // 初始化或更新 streamStats
             if (!this.streamStats.has(streamId)) {
                 this.streamStats.set(streamId, {
                     totalRequests: 0,
@@ -188,7 +187,6 @@ class StreamManager {
                 });
             }
 
-            // 更新两个统计对象
             const stats = this.streamStats.get(streamId);
             const configStats = streamConfig.stats;
             
@@ -198,25 +196,46 @@ class StreamManager {
             stats.errors = 0;
             configStats.errors = 0;
 
-            // 解析 KODIPROP 属性
-            let licenseKey = null;
-            let manifestType = null;
-            if (streamConfig.kodiprop) {
-                const props = streamConfig.kodiprop.split('\n');
-                for (const prop of props) {
-                    if (prop.startsWith('#KODIPROP:inputstream.adaptive.license_key=')) {
-                        licenseKey = prop.split('=')[1];
-                    }
-                    if (prop.startsWith('#KODIPROP:inputstream.adaptive.manifest_type=')) {
-                        manifestType = prop.split('=')[1];
-                    }
-                }
+            // 检查是否是 DASH/MPD 流
+            const isDash = streamConfig.url.includes('.mpd') || 
+                          streamConfig.kodiprop?.includes('manifest_type=mpd') ||
+                          streamConfig.url.includes('/dash/') ||
+                          streamConfig.url.includes('dash-');
+
+            if (isDash) {
+                logger.info(`Detected DASH stream, using yt-dlp for: ${streamId}`);
+                await this.startStreamingWithYtdlp(streamId, streamConfig);
+                return;
             }
 
-            // 如果是 MPD 流，直接使用 yt-dlp
-            if (manifestType === 'mpd' || streamConfig.url.includes('.mpd')) {
-                logger.info(`Using yt-dlp for MPD stream: ${streamId}`);
-                await this.startStreamingWithYtdlp(streamId, streamConfig, licenseKey);
+            // 检查流的可访问性
+            try {
+                const response = await axios.head(streamConfig.url, {
+                    timeout: 5000,
+                    maxRedirects: 5,
+                    validateStatus: null,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    }
+                });
+
+                if (response.status === 404) {
+                    throw new Error('Stream URL returned 404 Not Found');
+                }
+
+                if (response.status >= 400) {
+                    throw new Error(`Stream URL returned status ${response.status}`);
+                }
+
+                // 如果有重定向，使用最终的 URL
+                if (response.request?.res?.responseUrl) {
+                    streamConfig.url = response.request.res.responseUrl;
+                }
+            } catch (error) {
+                logger.error(`Error checking stream URL: ${streamId}`, { error });
+                // 如果 URL 检查失败，尝试使用 yt-dlp
+                logger.info(`Falling back to yt-dlp for: ${streamId}`);
+                await this.startStreamingWithYtdlp(streamId, streamConfig);
                 return;
             }
 
@@ -225,35 +244,7 @@ class StreamManager {
                 fs.mkdirSync(outputPath, { recursive: true });
             }
 
-            // 获取实际的 MPD URL（处理重定向）
-            try {
-                logger.info(`Fetching MPD manifest for stream: ${streamId}`);
-                const response = await axios.get(streamConfig.url, {
-                    maxRedirects: 5,
-                    validateStatus: null,
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                    }
-                });
-                
-                if (response.status === 302 || response.headers.location) {
-                    const redirectUrl = response.headers.location;
-                    logger.info(`Stream redirected to: ${redirectUrl}`);
-                    streamConfig.url = redirectUrl;
-                }
-
-                // 检查响应内容类型
-                logger.debug('Stream response details:', {
-                    contentType: response.headers['content-type'],
-                    status: response.status,
-                    headers: response.headers
-                });
-            } catch (error) {
-                logger.error(`Error fetching MPD manifest: ${streamId}`, { error });
-                throw error;
-            }
-
-            // 基础输入选项
+            // FFmpeg 输入选项
             const inputOptions = [
                 '-reconnect', '1',
                 '-reconnect_streamed', '1',
@@ -262,7 +253,7 @@ class StreamManager {
                 '-allowed_extensions', 'ALL',
                 '-y',
                 '-nostdin',
-                '-loglevel', 'debug',  // 改为 debug 级别以获取更多信息
+                '-loglevel', 'warning',  // 改为 warning 级别减少日志
                 '-protocol_whitelist', 'file,http,https,tcp,tls,crypto,data',
                 '-re',
                 '-fflags', '+genpts+igndts',
@@ -270,27 +261,13 @@ class StreamManager {
                 '-probesize', '15000000'
             ];
 
-            // MPD 特定选项
-            if (manifestType === 'mpd' || streamConfig.url.includes('.mpd')) {
-                const [keyId, key] = (licenseKey || '').split(':');
-                
-                // 构建包含解密信息的请求头
-                const headers = [
-                    'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                    `X-AxDRM-Message: ${licenseKey}`
-                ].join('\r\n') + '\r\n';
-
-                inputOptions.push(
-                    '-headers', headers,
-                    '-stream_loop', '-1',
-                    '-live_start_index', '0'
-                );
-
-                if (keyId && key) {
-                    // 添加解密相关选项
+            // 如果有 license key，添加相关头信息
+            if (streamConfig.kodiprop?.includes('license_key')) {
+                const licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
+                if (licenseKey) {
                     inputOptions.push(
-                        '-decryption_key', key,
-                        '-decryption_key_id', keyId
+                        '-headers', 
+                        `X-AxDRM-Message: ${licenseKey}\r\nContent-Type: application/dash+xml\r\n`
                     );
                 }
             }
