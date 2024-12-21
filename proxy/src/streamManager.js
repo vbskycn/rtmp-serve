@@ -265,14 +265,18 @@ class StreamManager {
             fs.mkdirSync(outputPath, { recursive: true });
         }
 
-        // 简化 yt-dlp 参数，只保留必要的选项
+        // 构建 yt-dlp 参数
         const args = [
-            '--allow-unplayable-formats',
             '--no-check-certificates',
+            '--allow-unplayable-formats',
             '--no-part',
+            '--no-mtime',
             '--live-from-start',
-            '--fragment-retries', 'infinite',
-            '--concurrent-fragments', '1'
+            '--no-playlist-reverse',
+            '--force-generic-extractor',
+            '--concurrent-fragments', '1',
+            '--downloader', 'ffmpeg',
+            '--downloader-args', 'ffmpeg:-protocol_whitelist file,http,https,tcp,tls,crypto',
         ];
 
         // 添加 DRM 解密头
@@ -283,8 +287,20 @@ class StreamManager {
             );
         }
 
-        // 设置输出
+        // 添加 User-Agent
         args.push(
+            '--add-header',
+            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        );
+
+        // 设置格式和输出
+        args.push(
+            '--format', 'best[protocol=dash]/best',
+            '--fixup', 'never',
+            '--retries', 'infinite',
+            '--fragment-retries', 'infinite',
+            '--hls-use-mpegts',
+            '--stream-types', 'dash,hls',
             '--output', `${outputPath}/stream.ts`,
             streamConfig.url
         );
@@ -308,10 +324,22 @@ class StreamManager {
 #EXT-X-VERSION:3
 #EXT-X-TARGETDURATION:10
 #EXT-X-MEDIA-SEQUENCE:0
+#EXT-X-PLAYLIST-TYPE:EVENT
 #EXTINF:10.0,
 stream.ts`;
 
         fs.writeFileSync(path.join(outputPath, 'playlist.m3u8'), playlistContent);
+
+        // 监控进程和文件
+        ytdlp.on('close', (code) => {
+            logger.info(`yt-dlp process exited with code ${code}`);
+            this.streamProcesses.delete(streamId);
+            if (code !== 0) {
+                logger.error(`yt-dlp failed for stream: ${streamId}`);
+                // 5秒后重试
+                setTimeout(() => this.startStreaming(streamId), 5000);
+            }
+        });
 
         // 等待文件创建并监控大小
         return new Promise((resolve, reject) => {
@@ -323,6 +351,10 @@ stream.ts`;
                     const stats = fs.statSync(streamPath);
                     if (stats.size > 0) {
                         logger.info(`Stream ${streamId} started successfully`);
+                        
+                        // 启动文件监控
+                        this.monitorStreamFile(streamId, streamPath);
+                        
                         resolve();
                         return;
                     }
@@ -336,6 +368,42 @@ stream.ts`;
             };
             checkFile();
         });
+    }
+
+    // 添加文件监控方法
+    monitorStreamFile(streamId, filePath) {
+        const checkInterval = setInterval(() => {
+            try {
+                const stats = fs.statSync(filePath);
+                const now = Date.now();
+                const fileAge = now - stats.mtimeMs;
+
+                // 如果文件超过30秒没有更新，重启流
+                if (fileAge > 30000) {
+                    logger.warn(`Stream file not updated for ${fileAge}ms, restarting: ${streamId}`);
+                    this.restartStream(streamId);
+                    clearInterval(checkInterval);
+                }
+            } catch (error) {
+                logger.error(`Error monitoring stream file: ${streamId}`, { error });
+                this.restartStream(streamId);
+                clearInterval(checkInterval);
+            }
+        }, 5000); // 每5秒检查一次
+
+        // 保存检查间隔的引用，以便后续清理
+        this.healthChecks.set(streamId, checkInterval);
+    }
+
+    // 添加重启流的方法
+    async restartStream(streamId) {
+        try {
+            await this.stopStreaming(streamId);
+            await this.startStreaming(streamId);
+            logger.info(`Stream restarted: ${streamId}`);
+        } catch (error) {
+            logger.error(`Error restarting stream: ${streamId}`, { error });
+        }
     }
 
     // 添加 streamlink 作为备选方案
@@ -462,16 +530,6 @@ stream.ts`;
             } catch (error) {
                 logger.error(`Health check failed for stream: ${streamId}`, { error });
             }
-        }
-    }
-
-    async restartStream(streamId) {
-        try {
-            await this.stopStreaming(streamId);
-            await this.startStreaming(streamId);
-            logger.info(`Stream restarted: ${streamId}`);
-        } catch (error) {
-            logger.error(`Error restarting stream: ${streamId}`, { error });
         }
     }
 
