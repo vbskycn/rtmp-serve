@@ -214,6 +214,7 @@
                 // 销毁现有播放器
                 if (dp) {
                     dp.destroy();
+                    dp = null;
                 }
 
                 // 创建新的DPlayer实例
@@ -222,7 +223,7 @@
                     video: {
                         url: playUrl,
                         type: 'hls',
-                        autoplay: true
+                        autoplay: true,  // 设置自动播放
                     },
                     theme: '#3498db',
                     hotkey: true,
@@ -243,7 +244,17 @@
                 });
 
                 // 监听播放开始事件
-                dp.on('playing', () => {
+                dp.on('loadstart', () => {
+                    // 强制播放
+                    dp.play();
+                });
+
+                // 监听播放器就绪事件
+                dp.on('loadedmetadata', () => {
+                    // 再次尝试播放
+                    dp.play().catch(error => {
+                        console.warn('Autoplay failed:', error);
+                    });
                     document.querySelector('.loading-overlay').style.display = 'none';
                 });
 
@@ -255,6 +266,53 @@
             }
         }
 
+        // 修改切换流的函数
+        async function switchStream(newStreamId) {
+            try {
+                // 显示加载动画
+                document.querySelector('.loading-overlay').style.display = 'flex';
+                
+                // 更新streamId
+                streamId = newStreamId;
+                
+                // 更新URL参数
+                const newUrl = new URL(window.location.href);
+                newUrl.searchParams.set('id', streamId);
+                window.history.pushState({}, '', newUrl);
+                
+                // 更新活动状态
+                document.querySelectorAll('.stream-item').forEach(item => {
+                    item.classList.remove('active');
+                    if (item.dataset.streamId === streamId) {
+                        item.classList.add('active');
+                        const streamList = item.parentElement;
+                        streamList.classList.add('active');
+                    }
+                });
+
+                // 重置重连计数
+                reconnectAttempts = 0;
+                
+                // 销毁现有播放器并重新初始化
+                if (dp) {
+                    dp.destroy();
+                    dp = null;
+                }
+                
+                // 等待一小段时间确保清理完成
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // 重新初始化播放器
+                await initPlayer();
+                
+            } catch (error) {
+                console.error('Error switching stream:', error);
+                document.querySelector('.loading-overlay').style.display = 'none';
+                alert('切换频道失败，请重试');
+            }
+        }
+
+        // 修改错误处理函数
         function handleStreamError() {
             if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
                 reconnectAttempts++;
@@ -268,17 +326,29 @@
                     reloadPlayer();
                 }, RECONNECT_DELAY);
             } else {
+                document.querySelector('.loading-overlay').style.display = 'none';
                 alert('播放失败，请刷新页面重试');
             }
         }
 
+        // 修改重新加载函数
         function reloadPlayer() {
             reconnectAttempts = 0;
             if (autoReconnectTimer) {
                 clearTimeout(autoReconnectTimer);
             }
             document.querySelector('.loading-overlay').style.display = 'flex';
-            initPlayer();
+            
+            // 确保完全销毁现有播放器
+            if (dp) {
+                dp.destroy();
+                dp = null;
+            }
+            
+            // 短暂延迟后重新初始化
+            setTimeout(() => {
+                initPlayer();
+            }, 1000);
         }
 
         async function loadPlaylist() {
@@ -334,32 +404,6 @@
                 }
             } catch (error) {
                 console.error('Error loading playlist:', error);
-            }
-        }
-
-        async function switchStream(newStreamId) {
-            try {
-                streamId = newStreamId;
-                
-                const newUrl = new URL(window.location.href);
-                newUrl.searchParams.set('id', streamId);
-                window.history.pushState({}, '', newUrl);
-                
-                document.querySelectorAll('.stream-item').forEach(item => {
-                    item.classList.remove('active');
-                    if (item.dataset.streamId === streamId) {
-                        item.classList.add('active');
-                        const streamList = item.parentElement;
-                        streamList.classList.add('active');
-                    }
-                });
-                
-                document.querySelector('.loading-overlay').style.display = 'flex';
-                await initPlayer();
-                
-            } catch (error) {
-                console.error('Error switching stream:', error);
-                alert('切换频��失败，请重试');
             }
         }
 
