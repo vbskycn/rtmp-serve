@@ -109,7 +109,7 @@
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">流媒体管理系统v1.1.21</h1>
+        <h1 class="text-center mb-4">流媒体管理系统v1.1.25</h1>
 
         <!-- 仪表盘 -->
         <div class="dashboard">
@@ -840,7 +840,7 @@
                 });
         }
 
-        // 导出TXT格式
+        // 修改导出TXT格式的函数
         function exportTXT() {
             fetch('/api/streams')
                 .then(response => response.json())
@@ -861,7 +861,9 @@
                     for (const [category, categoryStreams] of Object.entries(streamsByCategory)) {
                         content += `${category},#genre#\n`;
                         categoryStreams.forEach(stream => {
-                            content += `${stream.name},${stream.url}\n`;
+                            // 使用转发后的地址替代原始地址
+                            const playUrl = `http://${serverConfig.server.host}:${serverConfig.server.port}/play/${stream.id}`;
+                            content += `${stream.name},${playUrl}\n`;
                         });
                         content += '\n'; // 分类之间添加空行
                     }
