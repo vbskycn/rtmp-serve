@@ -18,6 +18,7 @@ class StreamManager extends EventEmitter {
         this.failureCount = new Map();
         this.activeViewers = new Map();
         this.autoStopTimers = new Map();
+        this.manuallyStartedStreams = new Set();
         
         // 创建配置目录
         const configDir = path.dirname(this.configPath);
@@ -30,7 +31,7 @@ class StreamManager extends EventEmitter {
         
         // 每小时运行一次清理
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
-        // 每5分钟运行一���健康检查
+        // 每5分钟运行一次健康检查
         setInterval(() => this.checkStreamsHealth(), 5 * 60 * 1000);
         
         // 加载配置
@@ -252,15 +253,17 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    async startStreaming(streamId) {
+    async startStreaming(streamId, isManualStart = false) {
         try {
-            if (this.streamProcesses.has(streamId)) {
-                return;
+            const stream = this.streams.get(streamId);
+            if (!stream) {
+                throw new Error('Stream not found');
             }
 
-            const streamConfig = this.streams.get(streamId);
-            if (!streamConfig) {
-                throw new Error('Stream not found');
+            // 如果是手动启动，记录到集合中
+            if (isManualStart) {
+                this.manuallyStartedStreams.add(streamId);
+                logger.info(`Stream ${streamId} marked as manually started`);
             }
 
             // 初始化统计信息
@@ -272,7 +275,7 @@ class StreamManager extends EventEmitter {
             }
 
             // 获取统计信息引用
-            const configStats = streamConfig.stats;
+            const configStats = stream.stats;
             
             // 更新统计信息
             const now = new Date();
@@ -286,7 +289,7 @@ class StreamManager extends EventEmitter {
             }
 
             // 使用 FFmpeg 处理流
-            await this.startStreamingWithFFmpeg(streamId, streamConfig);
+            await this.startStreamingWithFFmpeg(streamId, stream);
 
         } catch (error) {
             logger.error(`Error starting stream: ${streamId}`, { 
@@ -358,7 +361,7 @@ class StreamManager extends EventEmitter {
             '-hls_segment_type', 'mpegts',
             '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
             '-start_number', '0',
-            '-preset', 'veryfast',         // 使用��速编码预设
+            '-preset', 'veryfast',         // 使用快速编码预设
             '-tune', 'zerolatency',        // 优化低延迟
             '-max_muxing_queue_size', '2048',
             '-hls_init_time', '2',
@@ -645,6 +648,9 @@ class StreamManager extends EventEmitter {
 
     async stopStreaming(streamId) {
         try {
+            // 从手动启动集合中移除
+            this.manuallyStartedStreams.delete(streamId);
+            
             // 清除自动停止定时器
             if (this.autoStopTimers.has(streamId)) {
                 clearTimeout(this.autoStopTimers.get(streamId));
@@ -843,24 +849,18 @@ class StreamManager extends EventEmitter {
         if (count > 0) {
             this.activeViewers.set(streamId, count - 1);
             
-            // 如果没有观看者，启动自动停止定时器
-            if (count - 1 === 0) {
-                logger.debug(`No viewers left for stream ${streamId}, starting auto-stop timer`);
+            // 只有不是手动启动的流才设置自动停止定时器
+            if (count - 1 === 0 && !this.manuallyStartedStreams.has(streamId)) {
+                logger.debug(`No viewers left for auto-started stream ${streamId}, starting auto-stop timer`);
                 const timer = setTimeout(async () => {
-                    logger.info(`Auto-stopping inactive stream: ${streamId}`);
-                    await this.stopStreaming(streamId);  // 使用 await 确保完全停止
-                    this.autoStopTimers.delete(streamId);
-                    
-                    // 强制刷新状态
-                    const stats = this.streamStats.get(streamId);
-                    if (stats) {
-                        stats.startTime = null;
-                        stats.lastStopped = new Date();
+                    // 再次检查是否还有观看者
+                    const currentCount = this.activeViewers.get(streamId) || 0;
+                    if (currentCount === 0) {
+                        logger.info(`Auto-stopping inactive stream: ${streamId}`);
+                        await this.stopStreaming(streamId);
+                        this.autoStopTimers.delete(streamId);
                     }
-                    
-                    // 触发状态更新事件
-                    this.emit('streamStatusChanged', streamId, 'stopped');
-                }, this.config.stream.autoStopTimeout);
+                }, 3 * 60 * 1000); // 3分钟后自动停止
                 
                 this.autoStopTimers.set(streamId, timer);
             }
