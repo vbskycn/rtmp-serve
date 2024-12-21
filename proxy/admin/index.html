@@ -122,11 +122,7 @@
                 <div class="stat-label">活跃流数量</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value" id="totalBandwidth">0 MB/s</div>
-                <div class="stat-label">总带宽使用</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="systemUptime">0天</div>
+                <div class="stat-value" id="systemUptime">刚刚启动</div>
                 <div class="stat-label">系统运行时间</div>
             </div>
             <div class="stat-card">
@@ -273,11 +269,7 @@
                 });
                 document.getElementById('activeStreams').textContent = activeStreams.length;
 
-                // 计算总带宽使用（假设每个活跃流使用2MB/s）
-                const totalBandwidth = activeStreams.length * 2;
-                document.getElementById('totalBandwidth').textContent = `${totalBandwidth} MB/s`;
-
-                // 获取系统运行时间
+                // 获取系统统计信息
                 try {
                     const statsResponse = await fetch('/api/stats');
                     const statsData = await statsResponse.json();
@@ -376,7 +368,7 @@
                                     <i class="fa fa-stop"></i> 停止
                                 </button>
                                 <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
-                                    <i class="fa fa-trash"></i> ��除
+                                    <i class="fa fa-trash"></i> 删除
                                 </button>
                             </td>
                         `;
@@ -514,10 +506,16 @@
             const hours = Math.floor(minutes / 60);
             const days = Math.floor(hours / 24);
 
-            if (days > 0) return `${days}天`;
-            if (hours > 0) return `${hours}小时`;
-            if (minutes > 0) return `${minutes}分钟`;
-            return `${seconds}秒`;
+            const remainingHours = hours % 24;
+            const remainingMinutes = minutes % 60;
+
+            let result = '';
+            if (days > 0) result += `${days}天`;
+            if (remainingHours > 0) result += `${remainingHours}时`;
+            if (remainingMinutes > 0) result += `${remainingMinutes}分`;
+            if (result === '') result = '刚刚启动';
+
+            return result;
         }
 
         // 刷新流列表
@@ -529,7 +527,7 @@
         async function init() {
             await getServerConfig();
             await loadStreams();
-            setInterval(loadStreams, 5000);
+            setInterval(loadStreams, 10000);
         }
 
         // 启动始化
