@@ -30,7 +30,7 @@ class StreamManager extends EventEmitter {
         
         // 每小时运行一次清理
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
-        // 每5分钟运行一���健康检查
+        // 每5分钟运行一次健康检查
         setInterval(() => this.checkStreamsHealth(), 5 * 60 * 1000);
         
         // 加载配置
@@ -88,7 +88,7 @@ class StreamManager extends EventEmitter {
         try {
             const configs = {};
             for (const [id, config] of this.streams.entries()) {
-                // ��保保存完整的流配置
+                // 确保保存完整的流配置
                 configs[id] = {
                     id: config.id,
                     name: config.name,
@@ -318,36 +318,49 @@ class StreamManager extends EventEmitter {
 
         // 构建 FFmpeg 输入参数
         const inputArgs = [
-            '-hide_banner',          // 隐 banner
-            '-reconnect', '1',       // 断开时重连
+            '-hide_banner',
+            '-nostats',
+            '-y',
+            '-fflags', '+genpts+igndts+discardcorrupt',
+            '-avoid_negative_ts', 'make_zero',
+            '-analyzeduration', '2000000',
+            '-probesize', '1000000',
+            '-rw_timeout', '5000000',
+            '-thread_queue_size', '4096',
+            '-reconnect', '1',
             '-reconnect_streamed', '1',
-            '-reconnect_delay_max', '5',
-            '-rw_timeout', '5000000',  // 读写超时
-            '-timeout', '5000000',     // 连接超时
-            '-fflags', '+genpts+igndts+discardcorrupt',  // 容错处理
-            '-analyzeduration', '2000000',  // 分时长
-            '-probesize', '1000000',   // 探测大小
+            '-reconnect_delay_max', '2',
+            '-multiple_requests', '1',
             '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            '-headers', 'Accept: */*\r\n',
             '-i', streamConfig.url
         ];
 
         // 构建 FFmpeg 输出参数
         const outputArgs = [
-            '-c:v', 'copy',           // 复制视频流
-            '-c:a', 'aac',           // 转换音频为 AAC
-            '-b:a', '128k',          // 音频比特率
-            '-ac', '2',              // 双声道
-            '-ar', '44100',          // 音频采样率
-            '-f', 'hls',             // HLS 格式
-            '-hls_time', '2',        // 每个分片2秒
-            '-hls_list_size', '6',   // 保留6个分片（约12秒）
-            '-hls_flags', 'delete_segments+append_list+discont_start+independent_segments',  // HLS 标志
-            '-hls_segment_type', 'mpegts',  // 分片类型
-            '-hls_segment_filename', `${outputPath}/segment_%d.ts`,  // 分片文件名
-            '-method', 'PUT',        // 使用 PUT 方法写入文件
-            '-max_muxing_queue_size', '1024',  // 最大复用队列
-            '-y',                    // 覆盖输出文件
+            '-sn',                          // 禁用字幕
+            '-map', '0:v:0',               // 选择第一个视频流
+            '-map', '0:a:0',               // 选择第一个音频流
+            '-c:v', 'copy',                // 视频流直接复制
+            '-c:a', 'aac',                 // 音频转换为 AAC
+            '-b:a', '128k',                // 音频码率
+            '-ac', '2',                    // 双声道
+            '-ar', '44100',                // 音频采样率
+            '-f', 'hls',                   // HLS 格式
+            '-hls_time', '2',              // 每个分片2秒
+            '-hls_list_size', '6',         // 保留6个分片
+            '-hls_flags', 'delete_segments+append_list+discont_start+independent_segments',
+            '-hls_segment_type', 'mpegts',
+            '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
+            '-start_number', '0',
+            '-preset', 'veryfast',         // 使用快速编码预设
+            '-tune', 'zerolatency',        // 优化低延迟
+            '-max_muxing_queue_size', '2048',
+            '-hls_init_time', '2',
+            '-hls_time', '2',
+            '-hls_segment_type', 'mpegts',
+            '-g', '48',                    // GOP大小
+            '-sc_threshold', '0',          // 禁用场景切换检测
+            '-strict', 'experimental',
             `${outputPath}/playlist.m3u8`  // 播放列表路径
         ];
 
@@ -510,7 +523,7 @@ class StreamManager extends EventEmitter {
                 this.restartStream(streamId);
                 clearInterval(checkInterval);
             }
-        }, 5000); // 每5秒��查一次
+        }, 5000); // 每5秒检查一次
 
         // 保存检查间隔的引用，便后续清理
         this.healthChecks.set(streamId, checkInterval);
