@@ -8,7 +8,7 @@ const fs = require('fs');
 // 创建 StreamManager 实例
 const streamManager = new StreamManager();
 
-// 生成流ID
+// 修改生成流ID的函数
 function generateStreamId(name, url, customId = '') {
     // 如果提供了自定义ID，直接使用
     if (customId) {
@@ -19,21 +19,31 @@ function generateStreamId(name, url, customId = '') {
     try {
         const urlParts = url.split('/');
         const lastPart = urlParts[urlParts.length - 1];
-        if (lastPart && lastPart.length > 3) {
-            // 清理URL中的特殊字符
-            const cleanId = lastPart.replace(/[^a-zA-Z0-9-_]/g, '');
-            return 'stream_' + cleanId;
+        
+        // 检查是否有文件扩展名
+        if (lastPart.includes('.')) {
+            // 如果有扩展名，生成随机ID
+            const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+            let randomId = '';
+            for (let i = 0; i < 6; i++) {
+                randomId += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return 'stream_' + randomId;
+        } else {
+            // 如果没有扩展名，直接使用最后一部分作为ID
+            return 'stream_' + lastPart;
         }
     } catch (error) {
         logger.debug('Failed to extract ID from URL:', error);
+        
+        // 如果出错，生成随机ID
+        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        let randomId = '';
+        for (let i = 0; i < 6; i++) {
+            randomId += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return 'stream_' + randomId;
     }
-
-    // 如果无法从URL提取,则使用名称生成ID
-    const cleanName = name.toLowerCase()
-        .replace(/[^a-z0-9]/g, '')  // 只保留字母和数字
-        .substring(0, 10);  // 限制长度
-    
-    return 'stream_' + cleanName;
 }
 
 // 添加单个流
