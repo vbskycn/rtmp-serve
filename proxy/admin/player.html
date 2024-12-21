@@ -220,7 +220,7 @@
                 // 创建新的DPlayer实例，优化HLS配置
                 dp = new DPlayer({
                     container: document.getElementById('dplayer'),
-                    live: true, // 标记为直播流
+                    live: true,
                     video: {
                         url: playUrl,
                         type: 'hls',
@@ -229,38 +229,43 @@
                             debug: false,
                             // 基本配置
                             enableWorker: true,
-                            lowLatencyMode: true,
-                            liveSyncDuration: 3,
-                            liveMaxLatencyDuration: 6,
+                            lowLatencyMode: false,  // 关闭低延迟模式，提高稳定性
                             
                             // 缓冲区配置
-                            maxBufferSize: 50 * 1000 * 1000, // 降低最大缓冲大小到50MB
-                            maxBufferLength: 10,             // 降低最大缓冲长度到10秒
-                            maxMaxBufferLength: 30,          // 最大允许缓冲30秒
+                            maxBufferLength: 30,             // 增加缓冲长度到30秒
+                            maxMaxBufferLength: 60,          // 最大允许缓冲60秒
+                            maxBufferSize: 200 * 1000 * 1000, // 增加缓冲大小到200MB
                             
                             // 加载超时配置
-                            manifestLoadingTimeOut: 10000,    // 10秒
-                            manifestLoadingMaxRetry: 2,       // 最多重试2次
-                            levelLoadingTimeOut: 10000,       // 10秒
-                            levelLoadingMaxRetry: 2,          // 最多重试2次
-                            fragLoadingTimeOut: 10000,        // 10秒
-                            fragLoadingMaxRetry: 2,           // 最多重试2次
-                            
-                            // 错误恢复配置
-                            recoverMediaError: true,          // 自动恢复媒体错误
-                            recoverNetworkError: true,        // 自动恢复网络错误
+                            manifestLoadingTimeOut: 20000,    // 增加超时时间到20秒
+                            manifestLoadingMaxRetry: 3,       // 最多重试3次
+                            levelLoadingTimeOut: 20000,       // 20秒
+                            levelLoadingMaxRetry: 3,          // 最多重试3次
+                            fragLoadingTimeOut: 20000,        // 20秒
+                            fragLoadingMaxRetry: 3,           // 最多重试3次
                             
                             // 直播流优化
                             liveDurationInfinity: true,
-                            liveBackBufferLength: 0,          // 禁用回退缓冲
+                            liveBackBufferLength: 30,         // 增加回退缓冲
                             
                             // 性能优化
-                            appendErrorMaxRetry: 3,           // 最多重试3次
-                            startLevel: -1,                   // 自动选择起始质量
-                            abrEwmaDefaultEstimate: 500000,   // 默认带宽估计
-                            abrBandWidthFactor: 0.95,        // 带宽因子
-                            abrBandWidthUpFactor: 0.7,       // 带宽上升因子
+                            startLevel: 0,                    // 从最低质量开始
+                            abrEwmaDefaultEstimate: 1000000,  // 增加默认带宽估计
+                            abrBandWidthFactor: 0.9,         // 调整带宽因子
+                            abrBandWidthUpFactor: 0.7,       // 调整带宽上升因子
                             abrMaxWithRealBitrate: true,     // 使用实际码率
+                            
+                            // 错误恢复配置
+                            fragLoadingRetryDelay: 1000,     // 片段加载重试延迟
+                            manifestLoadingRetryDelay: 1000,  // 清单加载重试延迟
+                            levelLoadingRetryDelay: 1000,    // 级别加载重试延迟
+                            
+                            // 新增配置
+                            backBufferLength: 30,             // 增加后退缓冲长度
+                            stretchShortVideoTrack: true,    // 拉伸短视频轨道
+                            maxAudioFramesDrift: 1,          // 减少音频帧漂移
+                            forceKeyFrameOnDiscontinuity: true, // 强制关键帧
+                            appendErrorMaxRetry: 5,           // 增加追加错误最大重试次数
                         }
                     },
                     theme: '#3498db',
@@ -276,39 +281,62 @@
                     ]
                 });
 
-                // 监听错误事件，但不要立即重载
-                dp.on('error', (error) => {
-                    console.warn('Player error:', error);
-                    // 只有在严重错误时才重载
-                    if (error && error.type === 'fatal') {
-                        handleStreamError();
+                // 添加更多事件监听
+                dp.on('waiting', () => {
+                    console.log('Player waiting for data...');
+                    // 如果等待时间过长，尝试自动恢复
+                    setTimeout(() => {
+                        if (dp && dp.video.paused) {
+                            console.log('Auto recovering from waiting state...');
+                            dp.play();
+                        }
+                    }, 5000);
+                });
+
+                // 监听卡顿事件
+                dp.on('stalled', () => {
+                    console.log('Playback stalled, attempting recovery...');
+                    if (dp.plugins.hls) {
+                        dp.plugins.hls.recoverMediaError();
                     }
                 });
 
-                // 监听HLS事件
+                // 监听错误事件
+                dp.on('error', () => {
+                    console.log('Player error, attempting recovery...');
+                    if (dp.plugins.hls) {
+                        // 先尝试恢复媒体错误
+                        dp.plugins.hls.recoverMediaError();
+                        // 如果还是失败，则重新加载
+                        setTimeout(() => {
+                            if (dp.video.paused) {
+                                reloadPlayer();
+                            }
+                        }, 3000);
+                    }
+                });
+
+                // 添加HLS特定事件监听
                 if (dp.plugins.hls) {
-                    dp.plugins.hls.on(Hls.Events.ERROR, (event, data) => {
-                        console.warn('HLS Error:', data);
-                        // 只有在致命错误时才处理
-                        if (data.fatal) {
-                            handleStreamError();
+                    dp.plugins.hls.on(Hls.Events.BUFFER_APPENDING, () => {
+                        console.log('Buffer appending...');
+                    });
+
+                    dp.plugins.hls.on(Hls.Events.BUFFER_APPENDED, () => {
+                        console.log('Buffer appended successfully');
+                    });
+
+                    dp.plugins.hls.on(Hls.Events.BUFFER_STALLED, () => {
+                        console.log('Buffer stalled, attempting recovery...');
+                        dp.plugins.hls.recoverMediaError();
+                    });
+
+                    // 监听片段加载失败
+                    dp.plugins.hls.on(Hls.Events.FRAG_LOAD_ERROR, (event, data) => {
+                        console.log('Fragment load error, retrying...');
+                        if (!data.fatal) {
+                            dp.plugins.hls.recoverMediaError();
                         }
-                    });
-
-                    // 监听媒体错误，尝试恢复
-                    dp.plugins.hls.on(Hls.Events.MEDIA_ATTACHING, () => {
-                        console.log('Media attaching...');
-                    });
-
-                    dp.plugins.hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-                        console.log('Media attached successfully');
-                    });
-
-                    // 监听分片加载成功
-                    dp.plugins.hls.on(Hls.Events.FRAG_LOADED, () => {
-                        // 重置重连计数
-                        reconnectAttempts = 0;
-                        document.querySelector('.loading-overlay').style.display = 'none';
                     });
                 }
 
