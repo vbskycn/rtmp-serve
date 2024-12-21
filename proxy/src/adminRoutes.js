@@ -20,19 +20,20 @@ function generateStreamId(name, url, customId = '') {
         const urlParts = url.split('/');
         const lastPart = urlParts[urlParts.length - 1];
         if (lastPart && lastPart.length > 3) {
-            return 'stream_' + lastPart;
+            // 清理URL中的特殊字符
+            const cleanId = lastPart.replace(/[^a-zA-Z0-9-_]/g, '');
+            return 'stream_' + cleanId;
         }
     } catch (error) {
         logger.debug('Failed to extract ID from URL:', error);
     }
 
-    // 生成随机ID（6位字母数字组合）
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    let randomId = '';
-    for (let i = 0; i < 6; i++) {
-        randomId += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return 'stream_' + randomId;
+    // 如果无法从URL提取,则使用名称生成ID
+    const cleanName = name.toLowerCase()
+        .replace(/[^a-z0-9]/g, '')  // 只保留字母和数字
+        .substring(0, 10);  // 限制长度
+    
+    return 'stream_' + cleanName;
 }
 
 // 添加单个流

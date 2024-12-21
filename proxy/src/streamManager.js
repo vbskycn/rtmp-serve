@@ -30,7 +30,7 @@ class StreamManager extends EventEmitter {
         
         // 每小时运行一次清理
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
-        // 每5分钟运行一次健康检查
+        // 每5分钟运行一���健康检查
         setInterval(() => this.checkStreamsHealth(), 5 * 60 * 1000);
         
         // 加载配置
@@ -107,32 +107,50 @@ class StreamManager extends EventEmitter {
                 throw new Error('缺少必要的流信息');
             }
 
-            // ���成流ID（如果没有提供）
-            const streamId = streamData.customId ? 
+            // 使用传入的ID或生成新ID
+            const streamId = streamData.id || streamData.customId ? 
                            `stream_${streamData.customId}` : 
-                           `stream_${Date.now()}`;
+                           generateStreamId(streamData.name, streamData.url);
 
-            // 添加流到管理器
-            this.streams.set(streamId, {
-                id: streamId,
-                name: streamData.name,
-                url: streamData.url,
-                category: streamData.category || '未分类',
-                stats: {
-                    startTime: null,
-                    uptime: 0,
-                    errors: 0
+            // 检查ID是否已存在
+            if (this.streams.has(streamId)) {
+                // 如果已存在，更新现有流
+                const existingStream = this.streams.get(streamId);
+                existingStream.name = streamData.name;
+                existingStream.url = streamData.url;
+                existingStream.category = streamData.category || '未分类';
+                if (streamData.tvg) {
+                    existingStream.tvg = streamData.tvg;
                 }
-            });
+            } else {
+                // 添加新流
+                this.streams.set(streamId, {
+                    id: streamId,
+                    name: streamData.name,
+                    url: streamData.url,
+                    category: streamData.category || '未分类',
+                    tvg: streamData.tvg || {
+                        id: '',
+                        name: streamData.name,
+                        logo: '',
+                        group: streamData.category || ''
+                    },
+                    stats: {
+                        startTime: null,
+                        uptime: 0,
+                        errors: 0
+                    }
+                });
 
-            // 初始化统计信息
-            this.streamStats.set(streamId, {
-                totalRequests: 0,
-                lastAccessed: null,
-                errors: 0,
-                uptime: 0,
-                startTime: null
-            });
+                // 初始化统计信息
+                this.streamStats.set(streamId, {
+                    totalRequests: 0,
+                    lastAccessed: null,
+                    errors: 0,
+                    uptime: 0,
+                    startTime: null
+                });
+            }
 
             // 保存配置
             await this.saveStreams();
@@ -800,7 +818,7 @@ class StreamManager extends EventEmitter {
         for (const [streamId, process] of this.streamProcesses.entries()) {
             const stats = this.streamStats.get(streamId);
             if (stats && process.startTime) {
-                // 更新���行时间
+                // 更新行时间
                 const uptime = Date.now() - process.startTime.getTime();
                 stats.uptime = uptime;
                 
@@ -834,7 +852,7 @@ class StreamManager extends EventEmitter {
                 const playUrl = `http://${this.config.server.host}:${this.config.server.port}/play/${stream.id}`;
                 configs.push(`${stream.name},${stream.url}`);
             }
-            configs.push(''); // 添加空行分隔��同分类
+            configs.push(''); // 添加空行分隔同分类
         }
 
         return configs.join('\n');
