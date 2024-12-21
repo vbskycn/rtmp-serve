@@ -38,7 +38,7 @@ function generateStreamId(name, url, customId = '') {
 // 添加单个流
 router.post('/api/streams', async (req, res) => {
     try {
-        const { name, url, customId } = req.body;
+        const { name, url, customId, category } = req.body;
         
         if (!name || !url) {
             return res.json({
@@ -47,25 +47,25 @@ router.post('/api/streams', async (req, res) => {
             });
         }
 
+        const streamId = generateStreamId(name, url, customId);
         const streamData = {
-            id: generateStreamId(name, url, customId),
+            id: streamId,
             name: name,
             url: url,
+            category: category || '未分类',
             kodiprop: '',
             tvg: {
                 id: '',
                 name: name,
                 logo: '',
-                group: ''
+                group: category || ''
             }
         };
 
-        await streamManager.addStream(streamData);
+        const result = await streamManager.addStream(streamData);
         
-        // 检查流是否成功添加（不检查是否启动）
-        const stream = streamManager.streams.get(streamData.id);
-        if (!stream) {
-            throw new Error('流添加失败');
+        if (!result || !result.success) {
+            throw new Error(result?.error || '添加流失败');
         }
 
         res.json({
@@ -108,18 +108,44 @@ router.post('/api/streams/batch', async (req, res) => {
     try {
         const { m3u } = req.body;
         const streams = parseM3U(m3u);
+        const results = [];
         
         for (const stream of streams) {
-            await streamManager.addStream(stream.name, {
-                name: stream.name,
-                url: stream.url,
-                kodiprop: stream.kodiprop,
-                tvg: stream.tvg
-            });
+            try {
+                const result = await streamManager.addStream({
+                    name: stream.name,
+                    url: stream.url,
+                    category: stream.tvg?.group || '未分类',
+                    kodiprop: stream.kodiprop,
+                    tvg: stream.tvg
+                });
+                results.push({
+                    name: stream.name,
+                    success: result.success,
+                    error: result.error
+                });
+            } catch (error) {
+                results.push({
+                    name: stream.name,
+                    success: false,
+                    error: error.message
+                });
+            }
         }
 
-        logger.info(`Batch added ${streams.length} streams`);
-        res.json({ success: true, count: streams.length });
+        const successCount = results.filter(r => r.success).length;
+        const failCount = results.filter(r => !r.success).length;
+
+        logger.info(`Batch added ${successCount} streams, failed ${failCount}`);
+        res.json({ 
+            success: true, 
+            results,
+            summary: {
+                total: streams.length,
+                success: successCount,
+                failed: failCount
+            }
+        });
     } catch (error) {
         logger.error('Error adding streams:', error);
         res.status(500).json({ error: error.message });
@@ -226,13 +252,19 @@ function parseM3U(content) {
     const lines = content.split('\n');
     let currentStream = null;
     let kodiprops = [];
+    let currentCategory = '未分类';
 
     for (let line of lines) {
         line = line.trim();
         if (!line) continue;
 
+        // 检查是否是分类标记行
+        if (line.endsWith('#genre#')) {
+            currentCategory = line.split(',')[0].trim();
+            continue;
+        }
+
         if (line.startsWith('#EXTINF:')) {
-            // 解析 EXTINF 行
             currentStream = {};
             const tvgInfo = line.match(/tvg-id="([^"]*)".*tvg-name="([^"]*)".*tvg-logo="([^"]*)".*group-title="([^"]*)",\s*(.*)/);
             if (tvgInfo) {
@@ -240,15 +272,23 @@ function parseM3U(content) {
                     id: tvgInfo[1],
                     name: tvgInfo[2],
                     logo: tvgInfo[3],
-                    group: tvgInfo[4]
+                    group: currentCategory
                 };
                 currentStream.name = tvgInfo[5].trim();
+            } else {
+                // 如果没有匹配到完整的TVG信息，至少设置名称和分类
+                currentStream.name = line.split(',').pop().trim();
+                currentStream.tvg = {
+                    id: '',
+                    name: currentStream.name,
+                    logo: '',
+                    group: currentCategory
+                };
             }
+            currentStream.category = currentCategory;
         } else if (line.startsWith('#KODIPROP:')) {
-            // 收集 KODIPROP
             kodiprops.push(line);
         } else if (!line.startsWith('#')) {
-            // URL 行
             if (currentStream) {
                 currentStream.url = line;
                 currentStream.kodiprop = kodiprops.join('\n');
