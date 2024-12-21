@@ -111,7 +111,7 @@ class StreamManager extends EventEmitter {
         try {
             const configs = {};
             for (const [id, config] of this.streams.entries()) {
-                // 确保保存完整的流配��
+                // 确保保存完整的流配置
                 configs[id] = {
                     id: config.id,
                     name: config.name,
@@ -148,7 +148,7 @@ class StreamManager extends EventEmitter {
                 throw new Error('缺少必要的流信息');
             }
 
-            // 生成或使用提供的streamId
+            // 生成或使���提供的streamId
             let streamId;
             if (streamData.id) {
                 streamId = streamData.id;
@@ -223,7 +223,7 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 修改删除流的方法
+    // 修改删��流的方法
     async deleteStream(streamId) {
         try {
             await this.stopStreaming(streamId);
@@ -305,7 +305,7 @@ class StreamManager extends EventEmitter {
             }
 
             // 使用 FFmpeg 处理流
-            await this.startStreamingWithFFmpeg(streamId, stream);
+            await this.startStreamingWithFFmpeg(streamId, stream, isManualStart);
 
         } catch (error) {
             logger.error(`Error starting stream: ${streamId}`, { 
@@ -328,7 +328,7 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    async startStreamingWithFFmpeg(streamId, streamConfig) {
+    async startStreamingWithFFmpeg(streamId, streamConfig, isManualStart = false) {
         const { spawn } = require('child_process');
         const outputPath = path.join(__dirname, '../streams', streamId);
         
@@ -360,7 +360,7 @@ class StreamManager extends EventEmitter {
             '-i', streamConfig.url
         ];
 
-        // 构建 FFmpeg 输出参数，添加推流输出
+        // 构建 FFmpeg 输出参数
         const outputArgs = [
             // HLS输出
             '-c:v', 'copy',
@@ -374,21 +374,26 @@ class StreamManager extends EventEmitter {
             '-hls_flags', 'delete_segments+append_list+discont_start+independent_segments',
             '-hls_segment_type', 'mpegts',
             '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
-            `${outputPath}/playlist.m3u8`,
-            
-            // RTMP推流输出（如果是手动启动的流）
-            ...(this.manuallyStartedStreams.has(streamId) ? [
+            `${outputPath}/playlist.m3u8`
+        ];
+
+        // 如果是手动启动，添加 RTMP 推流输出
+        if (isManualStart || this.manuallyStartedStreams.has(streamId)) {
+            outputArgs.push(
                 '-c:v', 'copy',
                 '-c:a', 'aac',
                 '-f', 'flv',
                 `${this.config.rtmp.pushServer}${streamId}`
-            ] : [])
-        ];
+            );
+            // 确保流被标记为手动启动
+            this.manuallyStartedStreams.add(streamId);
+            logger.info(`Adding RTMP output for manually started stream: ${streamId}`);
+        }
 
-        // 合并所有参��
+        // 合并所有参数
         const args = [...inputArgs, ...outputArgs];
 
-        logger.info(`Starting FFmpeg for stream: ${streamId}`);
+        logger.info(`Starting FFmpeg for stream: ${streamId} (manual: ${isManualStart})`);
         logger.debug(`FFmpeg command: ffmpeg ${args.join(' ')}`);
 
         return new Promise((resolve, reject) => {
@@ -451,7 +456,7 @@ class StreamManager extends EventEmitter {
                         logger.error(`FFmpeg exited with code ${code} for stream ${streamId}`);
                         logger.error(`FFmpeg stderr: ${ffmpegError}`);
                         
-                        // 检���是否包含致命错误
+                        // 检查是否包含致命错误
                         if (ffmpegError.includes('Server returned 400') ||
                             ffmpegError.includes('Server returned 403') ||
                             ffmpegError.includes('Server returned 404') ||
@@ -546,7 +551,7 @@ class StreamManager extends EventEmitter {
             }
         }, 5000); // 每5秒检查一次
 
-        // 保存查间隔的引用，便后续处理
+        // 保存查间隔的引用，��后续处理
         this.healthChecks.set(streamId, checkInterval);
     }
 
@@ -666,6 +671,9 @@ class StreamManager extends EventEmitter {
 
     async stopStreaming(streamId) {
         try {
+            // 记录是否是手动启动的流
+            const wasManuallyStarted = this.manuallyStartedStreams.has(streamId);
+            
             // 从手动启动集合中移除
             this.manuallyStartedStreams.delete(streamId);
             
@@ -740,7 +748,7 @@ class StreamManager extends EventEmitter {
                 // 保存配置以更新状态
                 await this.saveStreams();
                 
-                logger.info(`Stream stopped: ${streamId}`);
+                logger.info(`Stream stopped: ${streamId} (was manually started: ${wasManuallyStarted})`);
                 return true;
             }
             return false;
@@ -849,7 +857,7 @@ class StreamManager extends EventEmitter {
 
     // 添加检查流状态的方法
     isStreamActive(streamId) {
-        // 检查是否有进程在运行
+        // 检查是否有进程在运��
         const hasProcess = this.streamProcesses.has(streamId);
         
         // 检查是否有最近的统计信息
@@ -883,7 +891,7 @@ class StreamManager extends EventEmitter {
         if (count > 0) {
             this.activeViewers.set(streamId, count - 1);
             
-            // 只有不是手动启动的流才设置自动停止定时器
+            // 只有不是手动启动的流才设置自动停止定��器
             if (count - 1 === 0 && !this.manuallyStartedStreams.has(streamId)) {
                 logger.debug(`No viewers left for auto-started stream ${streamId}, starting auto-stop timer`);
                 const timer = setTimeout(async () => {
@@ -971,7 +979,7 @@ class StreamManager extends EventEmitter {
                 // 先停止当前流
                 await this.stopStreaming(streamId);
 
-                // 使用新ID重��创建流
+                // 使用新ID重创建流
                 this.streams.delete(streamId);
                 stream.id = newId;
                 this.streams.set(newId, stream);
