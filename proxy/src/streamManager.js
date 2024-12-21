@@ -111,7 +111,7 @@ class StreamManager extends EventEmitter {
         try {
             const configs = {};
             for (const [id, config] of this.streams.entries()) {
-                // 确保保存完整的流配置
+                // 确保保存完整的流配��
                 configs[id] = {
                     id: config.id,
                     name: config.name,
@@ -385,7 +385,7 @@ class StreamManager extends EventEmitter {
             ] : [])
         ];
 
-        // 合并所有参数
+        // 合并所有参��
         const args = [...inputArgs, ...outputArgs];
 
         logger.info(`Starting FFmpeg for stream: ${streamId}`);
@@ -451,7 +451,7 @@ class StreamManager extends EventEmitter {
                         logger.error(`FFmpeg exited with code ${code} for stream ${streamId}`);
                         logger.error(`FFmpeg stderr: ${ffmpegError}`);
                         
-                        // 检查是否包含致命错误
+                        // 检���是否包含致命错误
                         if (ffmpegError.includes('Server returned 400') ||
                             ffmpegError.includes('Server returned 403') ||
                             ffmpegError.includes('Server returned 404') ||
@@ -551,7 +551,7 @@ class StreamManager extends EventEmitter {
     }
 
     // 修改重启流的方法
-    async restartStream(streamId) {
+    async restartStream(streamId, isManualStart = false) {
         try {
             const stream = this.streams.get(streamId);
             if (!stream) {
@@ -572,10 +572,16 @@ class StreamManager extends EventEmitter {
                 return;
             }
 
+            // 如果是手动启动，记录到集合中
+            if (isManualStart) {
+                this.manuallyStartedStreams.add(streamId);
+                logger.info(`Stream ${streamId} marked as manually started for restart`);
+            }
+
             logger.info(`Restarting stream: ${streamId}`);
             await this.forceStopStreaming(streamId);
             await new Promise(resolve => setTimeout(resolve, 5000));  // 增加等待时间到5秒
-            await this.startStreaming(streamId);
+            await this.startStreaming(streamId, isManualStart);  // 传递 isManualStart 参数
         } catch (error) {
             logger.error(`Error restarting stream: ${streamId}`, { error });
             this.failureCount.set(streamId, (this.failureCount.get(streamId) || 0) + 1);
@@ -965,7 +971,7 @@ class StreamManager extends EventEmitter {
                 // 先停止当前流
                 await this.stopStreaming(streamId);
 
-                // 使用新ID重新创建流
+                // 使用新ID重��创建流
                 this.streams.delete(streamId);
                 stream.id = newId;
                 this.streams.set(newId, stream);

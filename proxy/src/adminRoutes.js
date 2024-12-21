@@ -36,7 +36,7 @@ router.post('/api/streams', async (req, res) => {
             });
         }
 
-        // 生成streamId (优先使用customId，否则生成随机ID)
+        // 生成streamId (优先使用customId，否则生成随���ID)
         const streamId = generateStreamId(name, url, customId);
         const streamData = {
             id: streamId,
@@ -177,12 +177,12 @@ router.delete('/api/streams/:id', async (req, res) => {
     }
 });
 
-// 重启流
+// 修改重启流的路由
 router.post('/api/streams/:id/restart', async (req, res) => {
     try {
         const { id } = req.params;
         const { manual } = req.body;
-        await streamManager.restartStream(id, manual);
+        await streamManager.restartStream(id, manual === true);
         res.json({ success: true });
     } catch (error) {
         logger.error(`Error restarting stream: ${id}`, error);
