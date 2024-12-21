@@ -232,6 +232,17 @@ class StreamManager {
             fs.mkdirSync(outputPath, { recursive: true });
         }
 
+        // 如果已经有进程在运行，先停止它
+        if (this.streamProcesses.has(streamId)) {
+            await this.stopStreaming(streamId);
+        }
+
+        // 解析 license_key
+        let licenseKey = null;
+        if (streamConfig.kodiprop?.includes('license_key')) {
+            licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
+        }
+
         // 构建 yt-dlp 参数
         const args = [
             '--no-check-certificates',
@@ -245,16 +256,13 @@ class StreamManager {
         ];
 
         // 添加 DRM 解密头
-        if (streamConfig.kodiprop?.includes('license_key')) {
-            const licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
-            if (licenseKey) {
-                args.push(
-                    '--add-header',
-                    `X-AxDRM-Message: ${licenseKey}`,
-                    '--add-header',
-                    'Content-Type: application/dash+xml'
-                );
-            }
+        if (licenseKey) {
+            args.push(
+                '--add-header',
+                `X-AxDRM-Message: ${licenseKey}`,
+                '--add-header',
+                'Content-Type: application/dash+xml'
+            );
         }
 
         // 添加 User-Agent
@@ -267,99 +275,98 @@ class StreamManager {
         args.push(
             '--format', 'best',
             '--no-check-formats',
-            '--retries', 'infinite',
-            '--fragment-retries', 'infinite',
+            '--retries', '3',  // 限制重试次数
+            '--fragment-retries', '3',
             '--stream-types', 'dash,hls',
-            '--live-from-start',
             '--no-part',
             '--no-mtime',
             '--no-progress',
-            '--quiet',
-            '--no-warnings',
-            '--output', '-'  // 输出到标准输出
+            '--verbose',  // 添加详细输出以便调试
+            '--output', '-'
         );
 
         // 添加源 URL
         args.push(streamConfig.url);
 
-        logger.info(`Starting yt-dlp with args:`, { args });
+        logger.info(`Starting yt-dlp for stream: ${streamId}`);
 
-        // 启动 yt-dlp 进程
-        const ytdlp = spawn('yt-dlp', args);
-        
-        // 启动 FFmpeg 进程来处理 yt-dlp 的输出
-        const ffmpeg = spawn('ffmpeg', [
-            '-i', 'pipe:0',
-            '-c:v', 'copy',
-            '-c:a', 'copy',
-            '-f', 'hls',
-            '-hls_time', '2',
-            '-hls_list_size', '6',
-            '-hls_flags', 'delete_segments+append_list+independent_segments',
-            '-hls_segment_type', 'mpegts',
-            '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
-            `${outputPath}/playlist.m3u8`
-        ]);
-
-        // 连接进程
-        ytdlp.stdout.pipe(ffmpeg.stdin);
-
-        // 错误处理
-        ytdlp.stderr.on('data', (data) => {
-            const message = data.toString();
-            logger.debug(`yt-dlp stderr: ${message}`);
-        });
-
-        ffmpeg.stderr.on('data', (data) => {
-            const message = data.toString();
-            logger.debug(`ffmpeg stderr: ${message}`);
-        });
-
-        // 保存进程引用
-        this.streamProcesses.set(streamId, {
-            ytdlp,
-            ffmpeg
-        });
-
-        // 处理进程结束
-        ytdlp.on('close', (code) => {
-            logger.info(`yt-dlp process exited with code ${code}`);
-            if (code !== 0) {
-                logger.error(`yt-dlp failed for stream: ${streamId}`);
-                setTimeout(() => this.restartStream(streamId), 5000);
-            }
-        });
-
-        ffmpeg.on('close', (code) => {
-            logger.info(`ffmpeg process exited with code ${code}`);
-            if (code !== 0) {
-                logger.error(`ffmpeg failed for stream: ${streamId}`);
-                setTimeout(() => this.restartStream(streamId), 5000);
-            }
-        });
-
-        // 等待文件创建
         return new Promise((resolve, reject) => {
-            const maxAttempts = 30;
-            let attempts = 0;
-            const checkFile = () => {
-                const playlistPath = path.join(outputPath, 'playlist.m3u8');
-                if (fs.existsSync(playlistPath)) {
-                    const stats = fs.statSync(playlistPath);
-                    if (stats.size > 0) {
-                        logger.info(`Stream ${streamId} started successfully`);
-                        resolve();
-                        return;
+            try {
+                // 启动 yt-dlp 进程
+                const ytdlp = spawn('yt-dlp', args);
+                
+                // 启动 FFmpeg 进程
+                const ffmpeg = spawn('ffmpeg', [
+                    '-i', 'pipe:0',
+                    '-c:v', 'copy',
+                    '-c:a', 'copy',
+                    '-f', 'hls',
+                    '-hls_time', '2',
+                    '-hls_list_size', '6',
+                    '-hls_flags', 'delete_segments+append_list+independent_segments',
+                    '-hls_segment_type', 'mpegts',
+                    '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
+                    `${outputPath}/playlist.m3u8`
+                ]);
+
+                // 错误处理
+                ytdlp.stderr.on('data', (data) => {
+                    const message = data.toString();
+                    logger.debug(`yt-dlp stderr: ${message}`);
+                });
+
+                ffmpeg.stderr.on('data', (data) => {
+                    const message = data.toString();
+                    logger.debug(`ffmpeg stderr: ${message}`);
+                });
+
+                // 连接进程
+                ytdlp.stdout.pipe(ffmpeg.stdin);
+
+                // 保存进程引用
+                this.streamProcesses.set(streamId, {
+                    ytdlp,
+                    ffmpeg,
+                    startTime: new Date()
+                });
+
+                // 设置超时检查
+                const timeout = setTimeout(() => {
+                    if (!fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
+                        logger.error(`Stream ${streamId} failed to start within timeout`);
+                        this.stopStreaming(streamId);
+                        reject(new Error('Stream start timeout'));
                     }
-                }
-                attempts++;
-                if (attempts >= maxAttempts) {
-                    reject(new Error('Failed to create stream file'));
-                } else {
-                    setTimeout(checkFile, 1000);
-                }
-            };
-            checkFile();
+                }, 30000);
+
+                // 检查文件创建
+                const checkInterval = setInterval(() => {
+                    if (fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
+                        clearInterval(checkInterval);
+                        clearTimeout(timeout);
+                        resolve();
+                    }
+                }, 1000);
+
+                // 错误处理
+                ytdlp.on('error', (error) => {
+                    logger.error(`yt-dlp error for stream ${streamId}:`, error);
+                    clearInterval(checkInterval);
+                    clearTimeout(timeout);
+                    reject(error);
+                });
+
+                ffmpeg.on('error', (error) => {
+                    logger.error(`ffmpeg error for stream ${streamId}:`, error);
+                    clearInterval(checkInterval);
+                    clearTimeout(timeout);
+                    reject(error);
+                });
+
+            } catch (error) {
+                logger.error(`Failed to start stream ${streamId}:`, error);
+                reject(error);
+            }
         });
     }
 
@@ -480,24 +487,16 @@ class StreamManager {
             const processes = this.streamProcesses.get(streamId);
             if (processes) {
                 if (processes.ytdlp) {
-                    processes.ytdlp.kill();
+                    processes.ytdlp.kill('SIGTERM');
                 }
                 if (processes.ffmpeg) {
-                    processes.ffmpeg.kill();
+                    processes.ffmpeg.kill('SIGTERM');
                 }
                 this.streamProcesses.delete(streamId);
-                
-                const stats = this.streamStats.get(streamId);
-                if (stats && stats.startTime) {
-                    stats.uptime += (new Date() - stats.startTime);
-                    stats.startTime = null;
-                }
-                
                 logger.info(`Stream stopped: ${streamId}`);
             }
         } catch (error) {
-            logger.error(`Error stopping stream: ${streamId}`, { error });
-            throw error;
+            logger.error(`Error stopping stream: ${streamId}`, error);
         }
     }
 
