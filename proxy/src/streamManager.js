@@ -272,59 +272,6 @@ class StreamManager {
             licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
         }
 
-        // 首先获取可用格式
-        const formatArgs = [
-            '--no-check-certificates',
-            '--allow-unplayable-formats',
-            '--list-formats'
-        ];
-
-        if (licenseKey) {
-            formatArgs.push(
-                '--add-header',
-                `X-AxDRM-Message: ${licenseKey}`,
-                '--add-header',
-                'Content-Type: application/dash+xml'
-            );
-        }
-
-        formatArgs.push(streamConfig.url);
-
-        // 获取可用格式
-        let format = 'v5000000_33';  // 默认格式
-        try {
-            const formatProcess = spawn('yt-dlp', formatArgs);
-            let formatOutput = '';
-            
-            await new Promise((resolve, reject) => {
-                formatProcess.stdout.on('data', (data) => {
-                    formatOutput += data.toString();
-                });
-                
-                formatProcess.stderr.on('data', (data) => {
-                    logger.debug(`Format check stderr: ${data}`);
-                });
-                
-                formatProcess.on('close', (code) => {
-                    if (code === 0) {
-                        // 解析输出找到最佳格式
-                        const lines = formatOutput.split('\n');
-                        for (const line of lines) {
-                            if (line.includes('v5000000_33')) {
-                                format = 'v5000000_33';
-                                break;
-                            }
-                        }
-                        resolve();
-                    } else {
-                        reject(new Error(`Format check failed with code ${code}`));
-                    }
-                });
-            });
-        } catch (error) {
-            logger.error(`Error checking formats: ${error}`);
-        }
-
         // 构建 yt-dlp 参数
         const args = [
             '--allow-unplayable-formats',
@@ -336,8 +283,10 @@ class StreamManager {
             '--no-warnings',
             '--live-from-start',
             '--no-playlist-reverse',
-            '--format', format,  // 使用找到的格式
-            '--output', '-'      // 输出到标准输出
+            '--format', 'best[protocol=dash]/best[protocol=hls]/best',  // 优先选择 DASH 或 HLS 格式
+            '--downloader', 'ffmpeg',  // 使用 ffmpeg 作为下载器
+            '--downloader-args', 'ffmpeg:-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+            '--output', '-'  // 输出到标准输出
         ];
 
         if (licenseKey) {
@@ -362,9 +311,10 @@ class StreamManager {
 
                     // 发送 HTTP 响应头
                     socket.write('HTTP/1.1 200 OK\r\n');
-                    socket.write('Content-Type: video/MP2T\r\n');
+                    socket.write('Content-Type: video/mp2t\r\n');  // 使用 MPEG-TS 格式
                     socket.write('Cache-Control: no-cache\r\n');
                     socket.write('Connection: keep-alive\r\n');
+                    socket.write('Access-Control-Allow-Origin: *\r\n');
                     socket.write('\r\n');
 
                     socket.on('close', () => {
@@ -378,14 +328,29 @@ class StreamManager {
                     });
                 });
 
+                // 启动 FFmpeg 进程进行转码
+                const ffmpeg = spawn('ffmpeg', [
+                    '-i', 'pipe:0',          // 从标准输入读取
+                    '-c:v', 'copy',          // 复制视频流
+                    '-c:a', 'aac',           // 转换音频为 AAC
+                    '-b:a', '128k',          // 音频比特率
+                    '-f', 'mpegts',          // 输出格式为 MPEG-TS
+                    '-muxdelay', '0',        // 最小化延迟
+                    '-muxpreload', '0',
+                    '-reset_timestamps', '1', // 重置时间戳
+                    'pipe:1'                 // 输出到标准输出
+                ]);
+
                 const ytdlp = spawn('yt-dlp', args);
                 let ytdlpError = '';
 
-                ytdlp.stdout.on('data', (data) => {
+                ytdlp.stdout.pipe(ffmpeg.stdin);
+
+                ffmpeg.stdout.on('data', (data) => {
                     buffer = Buffer.concat([buffer, data]);
                     
                     // 当缓冲区达到一定大小时发送数据
-                    if (buffer.length >= 188 * 1024) {  // 使用 MPEG-TS 包大小的倍数
+                    if (buffer.length >= 188 * 1024) {  // MPEG-TS 包大小的倍数
                         for (const client of clients) {
                             try {
                                 if (!client.destroyed) {
@@ -405,22 +370,24 @@ class StreamManager {
                     logger.debug(`yt-dlp stderr: ${data.toString()}`);
                 });
 
+                ffmpeg.stderr.on('data', (data) => {
+                    logger.debug(`ffmpeg stderr: ${data.toString()}`);
+                });
+
                 ytdlp.on('error', (error) => {
                     logger.error(`yt-dlp error for stream ${streamId}:`, error);
                     this.restartStream(streamId);
                 });
 
-                ytdlp.on('exit', (code) => {
-                    if (code !== 0) {
-                        logger.error(`yt-dlp exited with code ${code} for stream ${streamId}`);
-                        logger.error(`yt-dlp stderr: ${ytdlpError}`);
-                        this.restartStream(streamId);
-                    }
+                ffmpeg.on('error', (error) => {
+                    logger.error(`ffmpeg error for stream ${streamId}:`, error);
+                    this.restartStream(streamId);
                 });
 
                 // 保存进程和服务器引用
                 this.streamProcesses.set(streamId, {
                     ytdlp,
+                    ffmpeg,
                     server,
                     clients,
                     port,

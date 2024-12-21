@@ -3,8 +3,15 @@
 <head>
     <title>流媒体播放器</title>
     <link href="https://cdn.jsdelivr.net/npm/video.js@7.20.3/dist/video-js.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/video.js@7.20.3/dist/video.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@videojs/http-streaming@2.14.2/dist/videojs-http-streaming.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/videojs-contrib-quality-levels@2.1.0/dist/videojs-contrib-quality-levels.min.js"></script>
     <style>
-        body { margin: 0; background: #000; }
+        body { 
+            margin: 0; 
+            background: #000; 
+            overflow: hidden;
+        }
         .video-container {
             width: 100vw;
             height: 100vh;
@@ -16,16 +23,18 @@
             width: 100%;
             height: 100%;
         }
+        .vjs-error-display {
+            display: none;
+        }
     </style>
 </head>
 <body>
     <div class="video-container">
-        <video id="player" class="video-js vjs-default-skin" controls>
+        <video id="player" class="video-js vjs-default-skin vjs-big-play-centered" controls>
             <p class="vjs-no-js">请启用 JavaScript 以观看视频</p>
         </video>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/video.js@7.20.3/dist/video.min.js"></script>
     <script>
         // 从 URL 获取流 ID
         const urlParams = new URLSearchParams(window.location.search);
@@ -37,23 +46,77 @@
                 controls: true,
                 autoplay: true,
                 preload: 'auto',
+                liveui: true,
+                responsive: true,
                 html5: {
-                    hls: {
+                    vhs: {
+                        overrideNative: true,
                         enableLowInitialPlaylist: true,
                         smoothQualityChange: true,
-                        overrideNative: true
-                    }
+                        allowSeeksWithinUnsafeLiveWindow: true,
+                        handlePartialData: true,
+                        experimentalBufferBasedABR: true
+                    },
+                    nativeAudioTracks: false,
+                    nativeVideoTracks: false
+                },
+                controlBar: {
+                    children: [
+                        'playToggle',
+                        'volumePanel',
+                        'currentTimeDisplay',
+                        'timeDivider',
+                        'durationDisplay',
+                        'progressControl',
+                        'liveDisplay',
+                        'customControlSpacer',
+                        'playbackRateMenuButton',
+                        'fullscreenToggle'
+                    ]
                 }
             });
 
             // 设置播放源
             player.src({
                 src: `/play/${streamId}`,
-                type: 'application/x-mpegURL'
+                type: 'application/x-mpegURL',
+                withCredentials: false
             });
 
+            // 错误处理
+            player.on('error', function(error) {
+                console.error('播放错误:', error);
+                // 尝试重新加载
+                player.load();
+                player.play();
+            });
+
+            // 自动重连
+            let reconnectAttempts = 0;
+            const maxReconnectAttempts = 5;
+
+            player.on('waiting', function() {
+                console.log('缓冲中...');
+            });
+
+            player.on('stalled', function() {
+                console.log('播放停滞...');
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    console.log(`尝试重连 (${reconnectAttempts}/${maxReconnectAttempts})...`);
+                    player.load();
+                    player.play();
+                }
+            });
+
+            player.on('playing', function() {
+                console.log('播放中...');
+                reconnectAttempts = 0;
+            });
+
+            // 启动播放
             player.play().catch(function(error) {
-                console.log("播放失败:", error);
+                console.error("播放失败:", error);
             });
         }
     </script>
