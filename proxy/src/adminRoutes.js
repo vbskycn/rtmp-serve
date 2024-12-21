@@ -60,7 +60,7 @@ router.post('/api/streams', async (req, res) => {
 
         await streamManager.addStream(streamData);
         
-        // 检查流是否成功启动
+        // 检查流是否成功添加（不检查是否启动）
         const stream = streamManager.streams.get(streamData.id);
         if (!stream) {
             throw new Error('流添加失败');

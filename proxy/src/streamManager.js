@@ -106,11 +106,20 @@ class StreamManager {
                 }
             });
 
+            // 初始化统计信息
+            this.streamStats.set(streamData.id, {
+                totalRequests: 0,
+                lastAccessed: null,
+                errors: 0,
+                uptime: 0,
+                startTime: null
+            });
+
             // 保存配置
             await this.saveStreams();
 
-            // 启动流
-            await this.startStreaming(streamData.id);
+            // 不再自动启动流
+            // await this.startStreaming(streamData.id);
 
             return true;
         } catch (error) {
@@ -405,9 +414,11 @@ class StreamManager {
     async restartStream(streamId) {
         try {
             logger.info(`Restarting stream: ${streamId}`);
-            await this.stopStreaming(streamId);
-            // 增加延迟时间
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            // 先强制停止
+            await this.forceStopStreaming(streamId);
+            // 等待一段时间
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            // 重新启动
             await this.startStreaming(streamId);
             logger.info(`Stream restarted: ${streamId}`);
         } catch (error) {
@@ -495,21 +506,43 @@ class StreamManager {
         try {
             const processes = this.streamProcesses.get(streamId);
             if (processes) {
-                if (processes.ytdlp) {
-                    processes.ytdlp.kill('SIGTERM');
+                // 停止 FFmpeg 进程
+                if (processes.ffmpeg) {
+                    processes.ffmpeg.kill('SIGTERM');
                 }
-                if (processes.server) {
-                    processes.server.close();
-                    for (const client of processes.clients) {
-                        client.destroy();
+                
+                // 等待进程完全退出
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // 清理流程序引用
+                this.streamProcesses.delete(streamId);
+                
+                // 清理统计信息
+                const stats = this.streamStats.get(streamId);
+                if (stats) {
+                    stats.startTime = null;
+                    stats.errors = 0;
+                }
+                
+                // 清理文件
+                const outputPath = path.join(__dirname, '../streams', streamId);
+                if (fs.existsSync(outputPath)) {
+                    // 删除所有分片文件
+                    const files = fs.readdirSync(outputPath);
+                    for (const file of files) {
+                        if (file.endsWith('.ts') || file.endsWith('.m3u8')) {
+                            fs.unlinkSync(path.join(outputPath, file));
+                        }
                     }
                 }
-                this.streamProcesses.delete(streamId);
-                this.serverPorts.delete(streamId);
+                
                 logger.info(`Stream stopped: ${streamId}`);
+                return true;
             }
+            return false;
         } catch (error) {
             logger.error(`Error stopping stream: ${streamId}`, error);
+            throw error;
         }
     }
 
@@ -562,6 +595,35 @@ class StreamManager {
 
     getStreamStats(streamId) {
         return this.streamStats.get(streamId);
+    }
+
+    // 添加一个强制停止的方法
+    async forceStopStreaming(streamId) {
+        try {
+            const processes = this.streamProcesses.get(streamId);
+            if (processes) {
+                // 使用 SIGKILL 强制终止进程
+                if (processes.ffmpeg) {
+                    processes.ffmpeg.kill('SIGKILL');
+                }
+                
+                // 立即清理资源
+                this.streamProcesses.delete(streamId);
+                
+                // 清理文件
+                const outputPath = path.join(__dirname, '../streams', streamId);
+                if (fs.existsSync(outputPath)) {
+                    fs.rmSync(outputPath, { recursive: true, force: true });
+                }
+                
+                logger.info(`Stream force stopped: ${streamId}`);
+                return true;
+            }
+            return false;
+        } catch (error) {
+            logger.error(`Error force stopping stream: ${streamId}`, error);
+            throw error;
+        }
     }
 }
 
