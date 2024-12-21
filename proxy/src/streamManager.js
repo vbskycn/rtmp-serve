@@ -141,20 +141,33 @@ class StreamManager {
         }
     }
 
-    async getStreamUrl(id) {
-        const stream = this.streams.get(id);
-        if (!stream) {
-            logger.warn(`Stream not found: ${id}`);
+    async getStreamUrl(streamId) {
+        try {
+            const stream = this.streams.get(streamId);
+            if (!stream) {
+                logger.warn(`Stream not found: ${streamId}`);
+                return null;
+            }
+            
+            // 更新访问统计
+            const stats = this.streamStats.get(streamId);
+            if (stats) {
+                stats.totalRequests++;
+                stats.lastAccessed = new Date();
+            }
+
+            // 检查流是否正在运行，如果没有运行则启动它
+            if (!this.streamProcesses.has(streamId)) {
+                logger.info(`Starting stream ${streamId} on demand`);
+                await this.startStreaming(streamId);
+            }
+            
+            // 返回 HLS 播放列表的路径
+            return `/streams/${streamId}/playlist.m3u8`;
+        } catch (error) {
+            logger.error(`Error getting stream URL: ${streamId}`, error);
             return null;
         }
-        
-        // 更新访问统计
-        const stats = this.streamStats.get(id) || { totalRequests: 0 };
-        stats.totalRequests++;
-        stats.lastAccessed = new Date();
-        this.streamStats.set(id, stats);
-        
-        return stream.url;
     }
 
     async startStreaming(streamId) {

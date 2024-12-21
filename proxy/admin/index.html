@@ -109,7 +109,7 @@
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">流媒体管理系统v1.0.32</h1>
+        <h1 class="text-center mb-4">流媒体管理系统v1.0.33</h1>
 
         <!-- 仪表盘 -->
         <div class="dashboard">
@@ -177,6 +177,7 @@
                             <tr>
                                 <th>名称</th>
                                 <th>状态</th>
+                                <th>流ID</th>
                                 <th>源地址</th>
                                 <th>播放地址</th>
                                 <th>统计信息</th>
@@ -207,7 +208,8 @@
 
                 streams.forEach(stream => {
                     const tr = document.createElement('tr');
-                    const playUrl = `${window.location.origin}/play/${stream.id}`;
+                    const streamId = stream.id.replace('stream_', '');  // 移除前缀
+                    const playUrl = `http://47.243.164.1:3000/play/${stream.id}.m3u`;
                     tr.innerHTML = `
                         <td>
                             <img src="${stream.tvg?.logo || ''}" alt="" style="height: 20px; margin-right: 8px;">
@@ -218,14 +220,19 @@
                                 ${stream.stats?.startTime ? '运行中' : '已停止'}
                             </span>
                         </td>
+                        <td>
+                            <div class="input-group">
+                                <input type="text" class="form-control form-control-sm" value="${streamId}" 
+                                       onchange="updateStreamId('${stream.id}', this.value)">
+                            </div>
+                        </td>
                         <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
                             ${stream.url}
                         </td>
                         <td>
-                            <div class="input-group">
-                                <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly>
-                                <button class="btn btn-outline-secondary btn-sm" onclick="copyToClipboard('${playUrl}')">
-                                    <i class="fa fa-copy"></i>
+                            <div class="d-flex align-items-center">
+                                <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${playUrl}')">
+                                    <i class="fa fa-copy"></i> 复制播放地址
                                 </button>
                             </div>
                         </td>
@@ -398,10 +405,39 @@
         // 定期刷新
         setInterval(loadStreams, 10000);
 
-        // 添加新的复制到剪贴板函数
+        // 添加更新流ID的函数
+        async function updateStreamId(oldId, newId) {
+            try {
+                const response = await fetch(`/api/streams/${oldId}/updateId`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ newId: `stream_${newId}` })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    loadStreams();
+                } else {
+                    alert('更新流ID失败: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error updating stream ID:', error);
+                alert('更新流ID失败');
+            }
+        }
+
+        // 修改复制到剪贴板函数
         function copyToClipboard(text) {
             navigator.clipboard.writeText(text).then(() => {
-                alert('播放地址已复制到剪贴板');
+                // 使用 Bootstrap 的 toast 或者更简单的提示
+                const toast = document.createElement('div');
+                toast.className = 'alert alert-success position-fixed bottom-0 end-0 m-3';
+                toast.style.zIndex = '9999';
+                toast.textContent = '播放地址已复制';
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 2000);
             }).catch(err => {
                 console.error('复制失败:', err);
                 alert('复制失败');

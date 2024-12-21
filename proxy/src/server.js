@@ -31,7 +31,7 @@ app.get('/play/:streamId', async (req, res) => {
         }
         
         // 重定向到实际的流文件
-        res.redirect(`/streams/${streamId}/playlist.m3u8`);
+        res.redirect(streamUrl);
     } catch (error) {
         logger.error('Error serving stream:', error);
         res.status(500).send('Internal Server Error');

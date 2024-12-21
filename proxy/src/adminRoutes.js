@@ -104,6 +104,90 @@ router.delete('/api/streams/:id', async (req, res) => {
     }
 });
 
+// 重启流
+router.post('/api/streams/:id/restart', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await streamManager.restartStream(id);
+        res.json({ success: true });
+    } catch (error) {
+        logger.error(`Error restarting stream: ${id}`, error);
+        res.json({ 
+            success: false, 
+            error: error.message || '重启流失败'
+        });
+    }
+});
+
+// 停止流
+router.post('/api/streams/:id/stop', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await streamManager.stopStreaming(id);
+        res.json({ success: true });
+    } catch (error) {
+        logger.error(`Error stopping stream: ${id}`, error);
+        res.json({ 
+            success: false, 
+            error: error.message || '停止流失败'
+        });
+    }
+});
+
+// 更新流ID
+router.post('/api/streams/:id/updateId', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { newId } = req.body;
+        
+        // 检查新ID是否已存在
+        if (streamManager.streams.has(newId)) {
+            return res.json({
+                success: false,
+                error: '流ID已存在'
+            });
+        }
+
+        // 更新流ID
+        const stream = streamManager.streams.get(id);
+        if (!stream) {
+            return res.json({
+                success: false,
+                error: '流不存在'
+            });
+        }
+
+        // 复制流配置到新ID
+        streamManager.streams.set(newId, stream);
+        streamManager.streams.delete(id);
+
+        // 更新统计信息
+        const stats = streamManager.streamStats.get(id);
+        if (stats) {
+            streamManager.streamStats.set(newId, stats);
+            streamManager.streamStats.delete(id);
+        }
+
+        // 更新进程信息
+        const processes = streamManager.streamProcesses.get(id);
+        if (processes) {
+            streamManager.streamProcesses.set(newId, processes);
+            streamManager.streamProcesses.delete(id);
+        }
+
+        // 保存配置
+        await streamManager.saveStreams();
+
+        res.json({ success: true });
+    } catch (error) {
+        logger.error(`Error updating stream ID: ${id}`, error);
+        res.json({
+            success: false,
+            error: error.message || '更新流ID失败'
+        });
+    }
+});
+
 function parseM3U(content) {
     const streams = [];
     const lines = content.split('\n');
