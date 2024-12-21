@@ -534,7 +534,7 @@ class StreamManager extends EventEmitter {
             }
         }, 5000); // 每5秒检查一次
 
-        // 保存检查间隔的引用，便后续清理
+        // 保存���查间隔的引用，便后续清理
         this.healthChecks.set(streamId, checkInterval);
     }
 
@@ -664,11 +664,21 @@ class StreamManager extends EventEmitter {
             if (processes) {
                 // 停止 FFmpeg 进程
                 if (processes.ffmpeg) {
+                    // 先尝试正常终止
                     processes.ffmpeg.kill('SIGTERM');
+                    
+                    // 等待一段时间后检查进程是否还在运行
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    // 如果进程还在运行，强制终止
+                    try {
+                        if (processes.ffmpeg.exitCode === null) {
+                            processes.ffmpeg.kill('SIGKILL');
+                        }
+                    } catch (error) {
+                        logger.error(`Error force killing process: ${error}`);
+                    }
                 }
-                
-                // 等待进程完全退出
-                await new Promise(resolve => setTimeout(resolve, 1000));
                 
                 // 清理流程序引用
                 this.streamProcesses.delete(streamId);
@@ -694,12 +704,18 @@ class StreamManager extends EventEmitter {
                 // 清理文件
                 const outputPath = path.join(__dirname, '../streams', streamId);
                 if (fs.existsSync(outputPath)) {
-                    // 删除所有片文件
-                    const files = fs.readdirSync(outputPath);
-                    for (const file of files) {
-                        if (file.endsWith('.ts') || file.endsWith('.m3u8')) {
-                            fs.unlinkSync(path.join(outputPath, file));
+                    try {
+                        // 删除所有片段文件
+                        const files = fs.readdirSync(outputPath);
+                        for (const file of files) {
+                            if (file.endsWith('.ts') || file.endsWith('.m3u8')) {
+                                fs.unlinkSync(path.join(outputPath, file));
+                            }
                         }
+                        // 尝试删除目录
+                        fs.rmdirSync(outputPath);
+                    } catch (error) {
+                        logger.error(`Error cleaning up files for stream ${streamId}:`, error);
                     }
                 }
                 
