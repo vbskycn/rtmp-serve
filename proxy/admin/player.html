@@ -50,11 +50,14 @@
         }
 
         .stream-item {
-            padding: 8px;
+            padding: 8px 12px;
             cursor: pointer;
             border-radius: 4px;
-            margin-bottom: 2px;
+            margin-bottom: 4px;
             transition: background-color 0.2s;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .stream-item:hover {
@@ -72,13 +75,15 @@
             align-items: center;
             background: #000;
             position: relative;
+            padding: 20px;
         }
 
         #videoPlayer {
-            max-width: 100%;
-            max-height: 100%;
+            max-width: 80%;
+            max-height: 80vh;
             width: auto;
             height: auto;
+            margin: auto;
         }
 
         .header {
@@ -107,15 +112,16 @@
 
         .controls {
             position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            padding: 15px;
-            background: rgba(0, 0, 0, 0.8);
+            top: 70px;
+            right: 10px;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.6);
             display: flex;
-            align-items: center;
-            gap: 15px;
+            flex-direction: column;
+            gap: 10px;
+            border-radius: 8px;
             transition: opacity 0.3s;
+            z-index: 1000;
         }
 
         .controls.hidden {
@@ -123,17 +129,23 @@
         }
 
         .control-btn {
-            background: none;
-            border: none;
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.2);
             color: #fff;
             cursor: pointer;
-            padding: 8px;
+            padding: 8px 12px;
             border-radius: 4px;
-            transition: background-color 0.2s;
+            transition: all 0.2s;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .control-btn:hover {
-            background-color: rgba(255, 255, 255, 0.1);
+            background-color: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.4);
         }
 
         .control-btn i {
@@ -214,6 +226,24 @@
             padding: 10px;
             border-radius: 4px;
         }
+
+        /* 添加工具提示样式 */
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .control-btn:hover .tooltip {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -239,17 +269,16 @@
     </button>
 
     <div class="controls">
-        <button class="control-btn" onclick="reloadPlayer()">
-            <i class="fa fa-refresh"></i> 重新加载
+        <button class="control-btn" onclick="reloadPlayer()" title="重新加载">
+            <i class="fa fa-refresh"></i>
         </button>
-        <button class="control-btn" onclick="toggleFullscreen()">
-            <i class="fa fa-expand"></i> 全屏
+        <button class="control-btn" onclick="toggleFullscreen()" title="全屏">
+            <i class="fa fa-expand"></i>
         </button>
-        <span style="flex: 1"></span>
-        <div class="stream-info">
-            <span id="resolution">-</span> |
-            <span id="bitrate">-</span>
-        </div>
+    </div>
+
+    <div class="stream-info" style="position: fixed; bottom: 10px; right: 10px; background: rgba(0,0,0,0.6); padding: 5px 10px; border-radius: 4px;">
+        <span id="resolution">-</span> | <span id="bitrate">-</span>
     </div>
 
     <div class="loading">
@@ -370,7 +399,7 @@
                     clearTimeout(autoReconnectTimer);
                 }
 
-                // 设置新的重连定时器
+                // 设置新的���连定时器
                 autoReconnectTimer = setTimeout(() => {
                     reloadPlayer();
                 }, RECONNECT_DELAY);
@@ -496,6 +525,7 @@
                     streams.forEach(stream => {
                         const streamItem = document.createElement('div');
                         streamItem.className = 'stream-item';
+                        streamItem.dataset.streamId = stream.id;
                         if (stream.id === streamId) {
                             streamItem.classList.add('active');
                             streamList.classList.add('active');
@@ -520,27 +550,50 @@
         }
 
         async function switchStream(newStreamId) {
-            streamId = newStreamId;
-            // 更新URL参数
-            const newUrl = new URL(window.location.href);
-            newUrl.searchParams.set('id', streamId);
-            window.history.pushState({}, '', newUrl);
-            
-            // 更新活动状态
-            document.querySelectorAll('.stream-item').forEach(item => {
-                item.classList.remove('active');
-            });
-            document.querySelector(`.stream-item[data-id="${streamId}"]`)?.classList.add('active');
-            
-            // 重新加载播放器
-            await initPlayer();
+            try {
+                // 更新streamId
+                streamId = newStreamId;
+                
+                // 更新URL参数
+                const newUrl = new URL(window.location.href);
+                newUrl.searchParams.set('id', streamId);
+                window.history.pushState({}, '', newUrl);
+                
+                // 更新活动状态
+                document.querySelectorAll('.stream-item').forEach(item => {
+                    item.classList.remove('active');
+                });
+                
+                // 找到对应的流项并添加active类
+                const streamItems = document.querySelectorAll('.stream-item');
+                for (const item of streamItems) {
+                    if (item.dataset.streamId === streamId) {
+                        item.classList.add('active');
+                        // 展开对应的分类
+                        const streamList = item.parentElement;
+                        streamList.classList.add('active');
+                    }
+                }
+                
+                // 显示加载动画
+                document.querySelector('.loading').style.display = 'block';
+                document.querySelector('.error-message').style.display = 'none';
+                
+                // 重新加载播放器
+                await initPlayer();
+                
+            } catch (error) {
+                console.error('Error switching stream:', error);
+                document.querySelector('.error-message').textContent = '切换频道失败，请重试';
+                document.querySelector('.error-message').style.display = 'block';
+            }
         }
 
         function togglePlaylist() {
             document.querySelector('.playlist-container').classList.toggle('show');
         }
 
-        // 在初始化时加载播放列表
+        // 在初始化时加载播放列��
         loadPlaylist();
 
         // 启动播放器
