@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { StreamManager } = require('./streamManager');
 const logger = require('./utils/logger');
+const path = require('path');
+const fs = require('fs');
 
 // 创建 StreamManager 实例
 const streamManager = new StreamManager();
@@ -80,17 +82,25 @@ router.post('/api/streams', async (req, res) => {
 });
 
 // 获取所有流列表
-router.get('/api/streams', (req, res) => {
-    const streams = [];
-    for (const [id, config] of streamManager.streams.entries()) {
-        streams.push({
-            id,
-            ...config,
-            stats: streamManager.streamStats.get(id),
-            processRunning: streamManager.streamProcesses.has(id)
-        });
+router.get('/api/streams', async (req, res) => {
+    try {
+        const streams = [];
+        for (const [id, config] of streamManager.streams.entries()) {
+            // 检查��的状态
+            const isRunning = await checkStreamStatus(id);
+            
+            streams.push({
+                id,
+                ...config,
+                stats: streamManager.streamStats.get(id),
+                processRunning: isRunning
+            });
+        }
+        res.json(streams);
+    } catch (error) {
+        logger.error('Error getting streams:', error);
+        res.status(500).json({ error: 'Failed to get streams' });
     }
-    res.json(streams);
 });
 
 // 批量添加流
@@ -251,5 +261,54 @@ function parseM3U(content) {
 
     return streams;
 }
+
+// 添加检查流状态的函数
+async function checkStreamStatus(streamId) {
+    try {
+        // 检查进程是否存在
+        const hasProcess = streamManager.streamProcesses.has(streamId);
+        if (hasProcess) return true;
+
+        // 检查播放列表文件是否存在且最近有更新
+        const playlistPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
+        if (fs.existsSync(playlistPath)) {
+            const stats = fs.statSync(playlistPath);
+            const fileAge = Date.now() - stats.mtimeMs;
+            // 如果文件在最近30秒内有更新，认为流是活跃的
+            if (fileAge < 30000) return true;
+        }
+
+        // 检查是否有 .ts 分片文件且最近有更新
+        const streamDir = path.join(__dirname, '../streams', streamId);
+        if (fs.existsSync(streamDir)) {
+            const files = fs.readdirSync(streamDir);
+            const tsFiles = files.filter(f => f.endsWith('.ts'));
+            if (tsFiles.length > 0) {
+                // 检查最新的分片文件
+                const latestTs = tsFiles.sort().pop();
+                const tsStats = fs.statSync(path.join(streamDir, latestTs));
+                const fileAge = Date.now() - tsStats.mtimeMs;
+                // 如果最新的分片文件在最近30秒内有更新，认为流是活跃的
+                if (fileAge < 30000) return true;
+            }
+        }
+
+        return false;
+    } catch (error) {
+        logger.error(`Error checking stream status: ${streamId}`, error);
+        return false;
+    }
+}
+
+// 添加获取配置的路由
+router.get('/api/config', (req, res) => {
+    try {
+        const config = require('../config/config.json');
+        res.json(config);
+    } catch (error) {
+        logger.error('Error loading config:', error);
+        res.status(500).json({ error: 'Failed to load config' });
+    }
+});
 
 module.exports = router; 

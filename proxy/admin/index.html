@@ -157,7 +157,7 @@
             </div>
         </div>
 
-        <!-- 在添加流的卡片后面添加新的量入卡片 -->
+        <!-- 在添加流的卡片后面添加新的量���片 -->
         <div class="card">
             <div class="card-header">
                 <h5 class="mb-0"><i class="fa fa-upload"></i> 批量导入流</h5>
@@ -226,6 +226,19 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // 在 <script> 标签开始处添加配置获取
+        let serverConfig = null;
+
+        // 获取服务器配置
+        async function getServerConfig() {
+            try {
+                const response = await fetch('/api/config');
+                serverConfig = await response.json();
+            } catch (error) {
+                console.error('Error loading server config:', error);
+            }
+        }
+
         // 加载流列表
         async function loadStreams() {
             try {
@@ -239,7 +252,7 @@
 
                 // 获取活跃流的数量
                 const activeStreams = streams.filter(stream => {
-                    // 检查流是否有进程在运行
+                    // 检查是否有进程在运行
                     return stream.processRunning || stream.stats?.startTime;
                 });
                 document.getElementById('activeStreams').textContent = activeStreams.length;
@@ -247,7 +260,7 @@
                 streams.forEach(stream => {
                     const tr = document.createElement('tr');
                     const streamId = stream.id.replace('stream_', '');
-                    const playUrl = `http://47.243.164.1:3000/play/${stream.id}`;
+                    const playUrl = `http://${serverConfig.server.host}:${serverConfig.server.port}/play/${stream.id}`;
                     
                     // 修改状态判断逻辑
                     let statusClass = 'inactive';
@@ -296,16 +309,12 @@
                                     <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly 
                                            style="font-family: monospace; background-color: #f8f9fa;">
                                     <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${playUrl}')">
-                                        <i class="fa fa-copy"></i> 复制地址
+                                        <i class="fa fa-copy"></i> 复制
                                     </button>
                                     <button class="btn btn-outline-success btn-sm" onclick="window.open('player.html?id=${stream.id}', '_blank')">
-                                        <i class="fa fa-play"></i> 在线播放
+                                        <i class="fa fa-play"></i> 播放
                                     </button>
                                 </div>
-                                <small class="text-muted ms-2">
-                                    <i class="fa fa-info-circle"></i> 
-                                    可用任意播放器打开此地址观看
-                                </small>
                             </div>
                         </td>
                         <td>
@@ -431,13 +440,14 @@
             }
         }
 
-        // 导出配置
+        // 修改导出配置函数
         function exportConfig() {
             fetch('/api/streams')
                 .then(response => response.json())
                 .then(streams => {
                     const config = streams.map(stream => {
-                        return `#EXTINF:-1 tvg-id="${stream.tvg?.id || ''}" tvg-name="${stream.tvg?.name || ''}" tvg-logo="${stream.tvg?.logo || ''}" group-title="${stream.tvg?.group || ''}", ${stream.name}\n${stream.kodiprop || ''}\n${stream.url}`;
+                        const playUrl = `http://${serverConfig.server.host}:${serverConfig.server.port}/play/${stream.id}`;
+                        return `#EXTINF:-1 tvg-id="${stream.tvg?.id || ''}" tvg-name="${stream.tvg?.name || ''}" tvg-logo="${stream.tvg?.logo || ''}" group-title="${stream.tvg?.group || ''}", ${stream.name}\n${stream.kodiprop || ''}\n${playUrl}`;
                     }).join('\n\n');
                     
                     const blob = new Blob([config], { type: 'text/plain' });
@@ -473,11 +483,16 @@
         }
 
         // 初始加载
-        loadStreams();
-        // 定期刷新
-        setInterval(loadStreams, 5000);
+        async function init() {
+            await getServerConfig();
+            await loadStreams();
+            setInterval(loadStreams, 5000);
+        }
 
-        // 添加更新流ID的函数
+        // 启动初始化
+        init();
+
+        // 添加更新流ID函数
         async function updateStreamId(oldId, newId) {
             try {
                 const response = await fetch(`/api/streams/${oldId}/updateId`, {
@@ -671,7 +686,7 @@
             const selectedStreams = getSelectedStreams();
             if (!selectedStreams.length) return;
             
-            if (!confirm(`确定要删除选中的 ${selectedStreams.length} 个流吗？此操作��可恢复！`)) return;
+            if (!confirm(`确定要删除选中的 ${selectedStreams.length} 个流吗？此操作不可恢复！`)) return;
 
             let success = 0;
             let failed = 0;
