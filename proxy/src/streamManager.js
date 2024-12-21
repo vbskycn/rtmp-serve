@@ -265,23 +265,36 @@ class StreamManager {
             licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
         }
 
-        // 构建 yt-dlp 参数，针对直播流优化
+        // 构建 yt-dlp 参数，针对 DASH/MPD 流优化
         const args = [
             '--no-check-certificates',
             '--live-from-start',
             '--no-part',
             '--no-mtime',
             '--no-progress',
-            '--quiet'
+            '--quiet',
+            '--format', 'best',  // 选择最佳质量
+            '--no-playlist-reverse',
+            '--no-hls-use-mpegts',
+            '--downloader', 'ffmpeg',  // 使用 ffmpeg 作为下载器
+            '--downloader-args', 'ffmpeg:-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'
         ];
 
         // 添加 DRM 解密头
         if (licenseKey) {
             args.push(
                 '--add-header',
-                `X-AxDRM-Message: ${licenseKey}`
+                `X-AxDRM-Message: ${licenseKey}`,
+                '--add-header',
+                'Content-Type: application/dash+xml'
             );
         }
+
+        // 添加 User-Agent
+        args.push(
+            '--add-header',
+            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        );
 
         // 添加源 URL
         args.push(streamConfig.url);
@@ -295,24 +308,31 @@ class StreamManager {
                 let ytdlpError = '';
                 let ffmpegError = '';
                 
-                // 启动 FFmpeg 进程，针对直播流优化
+                // 启动 FFmpeg 进程，针对 DASH/MPD 流优化
                 const ffmpeg = spawn('ffmpeg', [
                     '-i', 'pipe:0',
-                    '-c:v', 'copy',              // 复制视频流
-                    '-c:a', 'copy',              // 复制音频流
+                    '-c:v', 'libx264',           // 使用 H.264 编码
+                    '-c:a', 'aac',               // 使用 AAC 音频编码
+                    '-b:v', '5000k',             // 视频比特率
+                    '-b:a', '192k',              // 音频比特率
+                    '-preset', 'veryfast',       // 编码速度预设
+                    '-tune', 'zerolatency',      // 零延迟调优
+                    '-profile:v', 'high',        // 高规格编码
+                    '-level', '4.1',             // 编码等级
+                    '-sc_threshold', '0',        // 禁用场景切换检测
+                    '-g', '50',                  // GOP 大小
+                    '-keyint_min', '50',         // 最小关键帧间隔
                     '-f', 'hls',                 // HLS 格式
                     '-hls_time', '2',            // 每个分片2秒
-                    '-hls_list_size', '90',      // 只保留90个分片（约3分钟）
-                    '-hls_flags', 'delete_segments+append_list+discont_start+omit_endlist',  // 删除旧分片，添加新分片，标记不连续点
+                    '-hls_list_size', '90',      // 保留90个分片（约3分钟）
+                    '-hls_flags', 'delete_segments+append_list+discont_start+omit_endlist',
                     '-hls_segment_type', 'mpegts',
                     '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
-                    '-strftime', '1',            // 启用时间戳
-                    '-strftime_mkdir', '1',      // 按需创建目录
                     '-max_muxing_queue_size', '2048',
-                    '-tune', 'zerolatency',      // 零延迟
-                    '-metadata', 'service_provider="Live Stream"',
-                    '-metadata', 'service_name="Live Stream"',
-                    '-method', 'PUT',            // 使用 PUT 方法写入文件
+                    '-vsync', '1',               // 视频同步模式
+                    '-async', '1',               // 音频同步模式
+                    '-threads', '4',             // 使用4个线程
+                    '-movflags', '+faststart',   // 快速启动标志
                     `${outputPath}/playlist.m3u8`
                 ]);
 
