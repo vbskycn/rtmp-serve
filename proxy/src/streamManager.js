@@ -11,11 +11,58 @@ class StreamManager {
         this.streamProcesses = new Map();
         this.streamStats = new Map();
         this.healthChecks = new Map();
+        this.configPath = path.join(__dirname, '../config/streams.json');
+        
+        // 创建配置目录
+        const configDir = path.dirname(this.configPath);
+        if (!fs.existsSync(configDir)) {
+            fs.mkdirSync(configDir, { recursive: true });
+        }
+        
+        // 加载保存的流配置
+        this.loadStreams();
         
         // 每小时运行一次清理
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
         // 每分钟运行一次健康检查
         setInterval(() => this.checkStreamsHealth(), 60 * 1000);
+    }
+
+    // 加载保存的流配置
+    loadStreams() {
+        try {
+            if (fs.existsSync(this.configPath)) {
+                const data = fs.readFileSync(this.configPath, 'utf8');
+                const configs = JSON.parse(data);
+                for (const [id, config] of Object.entries(configs)) {
+                    this.streams.set(id, config);
+                    this.streamStats.set(id, {
+                        totalRequests: 0,
+                        lastAccessed: null,
+                        errors: 0,
+                        uptime: 0,
+                        startTime: null
+                    });
+                }
+                logger.info(`Loaded ${this.streams.size} streams from config`);
+            }
+        } catch (error) {
+            logger.error('Error loading streams config:', error);
+        }
+    }
+
+    // 保存流配置
+    saveStreams() {
+        try {
+            const configs = {};
+            for (const [id, config] of this.streams.entries()) {
+                configs[id] = config;
+            }
+            fs.writeFileSync(this.configPath, JSON.stringify(configs, null, 2));
+            logger.info(`Saved ${this.streams.size} streams to config`);
+        } catch (error) {
+            logger.error('Error saving streams config:', error);
+        }
     }
 
     async addStream(id, config) {
@@ -47,6 +94,10 @@ class StreamManager {
                 uptime: 0,
                 startTime: null
             });
+            
+            // 保存配置
+            this.saveStreams();
+            
             logger.info(`Stream added: ${streamId}`, { streamId, config });
             
             // 自动启动流
@@ -55,6 +106,29 @@ class StreamManager {
             });
         } catch (error) {
             logger.error(`Error adding stream: ${id}`, { error });
+            throw error;
+        }
+    }
+
+    // 修改删除流的方法
+    async deleteStream(streamId) {
+        try {
+            await this.stopStreaming(streamId);
+            this.streams.delete(streamId);
+            this.streamStats.delete(streamId);
+            
+            // 保存配置
+            this.saveStreams();
+            
+            // 清理流文件
+            const streamPath = path.join(__dirname, '../streams', streamId);
+            if (fs.existsSync(streamPath)) {
+                fs.rmSync(streamPath, { recursive: true });
+            }
+            
+            logger.info(`Stream deleted: ${streamId}`);
+        } catch (error) {
+            logger.error(`Error deleting stream: ${streamId}`, { error });
             throw error;
         }
     }
@@ -275,6 +349,7 @@ class StreamManager {
 
         // 构建 yt-dlp 参数
         const args = [
+            '--verbose',                    // 添加详细输出
             '--no-check-certificates',
             '--allow-unplayable-formats',
             '--no-part',
@@ -283,15 +358,15 @@ class StreamManager {
             '--no-playlist-reverse',
             '--force-generic-extractor',
             '--concurrent-fragments', '1',
-            '--downloader', 'ffmpeg',
-            '--downloader-args', 'ffmpeg:-protocol_whitelist file,http,https,tcp,tls,crypto',
         ];
 
         // 添加 DRM 解密头
         if (streamConfig.inputstream?.adaptive?.license_key) {
             args.push(
                 '--add-header',
-                `X-AxDRM-Message: ${streamConfig.inputstream.adaptive.license_key}`
+                `X-AxDRM-Message: ${streamConfig.inputstream.adaptive.license_key}`,
+                '--add-header',
+                'Content-Type: application/dash+xml'
             );
         }
 
@@ -303,66 +378,89 @@ class StreamManager {
 
         // 设置格式和输出
         args.push(
-            '--format', 'best[protocol=dash]/best',
-            '--fixup', 'never',
+            '--format', 'best',
+            '--no-check-formats',
             '--retries', 'infinite',
             '--fragment-retries', 'infinite',
-            '--hls-use-mpegts',
             '--stream-types', 'dash,hls',
-            '--output', `${outputPath}/live.ts`,  // 改用固定文件名
-            streamConfig.url
+            '--live-from-start',
+            '--no-part',
+            '--no-mtime',
+            '--no-progress',
+            '--quiet',
+            '--no-warnings',
+            '--output', '-'  // 输出到标准输出
         );
+
+        // 添加源 URL
+        args.push(streamConfig.url);
 
         logger.info(`Starting yt-dlp with args:`, { args });
 
+        // 启动 yt-dlp 进程
         const ytdlp = spawn('yt-dlp', args);
-        this.streamProcesses.set(streamId, ytdlp);
+        
+        // 启动 FFmpeg 进程来处理 yt-dlp 的输出
+        const ffmpeg = spawn('ffmpeg', [
+            '-i', 'pipe:0',
+            '-c:v', 'copy',
+            '-c:a', 'copy',
+            '-f', 'hls',
+            '-hls_time', '2',
+            '-hls_list_size', '6',
+            '-hls_flags', 'delete_segments+append_list+independent_segments',
+            '-hls_segment_type', 'mpegts',
+            '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
+            `${outputPath}/playlist.m3u8`
+        ]);
 
-        ytdlp.stdout.on('data', (data) => {
-            logger.debug(`yt-dlp stdout: ${data}`);
-        });
+        // 连接进程
+        ytdlp.stdout.pipe(ffmpeg.stdin);
 
+        // 错误处理
         ytdlp.stderr.on('data', (data) => {
             const message = data.toString();
             logger.debug(`yt-dlp stderr: ${message}`);
         });
 
-        // 创建 HLS 播放列表
-        const playlistContent = `#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-TARGETDURATION:10
-#EXT-X-MEDIA-SEQUENCE:0
-#EXT-X-PLAYLIST-TYPE:EVENT
-#EXTINF:10.0,
-live.ts`;
+        ffmpeg.stderr.on('data', (data) => {
+            const message = data.toString();
+            logger.debug(`ffmpeg stderr: ${message}`);
+        });
 
-        fs.writeFileSync(path.join(outputPath, 'playlist.m3u8'), playlistContent);
+        // 保存进程引用
+        this.streamProcesses.set(streamId, {
+            ytdlp,
+            ffmpeg
+        });
 
-        // 监控进程和文件
+        // 处理进程结束
         ytdlp.on('close', (code) => {
             logger.info(`yt-dlp process exited with code ${code}`);
-            this.streamProcesses.delete(streamId);
             if (code !== 0) {
                 logger.error(`yt-dlp failed for stream: ${streamId}`);
-                // 5秒后重试
-                setTimeout(() => this.startStreaming(streamId), 5000);
+                this.restartStream(streamId);
             }
         });
 
-        // 等待文件创建并监控大小
+        ffmpeg.on('close', (code) => {
+            logger.info(`ffmpeg process exited with code ${code}`);
+            if (code !== 0) {
+                logger.error(`ffmpeg failed for stream: ${streamId}`);
+                this.restartStream(streamId);
+            }
+        });
+
+        // 等待文件创建
         return new Promise((resolve, reject) => {
             const maxAttempts = 30;
             let attempts = 0;
             const checkFile = () => {
-                const streamPath = path.join(outputPath, 'live.ts');
-                if (fs.existsSync(streamPath)) {
-                    const stats = fs.statSync(streamPath);
+                const playlistPath = path.join(outputPath, 'playlist.m3u8');
+                if (fs.existsSync(playlistPath)) {
+                    const stats = fs.statSync(playlistPath);
                     if (stats.size > 0) {
                         logger.info(`Stream ${streamId} started successfully`);
-                        
-                        // 启动文件监控
-                        this.monitorStreamFile(streamId, streamPath);
-                        
                         resolve();
                         return;
                     }
@@ -492,12 +590,13 @@ live.ts`;
 
     async stopStreaming(streamId) {
         try {
-            const process = this.streamProcesses.get(streamId);
-            if (process) {
-                if (process.kill) {
-                    process.kill();
-                } else if (process.stop) {
-                    process.stop();
+            const processes = this.streamProcesses.get(streamId);
+            if (processes) {
+                if (processes.ytdlp) {
+                    processes.ytdlp.kill();
+                }
+                if (processes.ffmpeg) {
+                    processes.ffmpeg.kill();
                 }
                 this.streamProcesses.delete(streamId);
                 

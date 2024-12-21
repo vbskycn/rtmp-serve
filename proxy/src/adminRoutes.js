@@ -44,9 +44,7 @@ function setupAdminRoutes(app, streamManager) {
     app.delete('/api/streams/:id', async (req, res) => {
         try {
             const { id } = req.params;
-            await streamManager.stopStreaming(id);
-            streamManager.streams.delete(id);
-            streamManager.streamStats.delete(id);
+            await streamManager.deleteStream(id);
             res.json({ success: true });
         } catch (error) {
             res.status(500).json({ error: error.message });
