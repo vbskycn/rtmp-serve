@@ -197,7 +197,7 @@ class StreamManager {
                 throw new Error('Stream not found');
             }
 
-            // 初始化统计信息
+            // ���始化统计信息
             if (!streamConfig.stats) {
                 streamConfig.stats = {
                     startTime: null,
@@ -265,50 +265,77 @@ class StreamManager {
             await this.stopStreaming(streamId);
         }
 
-        // 解析 license_key
-        let licenseKey = null;
-        if (streamConfig.kodiprop?.includes('license_key')) {
-            licenseKey = streamConfig.kodiprop.match(/license_key=([^#\n]*)/)?.[1];
-        }
-
-        // 构建 FFmpeg 参数
-        const args = [
-            '-reconnect', '1',
+        // 构建 FFmpeg 输入参数
+        const inputArgs = [
+            '-hide_banner',          // 隐藏 banner
+            '-reconnect', '1',       // 断开时重连
             '-reconnect_streamed', '1',
             '-reconnect_delay_max', '5',
-            '-i', streamConfig.url,
+            '-rw_timeout', '5000000',  // 读写超时
+            '-timeout', '5000000',     // 连接超时
+            '-fflags', '+genpts+igndts+discardcorrupt',  // 容错处理
+            '-analyzeduration', '2000000',  // 分析时长
+            '-probesize', '1000000',   // 探测大小
+            '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            '-headers', 'Accept: */*\r\n',
+            '-i', streamConfig.url
+        ];
+
+        // 构建 FFmpeg 输出参数
+        const outputArgs = [
             '-c:v', 'copy',           // 复制视频流
             '-c:a', 'aac',           // 转换音频为 AAC
             '-b:a', '128k',          // 音频比特率
+            '-ac', '2',              // 双声道
+            '-ar', '44100',          // 音频采样率
             '-f', 'hls',             // HLS 格式
             '-hls_time', '2',        // 每个分片2秒
             '-hls_list_size', '6',   // 保留6个分片（约12秒）
-            '-hls_flags', 'delete_segments+append_list+discont_start',  // HLS 标志
+            '-hls_flags', 'delete_segments+append_list+discont_start+independent_segments',  // HLS 标志
             '-hls_segment_type', 'mpegts',  // 分片类型
             '-hls_segment_filename', `${outputPath}/segment_%d.ts`,  // 分片文件名
             '-method', 'PUT',        // 使用 PUT 方法写入文件
+            '-max_muxing_queue_size', '1024',  // 最大复用队列
+            '-y',                    // 覆盖输出文件
             `${outputPath}/playlist.m3u8`  // 播放列表路径
         ];
 
-        // 如果有 DRM 头，添加到参数中
-        if (licenseKey) {
-            args.unshift(
-                '-headers', 
-                `X-AxDRM-Message: ${licenseKey}\r\nContent-Type: application/dash+xml\r\n`
-            );
-        }
+        // 合并所有参数
+        const args = [...inputArgs, ...outputArgs];
 
         logger.info(`Starting FFmpeg for stream: ${streamId}`);
+        logger.debug(`FFmpeg command: ffmpeg ${args.join(' ')}`);
 
         return new Promise((resolve, reject) => {
             try {
                 const ffmpeg = spawn('ffmpeg', args);
                 let ffmpegError = '';
+                let retryCount = 0;
+                const maxRetries = 3;
+                const retryDelay = 5000;
 
                 ffmpeg.stderr.on('data', (data) => {
                     const message = data.toString();
                     ffmpegError += message;
-                    if (message.includes('Error') || 
+
+                    // 检查是否是致命错误
+                    const isFatalError = message.includes('Server returned 400') || 
+                                       message.includes('Server returned 403') ||
+                                       message.includes('Server returned 404') ||
+                                       message.includes('Server returned 500') ||
+                                       message.includes('Invalid data found') ||
+                                       message.includes('Error opening input') ||
+                                       message.includes('Protocol not found');
+
+                    if (isFatalError) {
+                        logger.error(`Fatal error for stream ${streamId}: ${message}`);
+                        this.stopStreaming(streamId);
+                        const stats = this.streamStats.get(streamId);
+                        if (stats) {
+                            stats.errors++;
+                            stats.lastError = message;
+                        }
+                    } else if (message.includes('Error') || 
                         message.includes('Invalid') || 
                         message.includes('Failed') ||
                         message.includes('No such')) {
@@ -320,14 +347,40 @@ class StreamManager {
 
                 ffmpeg.on('error', (error) => {
                     logger.error(`FFmpeg error for stream ${streamId}:`, error);
-                    this.restartStream(streamId);
+                    if (retryCount < maxRetries) {
+                        retryCount++;
+                        logger.info(`Retrying stream ${streamId} (attempt ${retryCount}/${maxRetries})`);
+                        setTimeout(() => {
+                            this.restartStream(streamId);
+                        }, retryDelay);
+                    } else {
+                        logger.error(`Max retries reached for stream ${streamId}, stopping stream`);
+                        this.stopStreaming(streamId);
+                    }
                 });
 
                 ffmpeg.on('exit', (code) => {
                     if (code !== 0) {
                         logger.error(`FFmpeg exited with code ${code} for stream ${streamId}`);
                         logger.error(`FFmpeg stderr: ${ffmpegError}`);
-                        this.restartStream(streamId);
+                        
+                        // 检查是否包含致命错误
+                        if (ffmpegError.includes('Server returned 400') ||
+                            ffmpegError.includes('Server returned 403') ||
+                            ffmpegError.includes('Server returned 404') ||
+                            ffmpegError.includes('Server returned 500')) {
+                            logger.error(`Fatal error detected for stream ${streamId}, stopping stream`);
+                            this.stopStreaming(streamId);
+                        } else if (retryCount < maxRetries) {
+                            retryCount++;
+                            logger.info(`Retrying stream ${streamId} (attempt ${retryCount}/${maxRetries})`);
+                            setTimeout(() => {
+                                this.restartStream(streamId);
+                            }, retryDelay);
+                        } else {
+                            logger.error(`Max retries reached for stream ${streamId}, stopping stream`);
+                            this.stopStreaming(streamId);
+                        }
                     }
                 });
 
