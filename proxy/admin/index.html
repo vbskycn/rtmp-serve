@@ -105,76 +105,151 @@
         .form-label {
             font-weight: 500;
         }
+        .top-bar {
+            background: #2c3e50;
+            color: white;
+            padding: 10px 20px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .system-title {
+            font-size: 1.2rem;
+            margin: 0;
+            padding: 0;
+        }
+
+        .stats-container {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            font-size: 0.9rem;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .stat-label {
+            color: #a8b6c5;
+        }
+
+        .stat-value {
+            font-weight: bold;
+            color: white;
+        }
+
+        .tools-panel {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .tools-toggle {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .tools-content {
+            display: none;
+            margin-top: 15px;
+        }
+
+        .tools-content.show {
+            display: block;
+        }
+
+        .stream-list-container {
+            margin-top: 20px;
+        }
     </style>
 </head>
 <body>
+    <!-- 顶部状态栏 -->
+    <div class="top-bar">
+        <div class="d-flex justify-content-between align-items-center">
+            <h1 class="system-title">流媒体管理系统 v1.3.0</h1>
+            <div class="stats-container">
+                <div class="stat-item">
+                    <span class="stat-label">总流数量:</span>
+                    <span class="stat-value" id="totalStreams">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">活跃流数量:</span>
+                    <span class="stat-value" id="activeStreams">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">运行时间:</span>
+                    <span class="stat-value" id="systemUptime">刚刚启动</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">接收流量:</span>
+                    <span class="stat-value" id="trafficReceived">0 B</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">发送流量:</span>
+                    <span class="stat-value" id="trafficSent">0 B</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="container">
-        <h1 class="text-center mb-4">流媒体管理系统v1.3.0</h1>
-
-        <!-- 仪表盘 -->
-        <div class="dashboard">
-            <div class="stat-card">
-                <div class="stat-value" id="totalStreams">0</div>
-                <div class="stat-label">总流数量</div>
+        <!-- 工具面板 -->
+        <div class="tools-panel">
+            <div class="tools-toggle" onclick="toggleTools()">
+                <i class="fa fa-cogs"></i> 管理工具
+                <i class="fa fa-chevron-down float-end"></i>
             </div>
-            <div class="stat-card">
-                <div class="stat-value" id="activeStreams">0</div>
-                <div class="stat-label">活跃流数量</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="systemUptime">刚刚启动</div>
-                <div class="stat-label">系统运行时间</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="trafficReceived">0 B</div>
-                <div class="stat-label">总接收���量</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="trafficSent">0 B</div>
-                <div class="stat-label">总发送流量</div>
-            </div>
-        </div>
-
-        <!-- 添加流 -->
-        <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="fa fa-plus-circle"></i> 添加流</h5>
-            </div>
-            <div class="card-body">
-                <form id="addStreamForm">
-                    <div class="mb-3">
-                        <label class="form-label">分类</label>
-                        <input type="text" class="form-control" id="streamCategory" placeholder="例如: 新闻、体育、综艺等">
+            <div class="tools-content" id="toolsContent">
+                <div class="row">
+                    <!-- 添加流 -->
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="mb-0"><i class="fa fa-plus-circle"></i> 添加流</h6>
+                            </div>
+                            <div class="card-body">
+                                <form id="addStreamForm">
+                                    <div class="mb-3">
+                                        <label class="form-label">分类</label>
+                                        <input type="text" class="form-control" id="streamCategory" placeholder="例如: 新闻、体育、综艺等">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">流名称</label>
+                                        <input type="text" class="form-control" id="streamName" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">源地址</label>
+                                        <input type="text" class="form-control" id="streamUrl" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">自定义ID（可选）</label>
+                                        <input type="text" class="form-control" id="streamCustomId" placeholder="留空将自动生成">
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fa fa-plus"></i> 添加流
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">流名称</label>
-                        <input type="text" class="form-control" id="streamName" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">源地址</label>
-                        <input type="text" class="form-control" id="streamUrl" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">自定义ID（可选）</label>
-                        <input type="text" class="form-control" id="streamCustomId" placeholder="留空将自动生成">
-                    </div>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fa fa-plus"></i> 添加流
-                    </button>
-                </form>
-            </div>
-        </div>
-
-        <!-- 在添加流的卡片后面添加新的量片 -->
-        <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="fa fa-upload"></i> 批量导入流</h5>
-            </div>
-            <div class="card-body">
-                <form id="batchImportForm">
-                    <div class="mb-3">
-                        <label class="form-label">批量导入（支持分类格式，例如: 分类名,#genre# 开头的新行）</label>
-                        <textarea class="form-control" id="batchStreams" rows="8" placeholder="例如：
+                    <!-- 批量导入 -->
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="mb-0"><i class="fa fa-upload"></i> 批量导入流</h6>
+                            </div>
+                            <div class="card-body">
+                                <form id="batchImportForm">
+                                    <div class="mb-3">
+                                        <label class="form-label">批量导入（支持分类格式，例如: 分类名,#genre# 开头的新行）</label>
+                                        <textarea class="form-control" id="batchStreams" rows="8" placeholder="例如：
 弯弯新聞,#genre#
 民視新聞台,http://example.com/stream1
 中視新聞台,http://example.com/stream2
@@ -182,60 +257,66 @@
 弯弯綜合,#genre#
 民視,http://example.com/stream3
 民視第一台,http://example.com/stream4"></textarea>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fa fa-upload"></i> 批量导入
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
                     </div>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fa fa-upload"></i> 批量导入
-                    </button>
-                </form>
+                </div>
             </div>
         </div>
 
         <!-- 流列表 -->
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="fa fa-list"></i> 流列表</h5>
-                <div class="btn-group">
-                    <button onclick="batchRestart()" class="btn btn-warning btn-sm" id="batchRestartBtn" disabled>
-                        <i class="fa fa-refresh"></i> 批量重启
-                    </button>
-                    <button onclick="batchStop()" class="btn btn-secondary btn-sm" id="batchStopBtn" disabled>
-                        <i class="fa fa-stop"></i> 批量停止
-                    </button>
-                    <button onclick="batchDelete()" class="btn btn-danger btn-sm" id="batchDeleteBtn" disabled>
-                        <i class="fa fa-trash"></i> 批量删除
-                    </button>
-                    <button onclick="refreshStreams()" class="btn btn-light btn-sm">
-                        <i class="fa fa-refresh"></i> 刷新
-                    </button>
-                    <button onclick="exportM3U()" class="btn btn-light btn-sm">
-                        <i class="fa fa-download"></i> 导出M3U
-                    </button>
-                    <button onclick="exportTXT()" class="btn btn-light btn-sm">
-                        <i class="fa fa-download"></i> 导出TXT
-                    </button>
-                    <button onclick="exportRtmpList()" class="btn btn-light btn-sm">
-                        <i class="fa fa-download"></i> 导出RTMP列表
-                    </button>
+        <div class="stream-list-container">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fa fa-list"></i> 流列表</h5>
+                    <div class="btn-group">
+                        <button onclick="batchRestart()" class="btn btn-warning btn-sm" id="batchRestartBtn" disabled>
+                            <i class="fa fa-refresh"></i> 批量重启
+                        </button>
+                        <button onclick="batchStop()" class="btn btn-secondary btn-sm" id="batchStopBtn" disabled>
+                            <i class="fa fa-stop"></i> 批量停止
+                        </button>
+                        <button onclick="batchDelete()" class="btn btn-danger btn-sm" id="batchDeleteBtn" disabled>
+                            <i class="fa fa-trash"></i> 批量删除
+                        </button>
+                        <button onclick="refreshStreams()" class="btn btn-light btn-sm">
+                            <i class="fa fa-refresh"></i> 刷新
+                        </button>
+                        <button onclick="exportM3U()" class="btn btn-light btn-sm">
+                            <i class="fa fa-download"></i> 导出M3U
+                        </button>
+                        <button onclick="exportTXT()" class="btn btn-light btn-sm">
+                            <i class="fa fa-download"></i> 导出TXT
+                        </button>
+                        <button onclick="exportRtmpList()" class="btn btn-light btn-sm">
+                            <i class="fa fa-download"></i> 导出RTMP列表
+                        </button>
+                    </div>
                 </div>
-            </div>
-            <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th>
-                                    <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
-                                </th>
-                                <th>名称</th>
-                                <th>状态</th>
-                                <th>推流状态</th>
-                                <th>源地址</th>
-                                <th>播放地址</th>
-                                <th>操作</th>
-                            </tr>
-                        </thead>
-                        <tbody id="streamTable"></tbody>
-                    </table>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>
+                                        <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
+                                    </th>
+                                    <th>名称</th>
+                                    <th>状态</th>
+                                    <th>推流状态</th>
+                                    <th>源地址</th>
+                                    <th>播放地址</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="streamTable"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -323,7 +404,7 @@
                         let statusClass = 'inactive';
                         let statusText = '已停止';
                         
-                        // 检查流是否失效
+                        // 检查流是���失效
                         if (stream.invalid) {
                             statusClass = 'error';
                             statusText = '已失效';
@@ -602,7 +683,7 @@
             }
         }
 
-        // 修改复���到剪贴板函数
+        // 修改复制到剪贴板函数
         function copyToClipboard(text) {
             // 创建临时输入框
             const input = document.createElement('input');
@@ -1020,6 +1101,14 @@
                     console.error('Error exporting RTMP list:', error);
                     alert('导出RTMP列表失败');
                 });
+        }
+
+        // 添加工具面板切换功能
+        function toggleTools() {
+            const content = document.getElementById('toolsContent');
+            content.classList.toggle('show');
+            const chevron = document.querySelector('.tools-toggle .fa-chevron-down');
+            chevron.style.transform = content.classList.contains('show') ? 'rotate(180deg)' : 'rotate(0)';
         }
     </script>
 
