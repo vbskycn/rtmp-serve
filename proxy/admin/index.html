@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>流媒体管理后台</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .stream-list { margin-top: 20px; }
+        .stream-item { border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <h1>流媒体管理后台</h1>
+    
+    <div>
+        <h2>添加新流</h2>
+        <form id="addStreamForm">
+            <div>
+                <label>ID: <input type="text" id="streamId" required></label>
+            </div>
+            <div>
+                <label>名称: <input type="text" id="streamName" required></label>
+            </div>
+            <div>
+                <label>URL: <input type="text" id="streamUrl" required></label>
+            </div>
+            <button type="submit">添加</button>
+        </form>
+    </div>
+
+    <div class="stream-list" id="streamList">
+    </div>
+
+    <script>
+        async function loadStreams() {
+            const response = await fetch('/api/streams');
+            const streams = await response.json();
+            const listEl = document.getElementById('streamList');
+            listEl.innerHTML = streams.map(stream => `
+                <div class="stream-item">
+                    <h3>${stream.name} (${stream.id})</h3>
+                    <p>URL: ${stream.url}</p>
+                    <p>状态: ${stream.active ? '活跃' : '停止'}</p>
+                    <div class="stats">
+                        <p>总请求数: ${stream.stats?.totalRequests || 0}</p>
+                        <p>最后访问: ${stream.stats?.lastAccessed ? new Date(stream.stats.lastAccessed).toLocaleString() : '从未'}</p>
+                        <p>错误次数: ${stream.stats?.errors || 0}</p>
+                        <p>运行时间: ${formatUptime(stream.stats?.uptime || 0)}</p>
+                    </div>
+                    ${stream.active ? 
+                        `<button onclick="stopStream('${stream.id}')">停止</button>` : 
+                        ''}
+                </div>
+            `).join('');
+        }
+
+        async function stopStream(id) {
+            await fetch(`/api/streams/${id}/stop`, { method: 'POST' });
+            loadStreams();
+        }
+
+        document.getElementById('addStreamForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const data = {
+                id: document.getElementById('streamId').value,
+                name: document.getElementById('streamName').value,
+                url: document.getElementById('streamUrl').value
+            };
+            await fetch('/api/streams', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            loadStreams();
+            e.target.reset();
+        };
+
+        loadStreams();
+
+        function formatUptime(ms) {
+            const seconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            return `${hours}小时${minutes % 60}分钟`;
+        }
+    </script>
+</body>
+</html> 
