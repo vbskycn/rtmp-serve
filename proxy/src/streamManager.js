@@ -168,6 +168,21 @@ class StreamManager {
                 throw new Error('Stream not found');
             }
 
+            // 初始化或更新统计信息
+            if (!this.streamStats.has(streamId)) {
+                this.streamStats.set(streamId, {
+                    totalRequests: 0,
+                    lastAccessed: null,
+                    errors: 0,
+                    uptime: 0,
+                    startTime: null
+                });
+            }
+
+            const stats = this.streamStats.get(streamId);
+            stats.startTime = new Date();
+            stats.errors = 0;
+
             // 解析 KODIPROP 属性
             let licenseKey = null;
             let manifestType = null;
@@ -194,10 +209,6 @@ class StreamManager {
             if (!fs.existsSync(outputPath)) {
                 fs.mkdirSync(outputPath, { recursive: true });
             }
-
-            const stats = this.streamStats.get(streamId);
-            stats.startTime = new Date();
-            stats.errors = 0;
 
             // 获取实际的 MPD URL（处理重定向）
             try {
@@ -227,7 +238,7 @@ class StreamManager {
                 throw error;
             }
 
-            // 基础输入选项
+            // ���础输入选项
             const inputOptions = [
                 '-reconnect', '1',
                 '-reconnect_streamed', '1',
@@ -342,7 +353,14 @@ class StreamManager {
                 error: error.message,
                 stack: error.stack 
             });
-            setTimeout(() => this.startStreaming(streamId), 30000);
+            
+            // 更新错误统计
+            const stats = this.streamStats.get(streamId);
+            if (stats) {
+                stats.errors++;
+                stats.startTime = null;
+            }
+            
             throw error;
         }
     }
