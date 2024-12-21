@@ -30,7 +30,7 @@ class StreamManager extends EventEmitter {
         
         // 每小时运行一次清理
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
-        // 每5分钟运行一���健康检查
+        // 每5分钟运行一次健康检查
         setInterval(() => this.checkStreamsHealth(), 5 * 60 * 1000);
         
         // 加载配置
@@ -107,50 +107,56 @@ class StreamManager extends EventEmitter {
                 throw new Error('缺少必要的流信息');
             }
 
-            // 使用传入的ID或生成新ID
-            const streamId = streamData.id || streamData.customId ? 
-                           `stream_${streamData.customId}` : 
-                           generateStreamId(streamData.name, streamData.url);
-
-            // 检查ID是否已存在
-            if (this.streams.has(streamId)) {
-                // 如果已存在，更新现有流
-                const existingStream = this.streams.get(streamId);
-                existingStream.name = streamData.name;
-                existingStream.url = streamData.url;
-                existingStream.category = streamData.category || '未分类';
-                if (streamData.tvg) {
-                    existingStream.tvg = streamData.tvg;
+            // 从URL中提取ID部分
+            const urlParts = streamData.url.split('/');
+            const lastPart = urlParts[urlParts.length - 1];
+            
+            // 生成streamId
+            let streamId;
+            if (streamData.id) {
+                streamId = streamData.id;
+            } else if (streamData.customId) {
+                streamId = `stream_${streamData.customId}`;
+            } else if (lastPart.includes('.')) {
+                // 如果URL最后部分包含文件扩展名，生成随机ID
+                const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+                let randomId = '';
+                for (let i = 0; i < 6; i++) {
+                    randomId += chars.charAt(Math.floor(Math.random() * chars.length));
                 }
+                streamId = `stream_${randomId}`;
             } else {
-                // 添加新流
-                this.streams.set(streamId, {
-                    id: streamId,
-                    name: streamData.name,
-                    url: streamData.url,
-                    category: streamData.category || '未分类',
-                    tvg: streamData.tvg || {
-                        id: '',
-                        name: streamData.name,
-                        logo: '',
-                        group: streamData.category || ''
-                    },
-                    stats: {
-                        startTime: null,
-                        uptime: 0,
-                        errors: 0
-                    }
-                });
-
-                // 初始化统计信息
-                this.streamStats.set(streamId, {
-                    totalRequests: 0,
-                    lastAccessed: null,
-                    errors: 0,
-                    uptime: 0,
-                    startTime: null
-                });
+                // 使用URL最后部分作为ID
+                streamId = `stream_${lastPart}`;
             }
+
+            // 添加新流
+            this.streams.set(streamId, {
+                id: streamId,
+                name: streamData.name,
+                url: streamData.url,
+                category: streamData.category || '未分类',
+                tvg: streamData.tvg || {
+                    id: '',
+                    name: streamData.name,
+                    logo: '',
+                    group: streamData.category || ''
+                },
+                stats: {
+                    startTime: null,
+                    uptime: 0,
+                    errors: 0
+                }
+            });
+
+            // 初始化统计信息
+            this.streamStats.set(streamId, {
+                totalRequests: 0,
+                lastAccessed: null,
+                errors: 0,
+                uptime: 0,
+                startTime: null
+            });
 
             // 保存配置
             await this.saveStreams();
@@ -283,7 +289,7 @@ class StreamManager extends EventEmitter {
 
         // 构建 FFmpeg 输入参数
         const inputArgs = [
-            '-hide_banner',          // 隐藏 banner
+            '-hide_banner',          // 隐��� banner
             '-reconnect', '1',       // 断开时重连
             '-reconnect_streamed', '1',
             '-reconnect_delay_max', '5',
@@ -613,7 +619,7 @@ class StreamManager extends EventEmitter {
                 // 清理流程序引用
                 this.streamProcesses.delete(streamId);
                 
-                // 重置统计信息
+                // 重置统计信��
                 const stats = this.streamStats.get(streamId);
                 if (stats) {
                     stats.startTime = null;

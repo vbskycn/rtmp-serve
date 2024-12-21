@@ -76,7 +76,7 @@ router.post('/api/streams', async (req, res) => {
         const result = await streamManager.addStream(streamData);
         
         if (!result || !result.success) {
-            throw new Error(result?.error || '添加流失败');
+            throw new Error(result?.error || '添���流失败');
         }
 
         res.json({
@@ -114,30 +114,52 @@ router.get('/api/streams', async (req, res) => {
     }
 });
 
-// 批量添加流
+// 修改批量导入的路由处理
 router.post('/api/streams/batch', async (req, res) => {
     try {
         const { m3u } = req.body;
-        const streams = parseM3U(m3u);
+        const lines = m3u.split('\n').filter(line => line.trim());
         const results = [];
+        let currentCategory = '未分类';
         
-        for (const stream of streams) {
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            
+            // 检查是否是分类行
+            if (line.endsWith('#genre#')) {
+                currentCategory = line.split(',')[0].trim();
+                continue;
+            }
+            
+            // 处理常规流行
+            const [name, url] = line.split(',').map(s => s.trim());
+            
+            if (!name || !url) {
+                continue;
+            }
+
             try {
-                const result = await streamManager.addStream({
-                    name: stream.name,
-                    url: stream.url,
-                    category: stream.tvg?.group || '未分类',
-                    kodiprop: stream.kodiprop,
-                    tvg: stream.tvg
-                });
+                const streamData = {
+                    name,
+                    url,
+                    category: currentCategory,
+                    tvg: {
+                        id: '',
+                        name: name,
+                        logo: '',
+                        group: currentCategory
+                    }
+                };
+
+                const result = await streamManager.addStream(streamData);
                 results.push({
-                    name: stream.name,
-                    success: result.success,
-                    error: result.error
+                    name,
+                    success: true
                 });
             } catch (error) {
+                logger.error(`Error adding stream ${name}:`, error);
                 results.push({
-                    name: stream.name,
+                    name,
                     success: false,
                     error: error.message
                 });
@@ -145,21 +167,23 @@ router.post('/api/streams/batch', async (req, res) => {
         }
 
         const successCount = results.filter(r => r.success).length;
-        const failCount = results.filter(r => !r.success).length;
+        const failCount = results.length - successCount;
 
-        logger.info(`Batch added ${successCount} streams, failed ${failCount}`);
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             results,
             summary: {
-                total: streams.length,
+                total: results.length,
                 success: successCount,
                 failed: failCount
             }
         });
     } catch (error) {
-        logger.error('Error adding streams:', error);
-        res.status(500).json({ error: error.message });
+        logger.error('Error in batch import:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
     }
 });
 
