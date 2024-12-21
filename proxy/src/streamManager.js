@@ -150,17 +150,24 @@ class StreamManager {
                 return null;
             }
 
-            // 获取端口
-            const port = this.serverPorts.get(streamId);
-            if (!port) {
-                logger.warn(`Port not found for stream: ${streamId}`);
-                return null;
-            }
-
             // 检查流是否正在运行
             if (!this.streamProcesses.has(streamId)) {
                 logger.info(`Starting stream ${streamId} on demand`);
                 await this.startStreaming(streamId);
+                
+                // 等待端口分配
+                let attempts = 0;
+                while (!this.serverPorts.has(streamId) && attempts < 10) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    attempts++;
+                }
+            }
+
+            // 获取端口
+            const port = this.serverPorts.get(streamId);
+            if (!port) {
+                logger.error(`Port not found for stream: ${streamId}`);
+                return null;
             }
 
             return `http://127.0.0.1:${port}`;
@@ -327,6 +334,7 @@ class StreamManager {
 
                 ytdlp.stderr.on('data', (data) => {
                     ytdlpError += data.toString();
+                    logger.debug(`yt-dlp stderr: ${data.toString()}`);
                 });
 
                 ytdlp.on('error', (error) => {
@@ -350,6 +358,12 @@ class StreamManager {
                     port,
                     startTime: new Date()
                 });
+
+                // 更新流配置中的端口信息
+                const stream = this.streams.get(streamId);
+                if (stream) {
+                    stream.serverPort = port;
+                }
 
                 resolve();
             } catch (error) {
