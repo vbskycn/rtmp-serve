@@ -217,13 +217,42 @@
                     dp = null;
                 }
 
-                // 创建新的DPlayer实例
+                // 创建新的DPlayer实例，添加更多HLS配置
                 dp = new DPlayer({
                     container: document.getElementById('dplayer'),
                     video: {
                         url: playUrl,
                         type: 'hls',
-                        autoplay: true,  // 设置自动播放
+                        autoplay: true,
+                        hlsjsConfig: {
+                            debug: false,
+                            // HLS配置
+                            fragLoadingTimeOut: 20000,        // 片段加载超时
+                            manifestLoadingTimeOut: 20000,    // 清单加载超时
+                            levelLoadingTimeOut: 20000,       // 级别加载超时
+                            maxBufferLength: 30,              // 最大缓冲长度（秒）
+                            maxMaxBufferLength: 60,           // 绝对最大缓冲长度
+                            maxBufferSize: 200 * 1000 * 1000, // 最大缓冲大小（字节）
+                            maxBufferHole: 0.5,              // 最大缓冲空洞
+                            lowLatencyMode: true,            // 低延迟模式
+                            backBufferLength: 30,            // 后退缓冲长度
+                            enableWorker: true,              // 启用Web Worker
+                            startLevel: -1,                  // 自动选择起始质量
+                            abrEwmaFastLive: 3.0,           // 实时流ABR快速EWMA
+                            abrEwmaSlowLive: 9.0,           // 实时流ABR慢速EWMA
+                            liveSyncDurationCount: 3,        // 同步持续时间计数
+                            liveMaxLatencyDurationCount: 10, // 最大延迟持续时间计数
+                            liveDurationInfinity: true,      // 无限直播持续时间
+                            liveBackBufferLength: 0,         // 禁用实时回退缓冲
+                            // 错误恢复配置
+                            recovery: {
+                                enabled: true,               // 启用错误恢复
+                                errorRetryInterval: 1000,    // 错误重试间隔
+                                maxErrorRetry: 3,            // 最大错误重试次数
+                                maxStarvationDelay: 4,       // 最大饥饿延迟
+                                maxLoadingDelay: 4           // 最大加载延迟
+                            }
+                        }
                     },
                     theme: '#3498db',
                     hotkey: true,
@@ -245,18 +274,42 @@
 
                 // 监听播放开始事件
                 dp.on('loadstart', () => {
-                    // 强制播放
                     dp.play();
                 });
 
                 // 监听播放器就绪事件
                 dp.on('loadedmetadata', () => {
-                    // 再次尝试播放
                     dp.play().catch(error => {
                         console.warn('Autoplay failed:', error);
                     });
                     document.querySelector('.loading-overlay').style.display = 'none';
                 });
+
+                // 添加缓冲监听
+                dp.on('waiting', () => {
+                    console.log('Player waiting for data...');
+                });
+
+                // 添加播放状态监听
+                dp.on('playing', () => {
+                    console.log('Player started playing');
+                    document.querySelector('.loading-overlay').style.display = 'none';
+                });
+
+                // 监听HLS事件
+                if (dp.plugins.hls) {
+                    dp.plugins.hls.on(Hls.Events.ERROR, (event, data) => {
+                        console.log('HLS Error:', data);
+                        if (data.fatal) {
+                            handleStreamError();
+                        }
+                    });
+
+                    // 监听片段加载事件
+                    dp.plugins.hls.on(Hls.Events.FRAG_LOADED, () => {
+                        console.log('Fragment loaded successfully');
+                    });
+                }
 
                 // 隐藏加载动画
                 document.querySelector('.loading-overlay').style.display = 'none';
