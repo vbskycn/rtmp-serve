@@ -4,6 +4,7 @@ const path = require('path');
 const logger = require('./utils/logger');
 const axios = require('axios');
 const EventEmitter = require('events');
+const config = require('../config/config.json');
 
 class StreamManager extends EventEmitter {
     constructor() {
@@ -19,6 +20,24 @@ class StreamManager extends EventEmitter {
         this.activeViewers = new Map();
         this.autoStopTimers = new Map();
         this.manuallyStartedStreams = new Set();
+        this.config = config;  // 保存配置引用
+        
+        // 加载主配置文件
+        try {
+            this.config = require('../config/config.json');
+        } catch (error) {
+            logger.error('Error loading config:', error);
+            this.config = {
+                server: {
+                    host: 'localhost',
+                    port: 3000
+                },
+                rtmp: {
+                    pushServer: 'rtmp://ali.push.yximgs.com/live/',
+                    pullServer: 'http://ali.hlspull.yximgs.com/live/'
+                }
+            };
+        }
         
         // 创建配置目录
         const configDir = path.dirname(this.configPath);
@@ -34,9 +53,6 @@ class StreamManager extends EventEmitter {
         // 每5分钟运行一次健康检查
         setInterval(() => this.checkStreamsHealth(), 5 * 60 * 1000);
         
-        // 加载配置
-        this.config = require('../config/config.json');
-        
         // 修改流量统计初始化
         this.startTime = Date.now();
         this.totalTraffic = {
@@ -44,7 +60,7 @@ class StreamManager extends EventEmitter {
             received: 0n
         };
         
-        // 加载已保存的统计数据
+        // 加��已保存的统计数据
         this.loadStats();
         
         // 每秒更新流量统计
@@ -194,7 +210,7 @@ class StreamManager extends EventEmitter {
                 logger.info(`Added new stream: ${streamId}`);
             }
 
-            // 立即保存配置到文件
+            // 立即保存���置到文件
             await this.saveStreams();
 
             return {
@@ -530,7 +546,7 @@ class StreamManager extends EventEmitter {
             }
         }, 5000); // 每5秒检查一次
 
-        // 保存查间隔的引用，便后续清理
+        // 保存查间隔的引用，便后续���理
         this.healthChecks.set(streamId, checkInterval);
     }
 
@@ -897,7 +913,7 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 修改导出配置方法以支持分类
+    // 改导出配置方法以支持分类
     exportConfig() {
         const configs = [];
         const streamsByCategory = new Map();
@@ -1090,6 +1106,20 @@ class StreamManager extends EventEmitter {
             this.totalTraffic.sent = 0n;
             this.totalTraffic.received = 0n;
         }
+    }
+
+    // 其他方法可以通过 this.config 访问配置
+    // 例如:
+    getServerUrl() {
+        return `http://${this.config.server.host}:${this.config.server.port}`;
+    }
+
+    getRtmpPushUrl(streamId) {
+        return `${this.config.rtmp.pushServer}${streamId}`;
+    }
+
+    getRtmpPullUrl(streamId) {
+        return `${this.config.rtmp.pullServer}${streamId}.flv`;
     }
 }
 

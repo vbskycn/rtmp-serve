@@ -8,9 +8,6 @@ const fs = require('fs');
 // 创建 StreamManager 实例
 const streamManager = new StreamManager();
 
-// 读取配置文件
-const config = require('../config/config.json');
-
 // 修改生成流ID的函数
 function generateStreamId(name, url, customId = '') {
     // 如果提供了自定义ID，直接使用
@@ -39,7 +36,7 @@ router.post('/api/streams', async (req, res) => {
             });
         }
 
-        // 生成streamId (优先使用customId，否则生成随机ID)
+        // 生成streamId (优先使用customId，否则生成随���ID)
         const streamId = generateStreamId(name, url, customId);
         const streamData = {
             id: streamId,
@@ -78,19 +75,14 @@ router.post('/api/streams', async (req, res) => {
 router.get('/api/streams', async (req, res) => {
     try {
         const streams = [];
-        for (const [id, config] of streamManager.streams.entries()) {
-            // 检查流的状态
-            const isRunning = await checkStreamStatus(id);
-            
-            // 构建完整的播放地址
-            const playUrl = `http://${config.server.host}:${config.server.port}/play/${id}`;
-            
+        for (const [id, streamConfig] of streamManager.streams.entries()) {
+            const playUrl = `${streamManager.getServerUrl()}/play/${id}`;
             streams.push({
                 id,
-                ...config,
-                playUrl,  // 添加完整的播放地址
+                ...streamConfig,
+                playUrl,
                 stats: streamManager.streamStats.get(id),
-                processRunning: isRunning
+                processRunning: await checkStreamStatus(id)
             });
         }
         res.json(streams);
@@ -363,18 +355,7 @@ async function checkStreamStatus(streamId) {
 
 // 添加获取服务器配置的路由
 router.get('/api/config', (req, res) => {
-    try {
-        // 只返回必要的配置信息
-        res.json({
-            server: {
-                host: config.server.host,
-                port: config.server.port
-            }
-        });
-    } catch (error) {
-        logger.error('Error getting server config:', error);
-        res.status(500).json({ error: 'Failed to get server config' });
-    }
+    res.json(streamManager.config);
 });
 
 // 添加更新流的路由

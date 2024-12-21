@@ -5,9 +5,11 @@ const { StreamManager } = require('./streamManager');
 const adminRoutes = require('./adminRoutes');
 const logger = require('./utils/logger');
 const fs = require('fs');
+const config = require('../config/config.json');
 
 const app = express();
-const port = process.env.PORT || 3000;
+// 使用配置文件中的端口
+const port = config.server.port;
 
 // 创建 StreamManager 实例
 const streamManager = new StreamManager();
@@ -35,7 +37,7 @@ app.use(express.static(path.join(__dirname, '../admin')));
 // 设置管理路由
 app.use(adminRoutes);
 
-// 播放���由
+// 播放由
 app.get('/play/:streamId', async (req, res) => {
     try {
         const { streamId } = req.params;
