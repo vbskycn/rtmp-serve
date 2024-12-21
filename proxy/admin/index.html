@@ -218,7 +218,6 @@
                                 </th>
                                 <th>名称</th>
                                 <th>状态</th>
-                                <th>流ID</th>
                                 <th>源地址</th>
                                 <th>播放地址</th>
                                 <th>操作</th>
@@ -315,12 +314,6 @@
                                 <span class="status ${statusClass}" style="${statusStyle}">
                                     ${statusText}
                                 </span>
-                            </td>
-                            <td>
-                                <div class="input-group">
-                                    <input type="text" class="form-control form-control-sm" value="${streamId}" 
-                                           onchange="updateStreamId('${stream.id}', this.value)">
-                                </div>
                             </td>
                             <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
                                 ${stream.url}
@@ -506,7 +499,7 @@
             setInterval(loadStreams, 5000);
         }
 
-        // 启动初始化
+        // 启动始化
         init();
 
         // 添加更新流ID函数
@@ -754,7 +747,6 @@
                 document.getElementById('editStreamCategory').value = stream.category || '';
                 document.getElementById('editStreamName').value = stream.name;
                 document.getElementById('editStreamUrl').value = stream.url;
-                document.getElementById('editStreamCustomId').value = streamId.replace('stream_', '');
                 
                 // 显示模态框
                 const modal = new bootstrap.Modal(document.getElementById('editStreamModal'));
@@ -771,8 +763,7 @@
             const streamData = {
                 category: document.getElementById('editStreamCategory').value,
                 name: document.getElementById('editStreamName').value,
-                url: document.getElementById('editStreamUrl').value,
-                customId: document.getElementById('editStreamCustomId').value
+                url: document.getElementById('editStreamUrl').value
             };
 
             try {
@@ -794,7 +785,7 @@
                     loadStreams();
                     alert('更新成功');
                 } else {
-                    alert('更新失败: ' + result.error);
+                    alert('��新失败: ' + result.error);
                 }
             } catch (error) {
                 console.error('Error updating stream:', error);
@@ -825,10 +816,6 @@
                         <div class="mb-3">
                             <label class="form-label">源地址</label>
                             <input type="text" class="form-control" id="editStreamUrl" required>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">自定义ID</label>
-                            <input type="text" class="form-control" id="editStreamCustomId">
                         </div>
                     </form>
                 </div>
