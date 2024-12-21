@@ -67,6 +67,34 @@ function setupAdminRoutes(app, streamManager) {
             res.status(500).json({ error: error.message });
         }
     });
+
+    // 启动流
+    app.post('/api/streams/:id/start', async (req, res) => {
+        const { id } = req.params;
+        try {
+            await streamManager.startStreaming(id);
+            logger.info(`Stream started`, { id });
+            res.json({ success: true });
+        } catch (error) {
+            logger.error('Error starting stream', { error });
+            res.status(500).json({ error: error.message });
+        }
+    });
+
+    // 删除流
+    app.delete('/api/streams/:id', async (req, res) => {
+        const { id } = req.params;
+        try {
+            await streamManager.stopStreaming(id);
+            streamManager.streams.delete(id);
+            streamManager.streamStats.delete(id);
+            logger.info(`Stream deleted`, { id });
+            res.json({ success: true });
+        } catch (error) {
+            logger.error('Error deleting stream', { error });
+            res.status(500).json({ error: error.message });
+        }
+    });
 }
 
 module.exports = { setupAdminRoutes }; 
