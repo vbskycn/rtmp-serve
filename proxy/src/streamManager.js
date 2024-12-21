@@ -284,13 +284,6 @@ class StreamManager {
             '--live-from-start',
             '--no-playlist-reverse',
             '--format', 'v5000000_33',  // 直接指定格式
-            '--extract-audio',          // 提取音频
-            '--extract-video',          // 提取视频
-            '--audio-format', 'aac',    // 音频格式
-            '--video-format', 'mp4',    // 视频格式
-            '--merge-output-format', 'mp4',  // 合并为 MP4
-            '--no-keep-video',          // 不保留原始视频
-            '--no-keep-audio',          // 不保留原始音频
             '--no-download-archive',    // 不使用下载存档
             '--no-write-info-json',     // 不写入信息文件
             '--no-write-description',   // 不写入描述文件
@@ -319,7 +312,7 @@ class StreamManager {
         // 添加输出参数
         args.push(
             '--output',
-            '-',  // 输出到标准输出
+            '-',  // 输出到���准输出
             streamConfig.url
         );
 
