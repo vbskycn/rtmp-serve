@@ -395,7 +395,7 @@
                             <i class="fa fa-download"></i> 导出远程推流M3U
                         </button>
                         <button onclick="exportRemoteTXT()" class="btn btn-light btn-sm">
-                            <i class="fa fa-download"></i> 导出远程推流TXT
+                            <i class="fa fa-download"></i> 导出远程���流TXT
                         </button>
                     </div>
                 </div>
@@ -548,7 +548,7 @@
             }
         }
 
-        // 添加完全重新渲染表格的函数
+        // 修改 renderFullTable 函数
         function renderFullTable(tbody, groupedStreams) {
             tbody.style.opacity = '0';
             setTimeout(() => {
@@ -567,7 +567,104 @@
                     categoryStreams.forEach(stream => {
                         const tr = document.createElement('tr');
                         tr.dataset.streamId = stream.id;
-                        // ... 现有的行渲染代码 ...
+                        const playUrl = `http://${serverConfig.server.host}:${serverConfig.server.port}/play/${stream.id}`;
+                        
+                        // 检查是否是手动启动的流
+                        const isManuallyStarted = stream.manuallyStarted;
+                        
+                        // 修改状态判断逻辑
+                        let statusClass = 'inactive';
+                        let statusText = '已停止';
+                        
+                        // 检查流是否失效
+                        if (stream.invalid) {
+                            statusClass = 'error';
+                            statusText = '已失效';
+                        } 
+                        // 检查流是否在运行（包括通过播放链接启动的）
+                        else if (stream.processRunning || stream.stats?.startTime) {
+                            statusClass = 'active';
+                            statusText = '运行中';
+                        }
+
+                        // 添加状态样式
+                        const statusStyle = stream.invalid ? 'background-color: #dc3545;' :
+                                          (statusClass === 'active' ? 'background-color: #28a745;' : 'background-color: #6c757d;');
+
+                        // 添加推流状态样式
+                        const rtmpStatusStyle = isManuallyStarted ? 'background-color: #28a745;' : 'background-color: #6c757d;';
+                        const rtmpStatusText = isManuallyStarted ? '推流中' : '未推流';
+
+                        tr.innerHTML = `
+                            <td>
+                                <input type="checkbox" class="stream-checkbox" value="${stream.id}" onchange="updateBatchButtons()">
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div class="input-group input-group-compact">
+                                        <img src="${stream.tvg?.logo || ''}" alt="" style="height: 20px; margin-right: 4px;">
+                                        <input type="text" class="form-control form-control-sm" value="${stream.name}" readonly 
+                                               style="font-family: monospace; background-color: #f8f9fa;">
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <span class="status ${statusClass}" style="${statusStyle}">
+                                    ${statusText}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="status" style="${rtmpStatusStyle}">
+                                    ${rtmpStatusText}
+                                </span>
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div class="input-group input-group-compact">
+                                        <input type="text" class="form-control form-control-sm" value="${stream.url}" readonly 
+                                               style="font-family: monospace; background-color: #f8f9fa;">
+                                        <button class="btn btn-outline-secondary btn-sm" onclick="copyToClipboard('${stream.url}')">
+                                            <i class="fa fa-copy"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div class="input-group input-group-compact">
+                                        <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly 
+                                               style="font-family: monospace; background-color: #f8f9fa;">
+                                        <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${playUrl}')">
+                                            <i class="fa fa-copy"></i> 复制
+                                        </button>
+                                        <button class="btn btn-outline-success btn-sm" onclick="window.open('player.html?id=${stream.id}', '_blank')">
+                                            <i class="fa fa-play"></i> 播放
+                                        </button>
+                                        ${isManuallyStarted ? `
+                                            <button class="btn btn-outline-info btn-sm" onclick="copyRtmpInfo('${stream.id}')">
+                                                <i class="fa fa-external-link"></i> 推流
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="stream-actions">
+                                <div class="btn-group btn-group-sm">
+                                    <button onclick="editStream('${stream.id}')" class="btn btn-info btn-sm">
+                                        <i class="fa fa-edit"></i> 编辑
+                                    </button>
+                                    <button onclick="restartStream('${stream.id}', true)" class="btn btn-warning btn-sm">
+                                        <i class="fa fa-refresh"></i> ${isManuallyStarted ? '重启' : '手动启动'}
+                                    </button>
+                                    <button onclick="stopStream('${stream.id}')" class="btn btn-secondary btn-sm">
+                                        <i class="fa fa-stop"></i> 停止
+                                    </button>
+                                    <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
+                                        <i class="fa fa-trash"></i> 删除
+                                    </button>
+                                </div>
+                            </td>
+                        `;
                         tbody.appendChild(tr);
                     });
                 }
@@ -784,7 +881,7 @@
                 console.error('复制失败:', err);
                 alert('复制失败');
             } finally {
-                // 移除临时输入框
+                // 移除��时输入框
                 document.body.removeChild(input);
             }
         }
@@ -874,7 +971,7 @@
                 .map(box => box.value);
         }
 
-        // 批量重���
+        // 批量重启
         async function batchRestart() {
             const selectedStreams = getSelectedStreams();
             if (!selectedStreams.length) return;
@@ -979,7 +1076,7 @@
                 document.getElementById('editStreamName').value = stream.name;
                 document.getElementById('editStreamUrl').value = stream.url;
                 
-                // 显示模态框
+                // ���示模态框
                 const modal = new bootstrap.Modal(document.getElementById('editStreamModal'));
                 modal.show();
             } catch (error) {
@@ -1128,7 +1225,7 @@
             const toast = document.createElement('div');
             toast.className = 'alert alert-success position-fixed bottom-0 end-0 m-3';
             toast.style.zIndex = '9999';
-            toast.textContent = '推流信息已复制到剪贴板';
+            toast.textContent = '��流信息已复制到剪贴板';
             document.body.appendChild(toast);
             setTimeout(() => toast.remove(), 2000);
         }
