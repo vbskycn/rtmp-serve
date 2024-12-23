@@ -6,6 +6,7 @@ const adminRoutes = require('./adminRoutes');
 const logger = require('./utils/logger');
 const fs = require('fs');
 const config = require('../config/config.json');
+const os = require('os');
 
 const app = express();
 // 使用配置文件中的端口
@@ -138,10 +139,91 @@ app.use((err, req, res, next) => {
     res.status(500).send('Internal Server Error');
 });
 
-// 启动服务器
-app.listen(port, () => {
-    logger.info(`Server running on port ${port}`);
+// 添加获取本机IP的函数
+function getLocalIP() {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const interface of interfaces[name]) {
+            // 跳过内部IP和IPv6
+            if (interface.internal || interface.family === 'IPv6') {
+                continue;
+            }
+            return interface.address;
+        }
+    }
+    return 'localhost';
+}
+
+// 在服务器启动前检查和更新配置
+async function initializeServer() {
+    try {
+        if (config.server.host === 'auto') {
+            config.server.host = getLocalIP();
+            // 保存更新后的配置
+            fs.writeFileSync(
+                path.join(__dirname, '../config/config.json'),
+                JSON.stringify(config, null, 2)
+            );
+        }
+        
+        // 启动服务器
+        app.listen(port, () => {
+            logger.info(`Server running on ${config.server.host}:${port}`);
+        });
+    } catch (error) {
+        logger.error('Error initializing server:', error);
+        process.exit(1);
+    }
+}
+
+// 添加配置相关的路由
+app.get('/api/config', (req, res) => {
+    res.json(config);
 });
+
+app.post('/api/config', (req, res) => {
+    try {
+        const newConfig = req.body;
+        // 验证配置
+        if (!newConfig.server || !newConfig.rtmp) {
+            return res.status(400).json({ success: false, error: '无效的配置格式' });
+        }
+        
+        // 检查配置是否有实际变化
+        const hasChanges = JSON.stringify(config.server) !== JSON.stringify(newConfig.server) ||
+                          JSON.stringify(config.rtmp) !== JSON.stringify(newConfig.rtmp);
+        
+        if (!hasChanges) {
+            return res.json({ success: true, message: '配置未发生变化' });
+        }
+        
+        // 保存配置
+        fs.writeFileSync(
+            path.join(__dirname, '../config/config.json'),
+            JSON.stringify(newConfig, null, 2)
+        );
+
+        // 返回需要重启的信息
+        res.json({ 
+            success: true, 
+            requireRestart: true,
+            message: '配置已保存，系统将在5秒后自动重启...'
+        });
+
+        // 延迟5秒后重启服务器
+        setTimeout(() => {
+            logger.info('Restarting server due to configuration change...');
+            process.exit(0);  // 使用 PM2 或 systemd 会自动重启服务
+        }, 5000);
+        
+    } catch (error) {
+        logger.error('Error saving config:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 修改启动方式
+initializeServer();
 
 // 优雅关闭
 process.on('SIGTERM', async () => {

@@ -1,6 +1,6 @@
 {
     "server": {
-        "host": "47.243.164.1",
+        "host": "auto",
         "port": 3000
     },
     "rtmp": {

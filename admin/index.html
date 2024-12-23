@@ -385,6 +385,48 @@
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- 添加服务器配置部分 -->
+                    <div class="col-md-12 mt-3">
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="mb-0"><i class="fa fa-server"></i> 服务器配置</h6>
+                            </div>
+                            <div class="card-body">
+                                <form id="serverConfigForm" class="row">
+                                    <div class="col-md-4">
+                                        <div class="mb-3">
+                                            <label class="form-label">服务器地址</label>
+                                            <input type="text" class="form-control" id="serverHost" placeholder="auto表示自动获取">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <div class="mb-3">
+                                            <label class="form-label">端口</label>
+                                            <input type="number" class="form-control" id="serverPort">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="mb-3">
+                                            <label class="form-label">RTMP推流地址</label>
+                                            <input type="text" class="form-control" id="rtmpPushServer">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="mb-3">
+                                            <label class="form-label">RTMP拉流地址</label>
+                                            <input type="text" class="form-control" id="rtmpPullServer">
+                                        </div>
+                                    </div>
+                                    <div class="col-12">
+                                        <button type="submit" class="btn btn-primary">
+                                            <i class="fa fa-save"></i> 保存配置
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -843,6 +885,7 @@
         // 初始加载
         async function init() {
             await getServerConfig();
+            await loadServerConfig();
             await loadStreams();
             
             // 每10秒更新一次状态
@@ -1129,7 +1172,7 @@
 
                     updateProgress(`第 ${retry + 1} 次重试...`);
                     
-                    // 将失败的流分成小批次
+                    // 将失败的流分成小��次
                     const retryBatches = [];
                     for (let i = 0; i < currentFailedStreams.length; i += batchSize) {
                         retryBatches.push(currentFailedStreams.slice(i, i + batchSize));
@@ -1662,6 +1705,124 @@
             
             // 刷新页面
             window.location.reload();
+        }
+
+        // 加载服务器配置
+        async function loadServerConfig() {
+            try {
+                const response = await fetch('/api/config');
+                const config = await response.json();
+                
+                document.getElementById('serverHost').value = config.server.host;
+                document.getElementById('serverPort').value = config.server.port;
+                document.getElementById('rtmpPushServer').value = config.rtmp.pushServer;
+                document.getElementById('rtmpPullServer').value = config.rtmp.pullServer;
+            } catch (error) {
+                console.error('Error loading server config:', error);
+                alert('加载服务器配置失败');
+            }
+        }
+
+        // 保存服务器配置
+        document.getElementById('serverConfigForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const config = {
+                server: {
+                    host: document.getElementById('serverHost').value,
+                    port: parseInt(document.getElementById('serverPort').value)
+                },
+                rtmp: {
+                    pushServer: document.getElementById('rtmpPushServer').value,
+                    pullServer: document.getElementById('rtmpPullServer').value
+                }
+            };
+
+            try {
+                const response = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    if (result.requireRestart) {
+                        // 显示重启倒计时模态框
+                        const modal = document.createElement('div');
+                        modal.className = 'modal fade show';
+                        modal.style.display = 'block';
+                        modal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+                        modal.innerHTML = `
+                            <div class="modal-dialog modal-dialog-centered">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title">系统重启</h5>
+                                    </div>
+                                    <div class="modal-body">
+                                        <p>配置已保存，系统将在 <span id="restartCountdown">5</span> 秒后重启...</p>
+                                        <div class="progress">
+                                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                                 role="progressbar" 
+                                                 style="width: 100%"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        document.body.appendChild(modal);
+
+                        // 倒计时
+                        let countdown = 5;
+                        const countdownEl = document.getElementById('restartCountdown');
+                        const timer = setInterval(() => {
+                            countdown--;
+                            countdownEl.textContent = countdown;
+                            if (countdown <= 0) {
+                                clearInterval(timer);
+                                // 显示重连中的提示
+                                modal.querySelector('.modal-body').innerHTML = `
+                                    <p>系统正在重启，请稍候...</p>
+                                    <div class="d-flex justify-content-center">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                    </div>
+                                `;
+                                // 等待服务器重启完成
+                                setTimeout(() => {
+                                    checkServerAndReload();
+                                }, 2000);
+                            }
+                        }, 1000);
+                    } else {
+                        alert(result.message || '配置保存成功');
+                    }
+                } else {
+                    alert('保存配置失败: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error saving server config:', error);
+                alert('保存配置失败');
+            }
+        });
+
+        // 添加检查服务器状态并重载的函数
+        async function checkServerAndReload() {
+            try {
+                const response = await fetch('/api/config');
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    // 如果服务器还没准备好，继续尝试
+                    setTimeout(checkServerAndReload, 1000);
+                }
+            } catch (error) {
+                // 如果连接失败，继续尝试
+                setTimeout(checkServerAndReload, 1000);
+            }
         }
     </script>
 
