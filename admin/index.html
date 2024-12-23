@@ -271,7 +271,7 @@
     <!-- 顶部状态栏 -->
     <div class="top-bar">
         <div class="d-flex justify-content-between align-items-center">
-            <h1 class="system-title">流媒体管理系统 v1.4.5</h1>
+            <h1 class="system-title">流媒体管理系统 v1.4.6</h1>
             <div class="stats-container">
                 <div class="stat-item">
                     <span class="stat-label">总流数量:</span>
@@ -581,7 +581,7 @@
                             statusClass = 'error';
                             statusText = '已失效';
                         } 
-                        // 检查流是否在���行（包括通过播放链接启动的）
+                        // 检查流是否在���（包括通过播放链接启动的）
                         else if (stream.processRunning || stream.stats?.startTime) {
                             statusClass = 'active';
                             statusText = '运行中';
@@ -978,7 +978,7 @@
             
             if (!confirm(`确定要手动启动选中的 ${selectedStreams.length} 个流吗？这些流将会推流到远程服务器。`)) return;
 
-            // 显示进度提示,使用 Bootstrap 的 modal
+            // 显示进度提示
             const progressModal = document.createElement('div');
             progressModal.className = 'modal fade show';
             progressModal.style.display = 'block';
@@ -1014,95 +1014,136 @@
             let failed = 0;
             let skipped = 0;
             const errors = [];
-            
-            // 将流分成小批次处理,每批6个
-            const batchSize = 6;
+            const failedStreams = new Map(); // 记录失败的流及其重试次数
+
+            // 更新进度显示的函数
+            const updateProgress = (detail) => {
+                const progress = ((success + failed + skipped) / selectedStreams.length * 100).toFixed(1);
+                progressBar.style.width = `${progress}%`;
+                progressDetail.textContent = detail;
+                progressStats.innerHTML = `
+                    处理中: ${success + failed + skipped}/${selectedStreams.length}<br>
+                    成功: <span class="text-success">${success}</span>
+                    失败: <span class="text-danger">${failed}</span>
+                    跳过: <span class="text-warning">${skipped}</span>
+                `;
+            };
+
+            // 尝试启动单个流的函数
+            const startStream = async (streamId) => {
+                try {
+                    // 先检查流是否已经在运行
+                    const streamStatus = await fetch(`/api/streams/${streamId}`).then(r => r.json());
+                    if (streamStatus.processRunning || streamStatus.manuallyStarted) {
+                        skipped++;
+                        updateProgress(`跳过已运行的流: ${streamId}`);
+                        return true;
+                    }
+
+                    // 设置单个流的超时
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+                    const response = await fetch(`/api/streams/${streamId}/restart`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ manual: true }),
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    const result = await response.json();
+                    if (result.success) {
+                        success++;
+                        updateProgress(`成功启动: ${streamId}`);
+                        return true;
+                    } else {
+                        throw new Error(result.error || '未知错误');
+                    }
+                } catch (error) {
+                    return false;
+                }
+            };
+
+            // 第一轮: 尝试启动所有流
+            const batchSize = 4;
             const batches = [];
             for (let i = 0; i < selectedStreams.length; i += batchSize) {
                 batches.push(selectedStreams.slice(i, i + batchSize));
             }
 
-            // 按批次处理流
+            updateProgress('开始第一轮启动...');
+
             for (let i = 0; i < batches.length; i++) {
                 const batch = batches[i];
+                const results = await Promise.allSettled(
+                    batch.map(async streamId => {
+                        const success = await startStream(streamId);
+                        if (!success) {
+                            failedStreams.set(streamId, 0); // 初始化重试次数为0
+                        }
+                        return { streamId, success };
+                    })
+                );
                 
-                // 不等待错误重试,直接处理下一批
-                const batchPromises = batch.map(async streamId => {
-                    try {
-                        // 更新进度提示
-                        const progress = ((success + failed + skipped) / selectedStreams.length * 100).toFixed(1);
-                        progressBar.style.width = `${progress}%`;
-                        progressDetail.textContent = `正在处理: ${streamId}`;
-                        progressStats.innerHTML = `
-                            处理中: ${success + failed + skipped}/${selectedStreams.length}<br>
-                            成功: <span class="text-success">${success}</span>
-                            失败: <span class="text-danger">${failed}</span>
-                            跳过: <span class="text-warning">${skipped}</span>
-                        `;
-
-                        // 先检查流是否已经在运行
-                        const streamStatus = await fetch(`/api/streams/${streamId}`).then(r => r.json());
-                        if (streamStatus.processRunning || streamStatus.manuallyStarted) {
-                            skipped++;
-                            return;
-                        }
-
-                        // 设置单个流的超时
-                        const controller = new AbortController();
-                        const timeout = setTimeout(() => controller.abort(), 30000); // 30秒超时
-
-                        const response = await fetch(`/api/streams/${streamId}/restart`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({ manual: true }),
-                            signal: controller.signal
-                        });
-
-                        clearTimeout(timeout);
-
-                        const result = await response.json();
-                        if (result.success) {
-                            success++;
-                        } else {
-                            // 失败的流会在后台自动重试,这里只记录状态
-                            failed++;
-                            errors.push(`${streamId}: ${result.error || '未知错误'}`);
-                        }
-                    } catch (error) {
-                        // 失败的流会在后台自动重试,这里只记录状态
-                        failed++;
-                        errors.push(`${streamId}: ${error.message}`);
-                        console.error(`Error manually starting stream ${streamId}:`, error);
-                    }
-                });
-
-                // 等待当前批次的初始启动完成
-                await Promise.all(batchPromises);
-
-                // 每批次之间暂停1秒
+                // 每批次之间暂停1.5秒
                 if (i < batches.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                }
+            }
+
+            // 第二轮: 重试失败的流
+            if (failedStreams.size > 0) {
+                updateProgress('开始重试失败的流...');
+                
+                const maxRetries = 3;
+                for (let retry = 0; retry < maxRetries; retry++) {
+                    const currentFailedStreams = Array.from(failedStreams.keys());
+                    if (currentFailedStreams.length === 0) break;
+
+                    updateProgress(`第 ${retry + 1} 轮重试...`);
+                    
+                    // 将失败的流分成小批次
+                    const retryBatches = [];
+                    for (let i = 0; i < currentFailedStreams.length; i += batchSize) {
+                        retryBatches.push(currentFailedStreams.slice(i, i + batchSize));
+                    }
+
+                    for (const batch of retryBatches) {
+                        const results = await Promise.allSettled(
+                            batch.map(async streamId => {
+                                const success = await startStream(streamId);
+                                if (success) {
+                                    failedStreams.delete(streamId);
+                                } else {
+                                    const retryCount = failedStreams.get(streamId) + 1;
+                                    if (retryCount >= maxRetries) {
+                                        failed++;
+                                        errors.push(`${streamId}: 重试${maxRetries}次后仍然失败`);
+                                        failedStreams.delete(streamId);
+                                    } else {
+                                        failedStreams.set(streamId, retryCount);
+                                    }
+                                }
+                                return { streamId, success };
+                            })
+                        );
+
+                        // 批次间隔2秒
+                        if (batch !== retryBatches[retryBatches.length - 1]) {
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                        }
+                    }
                 }
             }
 
             // 移除进度模态框
             progressModal.remove();
 
-            // 显示详细结果
-            let message = `批量手动启动完成\n`;
-            message += `成功: ${success}\n`;
-            message += `失败: ${failed}\n`;
-            message += `跳过: ${skipped}\n`;
-            if (errors.length > 0) {
-                message += `\n错误详情:\n${errors.join('\n')}`;
-            }
-            if (success > 0) {
-                message += `\n\n成功启动的流已开始推流到远程服务器`;
-            }
-
-            // 使用更友好的结果显示方式
+            // 显示最终结果
             const resultModal = document.createElement('div');
             resultModal.className = 'modal fade show';
             resultModal.style.display = 'block';
@@ -1195,9 +1236,10 @@
 
             let success = 0;
             let failed = 0;
+            const errors = [];
             
-            // 每批20个流同时处理
-            const batchSize = 20;
+            // 每批10个流同时处理
+            const batchSize = 10;
             const batches = [];
             for (let i = 0; i < selectedStreams.length; i += batchSize) {
                 batches.push(selectedStreams.slice(i, i + batchSize));
@@ -1217,28 +1259,36 @@
                             失败: <span class="text-danger">${failed}</span>
                         `;
 
-                        // 直接尝试停止流
+                        // 设置超时
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+
                         const response = await fetch(`/api/streams/${streamId}/stop`, {
-                            method: 'POST'
+                            method: 'POST',
+                            signal: controller.signal
                         });
+                        
+                        clearTimeout(timeoutId);
                         
                         if (response.ok) {
                             success++;
                         } else {
-                            failed++;
+                            const error = await response.text();
+                            throw new Error(error);
                         }
                     } catch (error) {
-                        console.error(`Error stopping stream ${streamId}:`, error);
                         failed++;
+                        errors.push(`${streamId}: ${error.message}`);
+                        console.error(`Error stopping stream ${streamId}:`, error);
                     }
                 });
 
                 // 等待当前批次完成
-                await Promise.all(batchPromises);
+                await Promise.allSettled(batchPromises);
 
-                // 批次间隔500ms
+                // 批次间隔1秒
                 if (i < batches.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                 }
             }
             
@@ -1268,6 +1318,14 @@
                                     <div class="text-muted">失败</div>
                                 </div>
                             </div>
+                            ${errors.length > 0 ? `
+                                <div class="mt-3">
+                                    <h6>错误详情:</h6>
+                                    <pre class="small bg-light p-2" style="max-height: 200px; overflow-y: auto;">
+                                        ${errors.join('\n')}
+                                    </pre>
+                                </div>
+                            ` : ''}
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-primary" onclick="this.closest('.modal').remove()">确定</button>
@@ -1329,7 +1387,7 @@
                 modal.show();
             } catch (error) {
                 console.error('Error loading stream details:', error);
-                alert('加载流信息失败');
+                alert('加载���信息失败');
             }
         }
 
@@ -1593,7 +1651,7 @@
                             <input type="text" class="form-control" id="editStreamName" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">源���址</label>
+                            <label class="form-label">源址</label>
                             <input type="text" class="form-control" id="editStreamUrl" required>
                         </div>
                     </form>
