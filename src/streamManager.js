@@ -254,6 +254,12 @@ class StreamManager extends EventEmitter {
                 return null;
             }
 
+            // 如果流被手动停止,不要自动启动
+            if (stream.manualStopped) {
+                logger.info(`Stream ${streamId} was manually stopped, not auto-starting`);
+                return null;
+            }
+
             // 检查流是否正在运行
             if (!this.streamProcesses.has(streamId)) {
                 logger.info(`Starting stream ${streamId} on demand`);
@@ -465,16 +471,16 @@ class StreamManager extends EventEmitter {
                             ffmpegError.includes('Server returned 500')) {
                             logger.error(`Fatal error detected for stream ${streamId}, stopping stream`);
                             this.stopStreaming(streamId);
-                        } else if (retryCount < maxRetries) {
+                        } else if (retryCount < maxRetries && this.activeViewers.get(streamId) > 0) {
+                            // 只有在有观看者的情况下才重试
                             retryCount++;
                             logger.info(`Retrying stream ${streamId} (attempt ${retryCount}/${maxRetries})`);
                             setTimeout(() => {
-                                // 保持手动启动状态进���重试
                                 const wasManuallyStarted = this.manuallyStartedStreams.has(streamId);
                                 this.restartStream(streamId, wasManuallyStarted);
                             }, retryDelay);
                         } else {
-                            logger.error(`Max retries reached for stream ${streamId}, stopping stream`);
+                            logger.error(`Max retries reached or no viewers for stream ${streamId}, stopping stream`);
                             this.stopStreaming(streamId);
                         }
                     }
@@ -574,7 +580,7 @@ class StreamManager extends EventEmitter {
                 return;
             }
 
-            // 检查失败���数
+            // 检查失败次数
             const failureCount = this.failureCount.get(streamId) || 0;
             if (failureCount >= 3) {
                 logger.info(`Stream ${streamId} has failed too many times, marking as invalid`);
@@ -582,7 +588,7 @@ class StreamManager extends EventEmitter {
                 return;
             }
 
-            // 如果是手动启动，记录到集合中
+            // 如���是手动启动，记录到集合中
             if (isManualStart) {
                 this.manuallyStartedStreams.add(streamId);
                 logger.info(`Stream ${streamId} marked as manually started for restart`);
@@ -676,10 +682,7 @@ class StreamManager extends EventEmitter {
 
     async stopStreaming(streamId) {
         try {
-            // 记录是否是手动启动的流
             const wasManuallyStarted = this.manuallyStartedStreams.has(streamId);
-            
-            // 获取进程信息
             const processes = this.streamProcesses.get(streamId);
             if (processes) {
                 // 停止 FFmpeg 进程
@@ -695,7 +698,7 @@ class StreamManager extends EventEmitter {
                 // 清理进程引用
                 this.streamProcesses.delete(streamId);
                 
-                // 无条件移除手动启动标记
+                // 清理手动启动标记
                 this.manuallyStartedStreams.delete(streamId);
                 
                 // 重置统计信息
@@ -716,25 +719,38 @@ class StreamManager extends EventEmitter {
                     };
                 }
                 
+                // 清理健康检查定时器
+                if (this.healthChecks.has(streamId)) {
+                    clearInterval(this.healthChecks.get(streamId));
+                    this.healthChecks.delete(streamId);
+                }
+
+                // 清理自动停止定时器
+                if (this.autoStopTimers.has(streamId)) {
+                    clearTimeout(this.autoStopTimers.get(streamId));
+                    this.autoStopTimers.delete(streamId);
+                }
+
+                // 清理观看者计数
+                this.activeViewers.delete(streamId);
+                
                 // 清理文件
                 const outputPath = path.join(__dirname, '../streams', streamId);
                 if (fs.existsSync(outputPath)) {
                     try {
-                        // 删除所有片段文件
                         const files = fs.readdirSync(outputPath);
                         for (const file of files) {
                             if (file.endsWith('.ts') || file.endsWith('.m3u8')) {
                                 fs.unlinkSync(path.join(outputPath, file));
                             }
                         }
-                        // 尝试删除目录
                         fs.rmdirSync(outputPath);
                     } catch (error) {
                         logger.error(`Error cleaning up files for stream ${streamId}:`, error);
                     }
                 }
                 
-                // 保存配置以更新状态
+                // 保存配置
                 await this.saveStreams();
                 
                 logger.info(`Stream stopped: ${streamId} (was manually started: ${wasManuallyStarted})`);
@@ -907,7 +923,7 @@ class StreamManager extends EventEmitter {
                 const uptime = Date.now() - process.startTime.getTime();
                 stats.uptime = uptime;
                 
-                // 更新流配��中的统计信息
+                // 更新流配置中的统计信息
                 const stream = this.streams.get(streamId);
                 if (stream && stream.stats) {
                     stream.stats.uptime = uptime;
@@ -980,7 +996,7 @@ class StreamManager extends EventEmitter {
                     this.streamStats.set(newId, stats);
                 }
 
-                // 移动流媒体文件
+                // 移动流媒体件
                 const oldPath = path.join(__dirname, '../streams', streamId);
                 const newPath = path.join(__dirname, '../streams', newId);
                 if (fs.existsSync(oldPath)) {

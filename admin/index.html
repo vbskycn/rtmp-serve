@@ -271,7 +271,7 @@
     <!-- 顶部状态栏 -->
     <div class="top-bar">
         <div class="d-flex justify-content-between align-items-center">
-            <h1 class="system-title">流媒体管理系统 v1.4.3</h1>
+            <h1 class="system-title">流媒体管理系统 v1.4.4</h1>
             <div class="stats-container">
                 <div class="stat-item">
                     <span class="stat-label">总流数量:</span>
@@ -878,7 +878,7 @@
                 document.body.appendChild(toast);
                 setTimeout(() => toast.remove(), 2000);
             } catch (err) {
-                console.error('复制失败:', err);
+                console.error('复制���败:', err);
                 alert('复制失败');
             } finally {
                 // 移除临时输入框
@@ -995,7 +995,7 @@
                             </div>
                             <div class="small text-muted" id="progressDetail"></div>
                             <div class="mt-2" id="progressStats">
-                                处理中: 0/${selectedStreams.length}<br>
+                                处理: 0/${selectedStreams.length}<br>
                                 成功: <span class="text-success">0</span>
                                 失败: <span class="text-danger">0</span>
                                 跳过: <span class="text-warning">0</span>
@@ -1149,7 +1149,7 @@
             loadStreams();
         }
 
-        // 批量停止
+        // 修改批量停止函数
         async function batchStop() {
             const selectedStreams = getSelectedStreams();
             if (!selectedStreams.length) return;
@@ -1172,6 +1172,12 @@
                                 <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
                             </div>
                             <div class="small text-muted" id="stopProgressDetail"></div>
+                            <div class="mt-2" id="stopProgressStats">
+                                处理中: 0/${selectedStreams.length}<br>
+                                成功: <span class="text-success">0</span>
+                                失败: <span class="text-danger">0</span>
+                                跳过: <span class="text-warning">0</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1180,12 +1186,14 @@
 
             const progressBar = progressModal.querySelector('.progress-bar');
             const progressDetail = progressModal.querySelector('#stopProgressDetail');
+            const progressStats = progressModal.querySelector('#stopProgressStats');
 
             let success = 0;
             let failed = 0;
+            let skipped = 0;
             
-            // 每批5个流同时处理
-            const batchSize = 5;
+            // 每批3个流同时处理(减少并发数以确保完全停止)
+            const batchSize = 3;
             const batches = [];
             for (let i = 0; i < selectedStreams.length; i += batchSize) {
                 batches.push(selectedStreams.slice(i, i + batchSize));
@@ -1196,25 +1204,51 @@
                 await Promise.all(batch.map(async streamId => {
                     try {
                         // 更新进度
-                        const progress = ((success + failed) / selectedStreams.length * 100).toFixed(1);
+                        const progress = ((success + failed + skipped) / selectedStreams.length * 100).toFixed(1);
                         progressBar.style.width = `${progress}%`;
-                        progressDetail.textContent = `正在停止: ${streamId}`;
+                        progressDetail.textContent = `正在处理: ${streamId}`;
+                        progressStats.innerHTML = `
+                            处理中: ${success + failed + skipped}/${selectedStreams.length}<br>
+                            成功: <span class="text-success">${success}</span>
+                            失败: <span class="text-danger">${failed}</span>
+                            跳过: <span class="text-warning">${skipped}</span>
+                        `;
 
-                        // 停止流
+                        // 先检查流是否在运行
+                        const streamStatus = await fetch(`/api/streams/${streamId}`).then(r => r.json());
+                        if (!streamStatus.processRunning && !streamStatus.manuallyStarted) {
+                            skipped++;
+                            return;
+                        }
+
+                        // 第一次停止
                         const response = await fetch(`/api/streams/${streamId}/stop`, {
                             method: 'POST'
                         });
-                        const result = await response.json();
                         
-                        // 确保完全停止
-                        if (result.success) {
-                            // 再次检查并强制停止
+                        // 等待2秒确保进程有时间完全停止
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+
+                        // 再次检查流状态
+                        const checkStatus = await fetch(`/api/streams/${streamId}`).then(r => r.json());
+                        if (checkStatus.processRunning || checkStatus.manuallyStarted) {
+                            // 如果还在运行,强制再次停止
                             await fetch(`/api/streams/${streamId}/stop`, {
                                 method: 'POST'
                             });
-                            success++;
+                            
+                            // 再等待2秒
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                            
+                            // 最后一次检查
+                            const finalCheck = await fetch(`/api/streams/${streamId}`).then(r => r.json());
+                            if (!finalCheck.processRunning && !finalCheck.manuallyStarted) {
+                                success++;
+                            } else {
+                                failed++;
+                            }
                         } else {
-                            failed++;
+                            success++;
                         }
                     } catch (error) {
                         console.error(`Error stopping stream ${streamId}:`, error);
@@ -1222,9 +1256,9 @@
                     }
                 }));
 
-                // 批次间隔
+                // 批次间隔增加到2秒
                 if (i < batches.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    await new Promise(resolve => setTimeout(resolve, 2000));
                 }
             }
             
@@ -1232,7 +1266,40 @@
             progressModal.remove();
             
             // 显示结果
-            alert(`批量停止完成\n成功: ${success}\n失败: ${failed}`);
+            const resultModal = document.createElement('div');
+            resultModal.className = 'modal fade show';
+            resultModal.style.display = 'block';
+            resultModal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+            resultModal.innerHTML = `
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">批量停止结果</h5>
+                            <button type="button" class="btn-close" onclick="this.closest('.modal').remove()"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="row mb-3">
+                                <div class="col-4 text-center">
+                                    <div class="h3 text-success">${success}</div>
+                                    <div class="text-muted">成功</div>
+                                </div>
+                                <div class="col-4 text-center">
+                                    <div class="h3 text-danger">${failed}</div>
+                                    <div class="text-muted">失败</div>
+                                </div>
+                                <div class="col-4 text-center">
+                                    <div class="h3 text-warning">${skipped}</div>
+                                    <div class="text-muted">跳过</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-primary" onclick="this.closest('.modal').remove()">确定</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(resultModal);
             
             // 刷新流列表
             loadStreams();
