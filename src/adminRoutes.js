@@ -507,15 +507,8 @@ router.post('/logout', (req, res) => {
 // 存储服务器状态
 const servers = new Map();
 
-// 接收心跳 - 使用 API key 验证
+// 接收心跳 - 不需要验证
 router.post('/api/heartbeat', (req, res) => {
-    const apiKey = req.headers['x-api-key'];
-    if (apiKey !== 'your-secret-api-key') {
-        return res.status(401).json({ 
-            success: false, 
-            error: 'Invalid API key' 
-        });
-    }
     try {
         const serverInfo = req.body;
         // 添加接收时间戳

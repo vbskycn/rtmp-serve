@@ -80,8 +80,7 @@ class StreamManager extends EventEmitter {
             enabled: true,
             server: 'http://localhost:3000/api/heartbeat',  // 默认使用本机地址
             interval: 300000,  // 5分钟
-            serverName: require('os').hostname(),  // 使用主机名作为服务器标识
-            apiKey: 'your-secret-api-key'  // 添加 API key
+            serverName: require('os').hostname()  // 使用主机名作为服务器标识
         };
 
         // 启动心跳
@@ -910,7 +909,7 @@ class StreamManager extends EventEmitter {
         if (count > 0) {
             this.activeViewers.set(streamId, count - 1);
             
-            // 只有不是手动启动的才设置自动停���定时器
+            // 只有不是手动启动的才��置自动停止定时器
             if (count - 1 === 0 && !this.manuallyStartedStreams.has(streamId)) {
                 logger.debug(`No viewers left for auto-started stream ${streamId}, starting auto-stop timer`);
                 const timer = setTimeout(async () => {
@@ -937,7 +936,7 @@ class StreamManager extends EventEmitter {
                 const uptime = Date.now() - process.startTime.getTime();
                 stats.uptime = uptime;
                 
-                // 更新流配置中的统计��息
+                // 更新流配置中的统计信息
                 const stream = this.streams.get(streamId);
                 if (stream && stream.stats) {
                     stream.stats.uptime = uptime;
@@ -1185,8 +1184,7 @@ class StreamManager extends EventEmitter {
                 const response = await fetch(this.heartbeatConfig.server, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
-                        'X-API-Key': this.heartbeatConfig.apiKey  // 在请求头中添加 API key
+                        'Content-Type': 'application/json'
                     },
                     body: JSON.stringify(stats)
                 });
