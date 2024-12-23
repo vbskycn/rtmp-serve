@@ -1466,7 +1466,7 @@
                 modal.show();
             } catch (error) {
                 console.error('Error loading stream details:', error);
-                alert('加载��息失败');
+                alert('加载���息失败');
             }
         }
 
@@ -1899,13 +1899,18 @@
             const newPassword = document.getElementById('newPassword').value;
             const confirmPassword = document.getElementById('confirmPassword').value;
 
+            if (!oldPassword || !newPassword || !confirmPassword) {
+                alert('所有密码字段都必须填写');
+                return;
+            }
+
             if (newPassword !== confirmPassword) {
                 alert('两次输入的新密码不一致');
                 return;
             }
 
             try {
-                const response = await fetch('/api/change-password', {
+                const response = await fetch('/api/change-password', {  // 修改API路径
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -1913,16 +1918,26 @@
                     body: JSON.stringify({ oldPassword, newPassword })
                 });
 
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+
                 const result = await response.json();
                 if (result.success) {
-                    alert('密码修改成功，请重新登录');
+                    alert(result.message);
+                    // 关闭模态框
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('changePasswordModal'));
+                    modal.hide();
+                    // 清空表单
+                    document.getElementById('changePasswordForm').reset();
+                    // 登出
                     logout();
                 } else {
                     alert(result.message || '修改密码失败');
                 }
             } catch (error) {
                 console.error('Change password error:', error);
-                alert('修改密码失败');
+                alert('修改密码失败，请检查网络连接');
             }
         }
 

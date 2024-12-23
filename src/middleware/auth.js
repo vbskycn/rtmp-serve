@@ -42,13 +42,25 @@ async function verifyUser(username, password) {
 
 // 更新用户密码
 async function updatePassword(username, newPassword) {
-    const data = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
-    const userIndex = data.users.findIndex(u => u.username === username);
-    if (userIndex === -1) return false;
-    
-    data.users[userIndex].password = hashPassword(newPassword);
-    fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 4));
-    return true;
+    try {
+        const data = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+        const userIndex = data.users.findIndex(u => u.username === username);
+        
+        if (userIndex === -1) {
+            console.error('User not found for password update:', username);
+            return false;
+        }
+        
+        const hashedPassword = hashPassword(newPassword);
+        data.users[userIndex].password = hashedPassword;
+        
+        fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 4));
+        console.log('Password updated successfully for user:', username);
+        return true;
+    } catch (error) {
+        console.error('Error updating password:', error);
+        return false;
+    }
 }
 
 // 认证中间件

@@ -461,7 +461,7 @@ router.post('/api/login', async (req, res) => {
 });
 
 // 修改密码接口
-router.post('/change-password', async (req, res) => {
+router.post('/api/change-password', async (req, res) => {
     const { oldPassword, newPassword } = req.body;
     const username = req.user.username;
 
@@ -469,19 +469,31 @@ router.post('/change-password', async (req, res) => {
         // 验证旧密码
         const user = await verifyUser(username, oldPassword);
         if (!user) {
-            return res.json({ success: false, message: '旧密码错误' });
+            return res.json({ 
+                success: false, 
+                message: '旧密码错误' 
+            });
         }
 
         // 更新密码
         const updated = await updatePassword(username, newPassword);
         if (!updated) {
-            return res.json({ success: false, message: '更新密码失败' });
+            return res.json({ 
+                success: false, 
+                message: '更新密码失败' 
+            });
         }
 
-        res.json({ success: true, message: '密码已更新' });
+        res.json({ 
+            success: true, 
+            message: '密码已更新，请重新登录' 
+        });
     } catch (error) {
         console.error('Change password error:', error);
-        res.json({ success: false, message: '更新密码失败' });
+        res.json({ 
+            success: false, 
+            message: '更新密码失败：' + error.message 
+        });
     }
 });
 
