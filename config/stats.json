@@ -1,7 +1,7 @@
 {
-  "startTime": 1703300000000,
+  "startTime": null,
   "traffic": {
-    "sent": "0",
-    "received": "0"
+    "sent": "35000000",
+    "received": "70000000"
   }
 } 

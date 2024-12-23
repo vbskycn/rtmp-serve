@@ -60,7 +60,7 @@ class StreamManager extends EventEmitter {
             received: 0n
         };
         
-        // 加载已保存的统计数据
+        // 加载已保存的统计数据，但只加载流量数据，不加载启动时间
         this.loadStats();
         
         // 每秒更新流量统计
@@ -588,7 +588,7 @@ class StreamManager extends EventEmitter {
                 return;
             }
 
-            // 如���是手动启动，记录到集合中
+            // 如是手动启动，记录到集合中
             if (isManualStart) {
                 this.manuallyStartedStreams.add(streamId);
                 logger.info(`Stream ${streamId} marked as manually started for restart`);
@@ -1059,10 +1059,11 @@ class StreamManager extends EventEmitter {
 
     // 修改获取流量统计的方法
     getTrafficStats() {
+        const uptime = Date.now() - this.startTime;  // 使用实际的启动时间计算运行时间
         return {
             sent: this.formatBytes(this.totalTraffic.sent),
             received: this.formatBytes(this.totalTraffic.received),
-            uptime: Date.now() - this.startTime,
+            uptime: uptime,
             activeStreams: this.streamProcesses.size
         };
     }
@@ -1089,7 +1090,7 @@ class StreamManager extends EventEmitter {
         try {
             const statsPath = path.join(__dirname, '../config/stats.json');
             const stats = {
-                startTime: this.startTime,
+                startTime: this.startTime,  // 保存实际的启动时间
                 traffic: {
                     sent: this.totalTraffic.sent.toString(),
                     received: this.totalTraffic.received.toString()
@@ -1111,8 +1112,7 @@ class StreamManager extends EventEmitter {
                 const data = await fs.promises.readFile(statsPath, 'utf8');
                 const stats = JSON.parse(data);
                 
-                // 恢复启动时间和流量数据
-                this.startTime = stats.startTime;
+                // 只加载流量数据，不加载启动时间
                 this.totalTraffic.sent = BigInt(stats.traffic.sent);
                 this.totalTraffic.received = BigInt(stats.traffic.received);
                 
@@ -1120,8 +1120,7 @@ class StreamManager extends EventEmitter {
             }
         } catch (error) {
             logger.error('Error loading stats:', error);
-            // 如果加载失败，重置统计数据
-            this.startTime = Date.now();
+            // 如果加载失败，只重置流量数据
             this.totalTraffic.sent = 0n;
             this.totalTraffic.received = 0n;
         }
