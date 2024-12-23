@@ -14,16 +14,21 @@ function hashPassword(password) {
 // 验证用户
 async function verifyUser(username, password) {
     try {
+        console.log('Attempting to verify user:', username);
         const users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')).users;
         const user = users.find(u => u.username === username);
+        
         if (!user) {
             console.log('User not found:', username);
             return null;
         }
         
         const hashedPassword = hashPassword(password);
+        console.log('Login attempt:');
+        console.log('Username:', username);
         console.log('Input password hash:', hashedPassword);
         console.log('Stored password hash:', user.password);
+        console.log('Password match:', hashedPassword === user.password);
         
         if (user.password === hashedPassword) {
             return user;
