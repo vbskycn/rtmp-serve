@@ -4,6 +4,8 @@ const { StreamManager } = require('./streamManager');
 const logger = require('./utils/logger');
 const path = require('path');
 const fs = require('fs');
+const jwt = require('jsonwebtoken');
+const { verifyUser, updatePassword, JWT_SECRET } = require('./middleware/auth');
 
 // 创建 StreamManager 实例
 const streamManager = new StreamManager();
@@ -36,7 +38,7 @@ router.post('/api/streams', async (req, res) => {
             });
         }
 
-        // 生成streamId (优先使用customId，否则生成随���ID)
+        // 生成streamId (优先使用customId，否则生成随机ID)
         const streamId = generateStreamId(name, url, customId);
         const streamData = {
             id: streamId,
@@ -413,6 +415,67 @@ router.get('/api/stats', (req, res) => {
         logger.error('Error getting system stats:', error);
         res.status(500).json({ error: 'Failed to get system stats' });
     }
+});
+
+// 登录接口
+router.post('/login', async (req, res) => {
+    const { username, password } = req.body;
+    
+    try {
+        const user = await verifyUser(username, password);
+        if (!user) {
+            return res.json({ success: false, message: '用户名或密码错误' });
+        }
+
+        // 生成JWT token
+        const token = jwt.sign(
+            { username: user.username, role: user.role },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        // 设置cookie
+        res.cookie('token', token, {
+            httpOnly: true,
+            maxAge: 24 * 60 * 60 * 1000 // 24小时
+        });
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Login error:', error);
+        res.json({ success: false, message: '登录失败' });
+    }
+});
+
+// 修改密码接口
+router.post('/change-password', async (req, res) => {
+    const { oldPassword, newPassword } = req.body;
+    const username = req.user.username;
+
+    try {
+        // 验证旧密码
+        const user = await verifyUser(username, oldPassword);
+        if (!user) {
+            return res.json({ success: false, message: '旧密码错误' });
+        }
+
+        // 更新密码
+        const updated = await updatePassword(username, newPassword);
+        if (!updated) {
+            return res.json({ success: false, message: '更新密码失败' });
+        }
+
+        res.json({ success: true, message: '密码已更新' });
+    } catch (error) {
+        console.error('Change password error:', error);
+        res.json({ success: false, message: '更新密码失败' });
+    }
+});
+
+// 登出接口
+router.post('/logout', (req, res) => {
+    res.clearCookie('token');
+    res.json({ success: true });
 });
 
 module.exports = router; 

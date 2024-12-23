@@ -12,6 +12,8 @@
     "pinyin": "^2.11.2",
     "winston": "^3.3.3",
     "fluent-ffmpeg": "^2.1.2",
-    "axios": "^1.6.7"
+    "axios": "^1.6.7",
+    "cookie-parser": "^1.4.6",
+    "jsonwebtoken": "^9.0.0"
   }
 }

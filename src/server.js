@@ -7,6 +7,8 @@ const logger = require('./utils/logger');
 const fs = require('fs');
 const config = require('../config/config.json');
 const os = require('os');
+const cookieParser = require('cookie-parser');
+const { authMiddleware } = require('./middleware/auth');
 
 const app = express();
 // 使用配置文件中的端口
@@ -18,6 +20,8 @@ const streamManager = new StreamManager();
 // 中间件设置
 app.use(cors());
 app.use(express.json());
+app.use(cookieParser());
+app.use(authMiddleware);
 
 // 修改静态文件服务配置
 app.use('/streams', express.static(path.join(__dirname, '../streams'), {

@@ -315,6 +315,16 @@
                         <span class="stat-value" id="trafficSent">0 B</span>
                     </div>
                 </div>
+                <div class="d-flex align-items-center">
+                    <div class="btn-group">
+                        <button class="btn btn-light btn-sm" onclick="showChangePasswordModal()">
+                            <i class="fa fa-key"></i> 修改密码
+                        </button>
+                        <button class="btn btn-light btn-sm" onclick="logout()">
+                            <i class="fa fa-sign-out"></i> 退出
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1164,7 +1174,7 @@
                 }
             }
 
-            // ��二轮: 重试失败的流
+            // 第二轮: 重试失败的流
             if (failedStreams.size > 0) {
                 updateProgress('开始重试失败的流...');
                 
@@ -1876,6 +1886,55 @@
                     alert('导出源地址失败');
                 });
         }
+
+        // 显示修改密码模态框
+        function showChangePasswordModal() {
+            const modal = new bootstrap.Modal(document.getElementById('changePasswordModal'));
+            modal.show();
+        }
+
+        // 修改密码
+        async function changePassword() {
+            const oldPassword = document.getElementById('oldPassword').value;
+            const newPassword = document.getElementById('newPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+
+            if (newPassword !== confirmPassword) {
+                alert('两次输入的新密码不一致');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/change-password', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ oldPassword, newPassword })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    alert('密码修改成功，请重新登录');
+                    logout();
+                } else {
+                    alert(result.message || '修改密码失败');
+                }
+            } catch (error) {
+                console.error('Change password error:', error);
+                alert('修改密码失败');
+            }
+        }
+
+        // 登出
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+                window.location.href = '/admin/login.html';
+            } catch (error) {
+                console.error('Logout error:', error);
+            }
+        }
     </script>
 
     <!-- 在 body 标签束前添加编辑模态框 -->
@@ -1906,6 +1965,38 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
                     <button type="button" class="btn btn-primary" onclick="saveStreamEdit()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 在body末尾添加修改密码模态框 -->
+    <div class="modal fade" id="changePasswordModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">修改密码</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="changePasswordForm">
+                        <div class="mb-3">
+                            <label class="form-label">旧密码</label>
+                            <input type="password" class="form-control" id="oldPassword" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">新密码</label>
+                            <input type="password" class="form-control" id="newPassword" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">确认新密码</label>
+                            <input type="password" class="form-control" id="confirmPassword" required>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="changePassword()">保存</button>
                 </div>
             </div>
         </div>

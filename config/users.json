@@ -1,0 +1,14 @@
+{
+    "users": [
+        {
+            "username": "admin",
+            "password": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
+            "role": "admin"
+        },
+        {
+            "username": "zhou",
+            "password": "f1c319f64b8f5f2c5ea2f86c1c61cc436e6cf6f7d7c82a2a3a6e25c0373978cf",
+            "role": "admin"
+        }
+    ]
+} 
