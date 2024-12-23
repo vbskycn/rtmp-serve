@@ -78,7 +78,7 @@ class StreamManager extends EventEmitter {
         // 直接配置心跳
         this.heartbeatConfig = {
             enabled: true,
-            server: 'http://47.243.164.1:3001/heartbeat',  // 替换为您的心跳服务器地址
+            server: 'http://localhost:3000/api/heartbeat',  // 默认使用本机地址
             interval: 300000,  // 5分钟
             serverName: require('os').hostname()  // 使用主机名作为服务器标识
         };
@@ -909,7 +909,7 @@ class StreamManager extends EventEmitter {
         if (count > 0) {
             this.activeViewers.set(streamId, count - 1);
             
-            // 只有不是手动启动的才设置自��停止定时器
+            // 只有不是手动启动的才设置自动停止定时器
             if (count - 1 === 0 && !this.manuallyStartedStreams.has(streamId)) {
                 logger.debug(`No viewers left for auto-started stream ${streamId}, starting auto-stop timer`);
                 const timer = setTimeout(async () => {
