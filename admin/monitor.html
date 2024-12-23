@@ -68,7 +68,12 @@
                             <div class="card-header d-flex justify-content-between align-items-center">
                                 <h5 class="mb-0">
                                     ${server.serverName} 
-                                    <small class="text-muted">(${server.serverIp})</small>
+                                    <small class="text-muted">
+                                        (<a href="http://${server.serverIp}" target="_blank" class="text-muted" style="text-decoration: none;">
+                                            ${server.serverIp}
+                                            <i class="fa fa-external-link" style="font-size: 0.8em; margin-left: 3px;"></i>
+                                        </a>)
+                                    </small>
                                 </h5>
                                 <span class="badge ${server.isOnline ? 'bg-success' : 'bg-danger'}">
                                     ${server.isOnline ? '在线' : '离线'}
