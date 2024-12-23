@@ -13,15 +13,26 @@ function hashPassword(password) {
 
 // 验证用户
 async function verifyUser(username, password) {
-    const users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')).users;
-    const user = users.find(u => u.username === username);
-    if (!user) return null;
-    
-    const hashedPassword = hashPassword(password);
-    if (user.password === hashedPassword) {
-        return user;
+    try {
+        const users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')).users;
+        const user = users.find(u => u.username === username);
+        if (!user) {
+            console.log('User not found:', username);
+            return null;
+        }
+        
+        const hashedPassword = hashPassword(password);
+        console.log('Input password hash:', hashedPassword);
+        console.log('Stored password hash:', user.password);
+        
+        if (user.password === hashedPassword) {
+            return user;
+        }
+        return null;
+    } catch (error) {
+        console.error('Error in verifyUser:', error);
+        return null;
     }
-    return null;
 }
 
 // 更新用户密码

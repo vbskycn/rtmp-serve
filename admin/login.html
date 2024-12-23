@@ -60,8 +60,13 @@
         document.getElementById('loginForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
-            const username = document.getElementById('username').value;
+            const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
+
+            if (!username || !password) {
+                alert('用户名和密码不能为空');
+                return;
+            }
 
             try {
                 const response = await fetch('/api/login', {
@@ -71,6 +76,10 @@
                     },
                     body: JSON.stringify({ username, password })
                 });
+
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
 
                 const result = await response.json();
                 if (result.success) {

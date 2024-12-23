@@ -421,12 +421,19 @@ router.get('/api/stats', (req, res) => {
 router.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     
+    if (!username || !password) {
+        return res.json({
+            success: false,
+            message: '用户名和密码不能为空'
+        });
+    }
+
     try {
         const user = await verifyUser(username, password);
         if (!user) {
-            return res.json({ 
-                success: false, 
-                message: '用户名或密码错误' 
+            return res.json({
+                success: false,
+                message: '用户名或密码错误'
             });
         }
 
@@ -446,9 +453,9 @@ router.post('/api/login', async (req, res) => {
         res.json({ success: true });
     } catch (error) {
         console.error('Login error:', error);
-        res.json({ 
-            success: false, 
-            message: '登录失败，请稍后重试' 
+        res.json({
+            success: false,
+            message: '登录失败，请稍后重试'
         });
     }
 });
