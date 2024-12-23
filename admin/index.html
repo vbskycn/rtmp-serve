@@ -271,7 +271,7 @@
     <!-- 顶部状态栏 -->
     <div class="top-bar">
         <div class="d-flex justify-content-between align-items-center">
-            <h1 class="system-title">流媒体管理系统 v1.4.6</h1>
+            <h1 class="system-title">流媒体管理系统 v1.4.7</h1>
             <div class="stats-container">
                 <div class="stat-item">
                     <span class="stat-label">总流数量:</span>
@@ -386,7 +386,7 @@
                             <i class="fa fa-refresh"></i> 刷新
                         </button>
                         <button onclick="exportM3U()" class="btn btn-light btn-sm">
-                            <i class="fa fa-download"></i> 导出M3U
+                            <i class="fa fa-download"></i> 导���M3U
                         </button>
                         <button onclick="exportTXT()" class="btn btn-light btn-sm">
                             <i class="fa fa-download"></i> 导出TXT
@@ -581,7 +581,7 @@
                             statusClass = 'error';
                             statusText = '已失效';
                         } 
-                        // 检查流是否在���（包括通过播放链接启动的）
+                        // 检查流是否在（包括通过播放链接启动的）
                         else if (stream.processRunning || stream.stats?.startTime) {
                             statusClass = 'active';
                             statusText = '运行中';
@@ -987,7 +987,7 @@
                 <div class="modal-dialog modal-dialog-centered">
                     <div class="modal-content">
                         <div class="modal-header">
-                            <h5 class="modal-title">批量启动进度</h5>
+                            <h5 class="modal-title">批量启动进度,请不要刷新，等待程序运行完成</h5>
                         </div>
                         <div class="modal-body">
                             <div class="progress mb-3">
@@ -1032,13 +1032,14 @@
             // 尝试启动单个流的函数
             const startStream = async (streamId) => {
                 try {
-                    // 先检查流是否已经在运行
+                    // 先检查流是否已经是手动启动状态
                     const streamStatus = await fetch(`/api/streams/${streamId}`).then(r => r.json());
-                    if (streamStatus.processRunning || streamStatus.manuallyStarted) {
+                    if (streamStatus.manuallyStarted) {
                         skipped++;
-                        updateProgress(`跳过已运行的流: ${streamId}`);
+                        updateProgress(`跳过已手动启动的流: ${streamId}`);
                         return true;
                     }
+                    // 注意：不再检查 processRunning，因为我们要把普通运行的流转换为手动启动状态
 
                     // 设置单个流的超时
                     const controller = new AbortController();
@@ -1104,7 +1105,7 @@
                     const currentFailedStreams = Array.from(failedStreams.keys());
                     if (currentFailedStreams.length === 0) break;
 
-                    updateProgress(`第 ${retry + 1} 轮重试...`);
+                    updateProgress(`第 ${retry + 1} ��重试...`);
                     
                     // 将失败的流分成小批次
                     const retryBatches = [];
@@ -1387,7 +1388,7 @@
                 modal.show();
             } catch (error) {
                 console.error('Error loading stream details:', error);
-                alert('加载���信息失败');
+                alert('加载信息失败');
             }
         }
 
