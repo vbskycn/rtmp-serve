@@ -123,9 +123,33 @@ function authMiddleware(req, res, next) {
     next();
 }
 
+// 添加 verifyToken 中间件
+const verifyToken = (req, res, next) => {
+    const token = req.cookies.token;
+
+    if (!token) {
+        return res.status(401).json({ 
+            success: false, 
+            message: '未登录或登录已过期' 
+        });
+    }
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = decoded;
+        next();
+    } catch (error) {
+        return res.status(401).json({ 
+            success: false, 
+            message: '无效的登录状态' 
+        });
+    }
+};
+
 module.exports = {
     authMiddleware,
     verifyUser,
     updatePassword,
-    JWT_SECRET
+    JWT_SECRET,
+    verifyToken
 }; 

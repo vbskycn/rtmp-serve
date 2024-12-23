@@ -5,7 +5,7 @@ const logger = require('./utils/logger');
 const path = require('path');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
-const { verifyUser, updatePassword, JWT_SECRET } = require('./middleware/auth');
+const { verifyUser, updatePassword, JWT_SECRET, verifyToken } = require('./middleware/auth');
 
 // 创建 StreamManager 实例
 const streamManager = new StreamManager();
