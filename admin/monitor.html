@@ -58,8 +58,13 @@
     <script>
         async function updateServers() {
             try {
-                const response = await fetch('/api/servers');
-                const servers = await response.json();
+                const [serversResponse, configResponse] = await Promise.all([
+                    fetch('/api/servers'),
+                    fetch('/api/config')
+                ]);
+                
+                const servers = await serversResponse.json();
+                const config = await configResponse.json();
                 
                 const serverList = document.getElementById('serverList');
                 serverList.innerHTML = servers.map(server => `
@@ -83,7 +88,7 @@
                                 <div class="row mb-3">
                                     <div class="col-6">
                                         <div class="mb-2">
-                                            <i class="fa fa-code-fork"></i> 版本: ${server.version}
+                                            <i class="fa fa-code-fork"></i> 版本: v${config.version}
                                         </div>
                                         <div class="mb-2">
                                             <i class="fa fa-clock-o"></i> 运行时间: ${formatUptime(server.uptime)}

@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const { verifyUser, updatePassword, JWT_SECRET, verifyToken } = require('./middleware/auth');
+const config = require('../config/config.json');
 
 // 创建 StreamManager 实例
 const streamManager = new StreamManager();
@@ -359,7 +360,9 @@ async function checkStreamStatus(streamId) {
 
 // 添加获取服务器配置的路由
 router.get('/api/config', (req, res) => {
-    res.json(streamManager.config);
+    res.json({
+        version: config.version
+    });
 });
 
 // 添加更新流的路由
