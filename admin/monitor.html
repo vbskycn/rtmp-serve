@@ -9,13 +9,6 @@
             font-family: "Microsoft YaHei", Arial, sans-serif;
             background-color: #f5f5f5;
         }
-        .server-card {
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .offline {
-            opacity: 0.6;
-        }
         .top-bar {
             background: #2c3e50;
             color: white;
@@ -24,10 +17,6 @@
             top: 0;
             z-index: 1000;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .system-info {
-            font-size: 0.9em;
-            color: #666;
         }
         .refresh-btn {
             background-color: rgba(255, 255, 255, 0.1);
@@ -38,6 +27,20 @@
             background-color: rgba(255, 255, 255, 0.2);
             border: 1px solid rgba(255, 255, 255, 0.3);
             color: white;
+        }
+        .server-table tr.offline {
+            background-color: rgba(0,0,0,0.05);
+        }
+        .pagination {
+            justify-content: center;
+            margin-top: 20px;
+        }
+        .stats-bar {
+            background: #fff;
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
     </style>
 </head>
@@ -51,11 +54,51 @@
         </div>
     </div>
 
-    <div class="container mt-4">
-        <div id="serverList" class="row"></div>
+    <div class="container-fluid mt-4">
+        <div class="stats-bar">
+            <div class="row text-center">
+                <div class="col">
+                    <strong>总服务器数:</strong> <span id="totalServers">0</span>
+                </div>
+                <div class="col">
+                    <strong>在线服务器:</strong> <span id="onlineServers">0</span>
+                </div>
+                <div class="col">
+                    <strong>离线服务器:</strong> <span id="offlineServers">0</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover server-table">
+                <thead>
+                    <tr>
+                        <th>服务器名称</th>
+                        <th>IP地址</th>
+                        <th>状态</th>
+                        <th>版本</th>
+                        <th>运行时间</th>
+                        <th>总流数</th>
+                        <th>活跃流</th>
+                        <th>接收流量</th>
+                        <th>发送流量</th>
+                        <th>系统信息</th>
+                    </tr>
+                </thead>
+                <tbody id="serverList"></tbody>
+            </table>
+        </div>
+
+        <nav>
+            <ul class="pagination" id="pagination"></ul>
+        </nav>
     </div>
 
     <script>
+        let currentPage = 1;
+        const itemsPerPage = 100;
+        let allServers = [];
+
         async function updateServers() {
             try {
                 const [serversResponse, configResponse] = await Promise.all([
@@ -66,73 +109,81 @@
                 const servers = await serversResponse.json();
                 const config = await configResponse.json();
                 
-                const serverList = document.getElementById('serverList');
-                serverList.innerHTML = servers.map(server => `
-                    <div class="col-md-6">
-                        <div class="card server-card ${server.isOnline ? '' : 'offline'}">
-                            <div class="card-header d-flex justify-content-between align-items-center">
-                                <h5 class="mb-0">
-                                    ${server.serverName} 
-                                    <small class="text-muted">
-                                        (<a href="http://${server.serverIp}" target="_blank" class="text-muted" style="text-decoration: none;">
-                                            ${server.serverIp}
-                                            <i class="fa fa-external-link" style="font-size: 0.8em; margin-left: 3px;"></i>
-                                        </a>)
-                                    </small>
-                                </h5>
-                                <span class="badge ${server.isOnline ? 'bg-success' : 'bg-danger'}">
-                                    ${server.isOnline ? '在线' : '离线'}
-                                </span>
-                            </div>
-                            <div class="card-body">
-                                <div class="row mb-3">
-                                    <div class="col-6">
-                                        <div class="mb-2">
-                                            <i class="fa fa-code-fork"></i> 版本: ${server.version || config.version || '未知'}
-                                        </div>
-                                        <div class="mb-2">
-                                            <i class="fa fa-clock-o"></i> 运行时间: ${formatUptime(server.uptime)}
-                                        </div>
-                                    </div>
-                                    <div class="col-6">
-                                        <div class="mb-2">
-                                            <i class="fa fa-list"></i> 总流数: ${server.totalStreams}
-                                        </div>
-                                        <div class="mb-2">
-                                            <i class="fa fa-play"></i> 活跃流: ${server.activeStreams}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="mb-3">
-                                    <h6><i class="fa fa-exchange"></i> 流量统计</h6>
-                                    <div class="row">
-                                        <div class="col-6">
-                                            <i class="fa fa-download"></i> 接收: ${formatBytes(server.traffic.received)}
-                                        </div>
-                                        <div class="col-6">
-                                            <i class="fa fa-upload"></i> 发送: ${formatBytes(server.traffic.sent)}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="mb-3">
-                                    <h6><i class="fa fa-server"></i> 系统信息</h6>
-                                    <div class="system-info">
-                                        <div>平台: ${server.systemInfo.platform}</div>
-                                        <div>架构: ${server.systemInfo.arch}</div>
-                                        <div>Node版本: ${server.systemInfo.nodeVersion}</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `).join('');
+                allServers = servers;
+                updateStats(servers);
+                renderPage(currentPage);
             } catch (error) {
                 console.error('Error updating servers:', error);
             }
         }
 
+        function updateStats(servers) {
+            const onlineCount = servers.filter(s => s.isOnline).length;
+            document.getElementById('totalServers').textContent = servers.length;
+            document.getElementById('onlineServers').textContent = onlineCount;
+            document.getElementById('offlineServers').textContent = servers.length - onlineCount;
+        }
+
+        function renderPage(page) {
+            const start = (page - 1) * itemsPerPage;
+            const end = start + itemsPerPage;
+            const pageServers = allServers.slice(start, end);
+            
+            const serverList = document.getElementById('serverList');
+            serverList.innerHTML = pageServers.map(server => `
+                <tr class="${server.isOnline ? '' : 'offline'}">
+                    <td>${server.serverName}</td>
+                    <td><a href="http://${server.serverIp}" target="_blank">${server.serverIp}</a></td>
+                    <td><span class="badge ${server.isOnline ? 'bg-success' : 'bg-danger'}">${server.isOnline ? '在线' : '离线'}</span></td>
+                    <td>${server.version || '未知'}</td>
+                    <td>${formatUptime(server.uptime)}</td>
+                    <td>${server.totalStreams}</td>
+                    <td>${server.activeStreams}</td>
+                    <td>${formatBytes(server.traffic.received)}</td>
+                    <td>${formatBytes(server.traffic.sent)}</td>
+                    <td>${server.systemInfo.platform} / ${server.systemInfo.arch}</td>
+                </tr>
+            `).join('');
+
+            updatePagination();
+        }
+
+        function updatePagination() {
+            const totalPages = Math.ceil(allServers.length / itemsPerPage);
+            const pagination = document.getElementById('pagination');
+            
+            let html = '';
+            // 上一页按钮
+            html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                        <a class="page-link" href="#" onclick="changePage(${currentPage - 1})">上一页</a>
+                    </li>`;
+            
+            // 页码按钮
+            for (let i = 1; i <= totalPages; i++) {
+                if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+                    html += `<li class="page-item ${currentPage === i ? 'active' : ''}">
+                                <a class="page-link" href="#" onclick="changePage(${i})">${i}</a>
+                            </li>`;
+                } else if (i === currentPage - 3 || i === currentPage + 3) {
+                    html += `<li class="page-item disabled"><a class="page-link">...</a></li>`;
+                }
+            }
+            
+            // 下一页按钮
+            html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                        <a class="page-link" href="#" onclick="changePage(${currentPage + 1})">下一页</a>
+                    </li>`;
+            
+            pagination.innerHTML = html;
+        }
+
+        function changePage(page) {
+            if (page < 1 || page > Math.ceil(allServers.length / itemsPerPage)) return;
+            currentPage = page;
+            renderPage(page);
+        }
+
+        // 其他辅助函数保持不变
         function formatUptime(ms) {
             const seconds = Math.floor(ms / 1000);
             const minutes = Math.floor(seconds / 60);
@@ -149,9 +200,7 @@
         }
 
         function formatBytes(bytes) {
-            if (typeof bytes === 'string') {
-                return bytes; // 如果已经是格式化的字符串，直接返回
-            }
+            if (typeof bytes === 'string') return bytes;
             const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
             if (bytes === 0) return '0 B';
             const i = Math.floor(Math.log(bytes) / Math.log(1024));
