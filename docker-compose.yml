@@ -1,4 +1,4 @@
-version: '3.8'
+version: '3'
 
 services:
   stream-server:
@@ -13,4 +13,5 @@ services:
       - ./logs:/app/logs
     environment:
       - NODE_ENV=production
-      - TZ=Asia/Shanghai 
+      - TZ=Asia/Shanghai
+      - APP_VERSION=${VERSION:-latest}

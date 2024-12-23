@@ -28,7 +28,9 @@ RUN npm install --production
 COPY . .
 
 # 更新配置文件中的版本号
-RUN sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" /app/config/config.json
+RUN if [ "$VERSION" != "latest" ]; then \
+    sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" /app/config/config.json; \
+    fi
 
 # 创建必要的目录
 RUN mkdir -p streams config logs

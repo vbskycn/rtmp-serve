@@ -22,12 +22,29 @@ class StreamManager extends EventEmitter {
         this.manuallyStartedStreams = new Set();
         this.config = config;  // 保存配置引用
         
-        // 加载主配置文件
+        // 修改配置加载逻辑
         try {
+            // 首先尝试从环境变量获取版本号
+            const envVersion = process.env.APP_VERSION;
+            
+            // 加载配置文件
             this.config = require('../config/config.json');
+            
+            // 如果环境变量中有版本号，优先使用环境变量的版本号
+            if (envVersion && envVersion !== 'latest') {
+                this.config.version = envVersion;
+            }
+            
+            // 确保版本号存在
+            if (!this.config.version) {
+                this.config.version = 'unknown';
+            }
+            
+            logger.info(`Loaded config with version: ${this.config.version}`);
         } catch (error) {
             logger.error('Error loading config:', error);
             this.config = {
+                version: process.env.APP_VERSION || 'unknown',
                 server: {
                     host: 'localhost',
                     port: 3000
@@ -87,6 +104,11 @@ class StreamManager extends EventEmitter {
         if (this.heartbeatConfig.enabled) {
             this.startHeartbeat();
         }
+
+        // 在 constructor 中添加调试日志
+        logger.info('Environment version:', process.env.APP_VERSION);
+        logger.info('Config file version:', require('../config/config.json').version);
+        logger.info('Final config version:', this.config.version);
     }
 
     // 加载保存的流配置

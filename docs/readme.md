@@ -20,7 +20,7 @@ docker buildx inspect --bootstrap
 docker buildx build --platform linux/amd64,linux/arm64 \
   -t zhoujie218/rtmp-serve:latest \
   --push .
-
+  
 # 构建并推送指定版本(同时更新 latest)
 docker buildx build --platform linux/amd64,linux/arm64 \
   --build-arg VERSION=1.5.4 \
@@ -57,6 +57,16 @@ docker run -d \
   -e NODE_ENV=production \
   -e TZ=Asia/Shanghai \
   zhoujie218/rtmp-serve:latest
+  
+# 自己用端
+docker run -d \
+  --name rtmp-serve \
+  --restart unless-stopped \
+  -p 3009:3000 \
+  -e NODE_ENV=production \
+  -e TZ=Asia/Shanghai \
+  zhoujie218/rtmp-serve:latest
+  
 ```
 
 ### 方式二：使用脚本部署
