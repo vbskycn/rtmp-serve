@@ -260,7 +260,7 @@ router.post('/api/streams/:id/updateId', async (req, res) => {
         logger.error(`Error updating stream ID: ${id}`, error);
         res.json({
             success: false,
-            error: error.message || '更新流ID失败'
+            error: error.message || '更新ID失败'
         });
     }
 });
@@ -360,9 +360,19 @@ async function checkStreamStatus(streamId) {
 
 // 添加获取服务器配置的路由
 router.get('/api/config', (req, res) => {
-    res.json({
-        version: config.version
-    });
+    try {
+        res.json({
+            version: config.version,
+            server: config.server,
+            rtmp: config.rtmp
+        });
+    } catch (error) {
+        logger.error('Error getting config:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: '获取配置失败: ' + error.message 
+        });
+    }
 });
 
 // 添加更新流的路由
@@ -539,7 +549,7 @@ router.get('/api/servers', verifyToken, (req, res) => {
     try {
         const serverList = Array.from(servers.entries()).map(([name, info]) => ({
             ...info,
-            isOnline: (Date.now() - info.lastHeartbeat) < 600000 // 10分钟内有心跳就认为在线
+            isOnline: (Date.now() - info.lastHeartbeat) < 600000 // 10分钟内有心跳认为在线
         }));
         res.json(serverList);
     } catch (error) {

@@ -1275,19 +1275,26 @@
         async function loadServerConfig() {
             try {
                 const response = await fetch('/api/config');
+                if (!response.ok) {  // 添加响应状态检查
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const config = await response.json();
                 
                 // 更新版本号显示
-                document.getElementById('systemVersion').textContent = config.version;
+                document.getElementById('systemVersion').textContent = config.version || '未知';
                 
-                // 原有的配置加载代码
-                document.getElementById('serverHost').value = config.server.host;
-                document.getElementById('serverPort').value = config.server.port;
-                document.getElementById('rtmpPushServer').value = config.rtmp.pushServer;
-                document.getElementById('rtmpPullServer').value = config.rtmp.pullServer;
+                // 更新配置表单
+                document.getElementById('serverHost').value = config.server?.host || '';
+                document.getElementById('serverPort').value = config.server?.port || '';
+                document.getElementById('rtmpPushServer').value = config.rtmp?.pushServer || '';
+                document.getElementById('rtmpPullServer').value = config.rtmp?.pullServer || '';
             } catch (error) {
                 console.error('Error loading server config:', error);
-                alert('加载服务器配置失败');
+                // 使用更友好的错误提示
+                const errorMessage = error.message.includes('Failed to fetch') 
+                    ? '无法连接到服务器，请检查网络连接'
+                    : '加载服务器配置失败: ' + error.message;
+                alert(errorMessage);
             }
         }
 
