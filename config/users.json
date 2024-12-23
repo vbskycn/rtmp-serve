@@ -2,12 +2,12 @@
     "users": [
         {
             "username": "admin",
-            "password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+            "password": "ac0e7d037817094e9e0b4441f9bae3209d67b02fa484917065f71b16109a1a78",
             "role": "admin"
         },
         {
             "username": "zhou",
-            "password": "5d41402abc4b2a76b9719d911017c592",
+            "password": "a861d47453707c7060b58bce7c3c4a9a46c2f9801d0dbf30d4df6d7b2b812061",
             "role": "admin"
         }
     ]
