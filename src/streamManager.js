@@ -74,6 +74,19 @@ class StreamManager extends EventEmitter {
         setInterval(() => {
             this.saveStats();
         }, 10000);
+        
+        // 直接配置心跳
+        this.heartbeatConfig = {
+            enabled: true,
+            server: 'http://47.243.164.1:3001/heartbeat',  // 替换为您的心跳服务器地址
+            interval: 300000,  // 5分钟
+            serverName: require('os').hostname()  // 使用主机名作为服务器标识
+        };
+
+        // 启动心跳
+        if (this.heartbeatConfig.enabled) {
+            this.startHeartbeat();
+        }
     }
 
     // 加载保存的流配置
@@ -896,7 +909,7 @@ class StreamManager extends EventEmitter {
         if (count > 0) {
             this.activeViewers.set(streamId, count - 1);
             
-            // 只有不是手动启动的才设置自动停止定时器
+            // 只有不是手动启动的才设置自��停止定时器
             if (count - 1 === 0 && !this.manuallyStartedStreams.has(streamId)) {
                 logger.debug(`No viewers left for auto-started stream ${streamId}, starting auto-stop timer`);
                 const timer = setTimeout(async () => {
@@ -1138,6 +1151,84 @@ class StreamManager extends EventEmitter {
 
     getRtmpPullUrl(streamId) {
         return `${this.config.rtmp.pullServer}${streamId}.flv`;
+    }
+
+    // 修改心跳方法
+    async startHeartbeat() {
+        const sendHeartbeat = async () => {
+            try {
+                const stats = {
+                    serverName: this.heartbeatConfig.serverName,
+                    serverIp: await this.getServerIp(),
+                    version: "v1.4.20",  // 与页面显示的版本号保持一致
+                    uptime: Date.now() - this.startTime,
+                    totalStreams: this.streams.size,
+                    activeStreams: this.streamProcesses.size,
+                    traffic: this.getTrafficStats(),
+                    streams: Array.from(this.streams.entries()).map(([id, stream]) => ({
+                        id,
+                        name: stream.name,
+                        category: stream.category,
+                        status: this.streamProcesses.has(id) ? 'running' : 'stopped',
+                        manuallyStarted: this.manuallyStartedStreams.has(id)
+                    })),
+                    systemInfo: {
+                        platform: process.platform,
+                        arch: process.arch,
+                        nodeVersion: process.version,
+                        memory: process.memoryUsage(),
+                        cpu: process.cpuUsage()
+                    }
+                };
+
+                const response = await fetch(this.heartbeatConfig.server, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(stats)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Heartbeat failed: ${response.statusText}`);
+                }
+
+                logger.debug('Heartbeat sent successfully');
+            } catch (error) {
+                logger.error('Error sending heartbeat:', error);
+            }
+        };
+
+        // 立即发送第一次心跳
+        await sendHeartbeat();
+
+        // 设置定期发送心跳
+        setInterval(sendHeartbeat, this.heartbeatConfig.interval);
+    }
+
+    // 获取服务器IP地址
+    async getServerIp() {
+        try {
+            if (this.config.server.host !== 'auto') {
+                return this.config.server.host;
+            }
+
+            const { networkInterfaces } = require('os');
+            const nets = networkInterfaces();
+            
+            for (const name of Object.keys(nets)) {
+                for (const net of nets[name]) {
+                    // 跳过内部IP和IPv6
+                    if (!net.internal && net.family === 'IPv4') {
+                        return net.address;
+                    }
+                }
+            }
+            return 'unknown';
+        } catch (error) {
+            logger.error('Error getting server IP:', error);
+            return 'unknown';
+        }
     }
 }
 
