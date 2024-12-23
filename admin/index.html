@@ -119,7 +119,7 @@
                         </div>
                     </div>
                     
-                    <!-- 添加服务器配置部分 -->
+                    <!-- 修改服务器配置部分 -->
                     <div class="col-md-12 mt-3">
                         <div class="card">
                             <div class="card-header">
@@ -127,28 +127,16 @@
                             </div>
                             <div class="card-body">
                                 <form id="serverConfigForm" class="row">
-                                    <div class="col-md-4">
+                                    <div class="col-md-6">
                                         <div class="mb-3">
                                             <label class="form-label">服务器地址</label>
                                             <input type="text" class="form-control" id="serverHost" placeholder="auto表示自动获取">
                                         </div>
                                     </div>
-                                    <div class="col-md-2">
+                                    <div class="col-md-6">
                                         <div class="mb-3">
                                             <label class="form-label">端口</label>
                                             <input type="number" class="form-control" id="serverPort">
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div class="mb-3">
-                                            <label class="form-label">RTMP推流地址</label>
-                                            <input type="text" class="form-control" id="rtmpPushServer">
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div class="mb-3">
-                                            <label class="form-label">RTMP拉流地址</label>
-                                            <input type="text" class="form-control" id="rtmpPullServer">
                                         </div>
                                     </div>
                                     <div class="col-12">
@@ -748,7 +736,7 @@
             }
         });
 
-        // 全选/取消全选
+        // ���选/取消全选
         function toggleSelectAll(checkbox) {
             const checkboxes = document.getElementsByClassName('stream-checkbox');
             for (let box of checkboxes) {
@@ -886,7 +874,7 @@
                     batch.map(async streamId => {
                         const success = await startStream(streamId);
                         if (!success) {
-                            failedStreams.set(streamId, 0); // 初始化重试次数为0
+                            failedStreams.set(streamId, 0); // 初始化重试���数为0
                         }
                         return { streamId, success };
                     })
@@ -1252,7 +1240,7 @@
             setTimeout(() => toast.remove(), 2000);
         }
 
-        // 添加工具面板切换功能
+        // 添加工具面板��换功能
         function toggleTools() {
             const content = document.getElementById('toolsContent');
             content.classList.toggle('show');
@@ -1271,11 +1259,11 @@
             window.location.reload();
         }
 
-        // 加载服务器配置
+        // 修改加载服务器配置函数
         async function loadServerConfig() {
             try {
                 const response = await fetch('/api/config');
-                if (!response.ok) {  // 添加响应状态检查
+                if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const config = await response.json();
@@ -1283,14 +1271,11 @@
                 // 更新版本号显示
                 document.getElementById('systemVersion').textContent = config.version || '未知';
                 
-                // 更新配置表单
+                // 只更新服务器地址和端口
                 document.getElementById('serverHost').value = config.server?.host || '';
                 document.getElementById('serverPort').value = config.server?.port || '';
-                document.getElementById('rtmpPushServer').value = config.rtmp?.pushServer || '';
-                document.getElementById('rtmpPullServer').value = config.rtmp?.pullServer || '';
             } catch (error) {
                 console.error('Error loading server config:', error);
-                // 使用更友好的错误提示
                 const errorMessage = error.message.includes('Failed to fetch') 
                     ? '无法连接到服务器，请检查网络连接'
                     : '加载服务器配置失败: ' + error.message;
@@ -1298,7 +1283,7 @@
             }
         }
 
-        // 保存服务器配置
+        // 修改保存服务器配置函数
         document.getElementById('serverConfigForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -1306,10 +1291,6 @@
                 server: {
                     host: document.getElementById('serverHost').value,
                     port: parseInt(document.getElementById('serverPort').value)
-                },
-                rtmp: {
-                    pushServer: document.getElementById('rtmpPushServer').value,
-                    pullServer: document.getElementById('rtmpPullServer').value
                 }
             };
 
