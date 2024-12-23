@@ -395,7 +395,7 @@
                             <i class="fa fa-download"></i> 导出远程推流M3U
                         </button>
                         <button onclick="exportRemoteTXT()" class="btn btn-light btn-sm">
-                            <i class="fa fa-download"></i> 导出远��推流TXT
+                            <i class="fa fa-download"></i> 导出远程推流TXT
                         </button>
                     </div>
                 </div>
@@ -978,19 +978,45 @@
             
             if (!confirm(`确定要手动启动选中的 ${selectedStreams.length} 个流吗？这些流将会推流到远程服务器。`)) return;
 
-            // 显示进度提示
-            const progressToast = document.createElement('div');
-            progressToast.className = 'alert alert-info position-fixed bottom-0 end-0 m-3';
-            progressToast.style.zIndex = '9999';
-            document.body.appendChild(progressToast);
+            // 显示进度提示,使用 Bootstrap 的 modal
+            const progressModal = document.createElement('div');
+            progressModal.className = 'modal fade show';
+            progressModal.style.display = 'block';
+            progressModal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+            progressModal.innerHTML = `
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">批量启动进度</h5>
+                        </div>
+                        <div class="modal-body">
+                            <div class="progress mb-3">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <div class="small text-muted" id="progressDetail"></div>
+                            <div class="mt-2" id="progressStats">
+                                处理中: 0/${selectedStreams.length}<br>
+                                成功: <span class="text-success">0</span>
+                                失败: <span class="text-danger">0</span>
+                                跳过: <span class="text-warning">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(progressModal);
 
+            const progressBar = progressModal.querySelector('.progress-bar');
+            const progressDetail = progressModal.querySelector('#progressDetail');
+            const progressStats = progressModal.querySelector('#progressStats');
+            
             let success = 0;
             let failed = 0;
             let skipped = 0;
             const errors = [];
             
             // 将流分成小批次处理,每批5个
-            const batchSize = 5;
+            const batchSize = 5;  // 改回5个
             const batches = [];
             for (let i = 0; i < selectedStreams.length; i += batchSize) {
                 batches.push(selectedStreams.slice(i, i + batchSize));
@@ -999,10 +1025,19 @@
             // 按批次处理流
             for (let i = 0; i < batches.length; i++) {
                 const batch = batches[i];
-                const batchPromises = batch.map(async streamId => {
+                
+                await Promise.all(batch.map(async streamId => {
                     try {
                         // 更新进度提示
-                        progressToast.textContent = `正在处理: ${success + failed + skipped}/${selectedStreams.length}`;
+                        const progress = ((success + failed + skipped) / selectedStreams.length * 100).toFixed(1);
+                        progressBar.style.width = `${progress}%`;
+                        progressDetail.textContent = `正在处理: ${streamId}`;
+                        progressStats.innerHTML = `
+                            处理中: ${success + failed + skipped}/${selectedStreams.length}<br>
+                            成功: <span class="text-success">${success}</span>
+                            失败: <span class="text-danger">${failed}</span>
+                            跳过: <span class="text-warning">${skipped}</span>
+                        `;
 
                         // 先检查流是否已经在运行
                         const streamStatus = await fetch(`/api/streams/${streamId}`).then(r => r.json());
@@ -1011,7 +1046,7 @@
                             return;
                         }
 
-                        // 设置超时
+                        // 设置单个流的超时
                         const controller = new AbortController();
                         const timeout = setTimeout(() => controller.abort(), 30000); // 30秒超时
 
@@ -1038,19 +1073,16 @@
                         errors.push(`${streamId}: ${error.message}`);
                         console.error(`Error manually starting stream ${streamId}:`, error);
                     }
-                });
+                }));
 
-                // 等待当前批次完成
-                await Promise.all(batchPromises);
-                
-                // 每批次之间暂停1秒,避免资源占用过高
+                // 每批次之间暂停1秒
                 if (i < batches.length - 1) {
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 }
             }
 
-            // 移除进度提示
-            progressToast.remove();
+            // 移除进度模态框
+            progressModal.remove();
 
             // 显示详细结果
             let message = `批量手动启动完成\n`;
@@ -1064,7 +1096,56 @@
                 message += `\n\n成功启动的流已开始推流到远程服务器`;
             }
 
-            alert(message);
+            // 使用更友好的结果显示方式
+            const resultModal = document.createElement('div');
+            resultModal.className = 'modal fade show';
+            resultModal.style.display = 'block';
+            resultModal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+            resultModal.innerHTML = `
+                <div class="modal-dialog modal-dialog-centered modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">批量启动结果</h5>
+                            <button type="button" class="btn-close" onclick="this.closest('.modal').remove()"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="row mb-3">
+                                <div class="col-4 text-center">
+                                    <div class="h3 text-success">${success}</div>
+                                    <div class="text-muted">成功</div>
+                                </div>
+                                <div class="col-4 text-center">
+                                    <div class="h3 text-danger">${failed}</div>
+                                    <div class="text-muted">失败</div>
+                                </div>
+                                <div class="col-4 text-center">
+                                    <div class="h3 text-warning">${skipped}</div>
+                                    <div class="text-muted">跳过</div>
+                                </div>
+                            </div>
+                            ${errors.length > 0 ? `
+                                <div class="mt-3">
+                                    <h6>错误详情:</h6>
+                                    <pre class="small bg-light p-2" style="max-height: 200px; overflow-y: auto;">
+                                        ${errors.join('\n')}
+                                    </pre>
+                                </div>
+                            ` : ''}
+                            ${success > 0 ? `
+                                <div class="alert alert-success mt-3">
+                                    成功启动的流已开始推流到远程服务器
+                                </div>
+                            ` : ''}
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-primary" onclick="this.closest('.modal').remove()">确定</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(resultModal);
+
+            // 刷新流列表
             loadStreams();
         }
 
@@ -1073,29 +1154,87 @@
             const selectedStreams = getSelectedStreams();
             if (!selectedStreams.length) return;
             
-            if (!confirm(`确定要停止选中的 ${selectedStreams.length} 个流吗？`)) return;
+            if (!confirm(`确定要停止选中的 ${selectedStreams.length} 个流吗？这将同时停止HLS推流和远程推流`)) return;
+
+            // 显示进度提示
+            const progressModal = document.createElement('div');
+            progressModal.className = 'modal fade show';
+            progressModal.style.display = 'block';
+            progressModal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+            progressModal.innerHTML = `
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">批量停止进度</h5>
+                        </div>
+                        <div class="modal-body">
+                            <div class="progress mb-3">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <div class="small text-muted" id="stopProgressDetail"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(progressModal);
+
+            const progressBar = progressModal.querySelector('.progress-bar');
+            const progressDetail = progressModal.querySelector('#stopProgressDetail');
 
             let success = 0;
             let failed = 0;
             
-            for (const streamId of selectedStreams) {
-                try {
-                    const response = await fetch(`/api/streams/${streamId}/stop`, {
-                        method: 'POST'
-                    });
-                    const result = await response.json();
-                    if (result.success) {
-                        success++;
-                    } else {
+            // 每批5个流同时处理
+            const batchSize = 5;
+            const batches = [];
+            for (let i = 0; i < selectedStreams.length; i += batchSize) {
+                batches.push(selectedStreams.slice(i, i + batchSize));
+            }
+
+            for (let i = 0; i < batches.length; i++) {
+                const batch = batches[i];
+                await Promise.all(batch.map(async streamId => {
+                    try {
+                        // 更新进度
+                        const progress = ((success + failed) / selectedStreams.length * 100).toFixed(1);
+                        progressBar.style.width = `${progress}%`;
+                        progressDetail.textContent = `正在停止: ${streamId}`;
+
+                        // 停止流
+                        const response = await fetch(`/api/streams/${streamId}/stop`, {
+                            method: 'POST'
+                        });
+                        const result = await response.json();
+                        
+                        // 确保完全停止
+                        if (result.success) {
+                            // 再次检查并强制停止
+                            await fetch(`/api/streams/${streamId}/stop`, {
+                                method: 'POST'
+                            });
+                            success++;
+                        } else {
+                            failed++;
+                        }
+                    } catch (error) {
+                        console.error(`Error stopping stream ${streamId}:`, error);
                         failed++;
                     }
-                } catch (error) {
-                    console.error(`Error stopping stream ${streamId}:`, error);
-                    failed++;
+                }));
+
+                // 批次间隔
+                if (i < batches.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                 }
             }
             
+            // 移除进度模态框
+            progressModal.remove();
+            
+            // 显示结果
             alert(`批量停止完成\n成功: ${success}\n失败: ${failed}`);
+            
+            // 刷新流列表
             loadStreams();
         }
 
@@ -1287,7 +1426,7 @@
             document.execCommand('copy');
             document.body.removeChild(textarea);
             
-            // 显示��示
+            // 显示提示
             const toast = document.createElement('div');
             toast.className = 'alert alert-success position-fixed bottom-0 end-0 m-3';
             toast.style.zIndex = '9999';
