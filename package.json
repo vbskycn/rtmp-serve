@@ -4,7 +4,9 @@
   "description": "Stream proxy server",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "docker:build": "docker buildx build --platform linux/amd64,linux/arm64 -t zhoujie218/rtmp-serve:latest --push .",
+    "docker:run": "docker run -d -p 3000:3000 -v $(pwd)/config:/app/config -v $(pwd)/streams:/app/streams -v $(pwd)/logs:/app/logs --name rtmp-serve zhoujie218/rtmp-serve:latest"
   },
   "dependencies": {
     "cors": "^2.8.5",
