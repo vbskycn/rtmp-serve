@@ -40,7 +40,6 @@ function authMiddleware(req, res, next) {
     // 允许访问的公共路径
     const publicPaths = [
         '/admin/login.html',
-        'login.html',
         '/api/login',
         '/play',
         '/streams',
@@ -58,29 +57,42 @@ function authMiddleware(req, res, next) {
     }
 
     const token = req.cookies.token;
-    if (!token) {
-        if (req.path.startsWith('/admin')) {
+    
+    // 如果是访问管理页面且未登录，重定向到登录页
+    if (req.path === '/admin/' || req.path === '/admin/index.html') {
+        if (!token) {
             return res.redirect('/admin/login.html');
         }
-        if (req.path.startsWith('/api')) {
-            return res.status(401).json({ success: false, message: '未登录' });
+        try {
+            jwt.verify(token, JWT_SECRET);
+            return next();
+        } catch (err) {
+            return res.redirect('/admin/login.html');
         }
-        return next();
     }
 
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        req.user = decoded;
-        next();
-    } catch (err) {
-        if (req.path.startsWith('/admin')) {
-            return res.redirect('/admin/login.html');
+    // API接口的认证处理
+    if (req.path.startsWith('/api/')) {
+        if (!token) {
+            return res.status(401).json({ 
+                success: false, 
+                message: '未登录或登录已过期，请重新登录' 
+            });
         }
-        if (req.path.startsWith('/api')) {
-            return res.status(401).json({ success: false, message: '登录已过期' });
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            req.user = decoded;
+            return next();
+        } catch (err) {
+            return res.status(401).json({ 
+                success: false, 
+                message: '登录已过期，请重新登录' 
+            });
         }
-        next();
     }
+
+    // 其他路径放行
+    next();
 }
 
 module.exports = {
