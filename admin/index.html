@@ -395,7 +395,7 @@
                             <i class="fa fa-download"></i> 导出远程推流M3U
                         </button>
                         <button onclick="exportRemoteTXT()" class="btn btn-light btn-sm">
-                            <i class="fa fa-download"></i> 导出远程推流TXT
+                            <i class="fa fa-download"></i> 导出远��推流TXT
                         </button>
                     </div>
                 </div>
@@ -971,38 +971,100 @@
                 .map(box => box.value);
         }
 
-        // 批量重启
+        // 修改批量手动启动函数
         async function batchManualStart() {
             const selectedStreams = getSelectedStreams();
             if (!selectedStreams.length) return;
             
             if (!confirm(`确定要手动启动选中的 ${selectedStreams.length} 个流吗？这些流将会推流到远程服务器。`)) return;
 
+            // 显示进度提示
+            const progressToast = document.createElement('div');
+            progressToast.className = 'alert alert-info position-fixed bottom-0 end-0 m-3';
+            progressToast.style.zIndex = '9999';
+            document.body.appendChild(progressToast);
+
             let success = 0;
             let failed = 0;
+            let skipped = 0;
+            const errors = [];
             
-            for (const streamId of selectedStreams) {
-                try {
-                    const response = await fetch(`/api/streams/${streamId}/restart`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ manual: true })
-                    });
-                    const result = await response.json();
-                    if (result.success) {
-                        success++;
-                    } else {
+            // 将流分成小批次处理,每批5个
+            const batchSize = 5;
+            const batches = [];
+            for (let i = 0; i < selectedStreams.length; i += batchSize) {
+                batches.push(selectedStreams.slice(i, i + batchSize));
+            }
+
+            // 按批次处理流
+            for (let i = 0; i < batches.length; i++) {
+                const batch = batches[i];
+                const batchPromises = batch.map(async streamId => {
+                    try {
+                        // 更新进度提示
+                        progressToast.textContent = `正在处理: ${success + failed + skipped}/${selectedStreams.length}`;
+
+                        // 先检查流是否已经在运行
+                        const streamStatus = await fetch(`/api/streams/${streamId}`).then(r => r.json());
+                        if (streamStatus.processRunning || streamStatus.manuallyStarted) {
+                            skipped++;
+                            return;
+                        }
+
+                        // 设置超时
+                        const controller = new AbortController();
+                        const timeout = setTimeout(() => controller.abort(), 30000); // 30秒超时
+
+                        const response = await fetch(`/api/streams/${streamId}/restart`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ manual: true }),
+                            signal: controller.signal
+                        });
+
+                        clearTimeout(timeout);
+
+                        const result = await response.json();
+                        if (result.success) {
+                            success++;
+                        } else {
+                            failed++;
+                            errors.push(`${streamId}: ${result.error || '未知错误'}`);
+                        }
+                    } catch (error) {
                         failed++;
+                        errors.push(`${streamId}: ${error.message}`);
+                        console.error(`Error manually starting stream ${streamId}:`, error);
                     }
-                } catch (error) {
-                    console.error(`Error manually starting stream ${streamId}:`, error);
-                    failed++;
+                });
+
+                // 等待当前批次完成
+                await Promise.all(batchPromises);
+                
+                // 每批次之间暂停1秒,避免资源占用过高
+                if (i < batches.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                 }
             }
-            
-            alert(`批量手动启动完成\n成功: ${success}\n失败: ${failed}\n成功启动的流已开始推流到远程服务器`);
+
+            // 移除进度提示
+            progressToast.remove();
+
+            // 显示详细结果
+            let message = `批量手动启动完成\n`;
+            message += `成功: ${success}\n`;
+            message += `失败: ${failed}\n`;
+            message += `跳过: ${skipped}\n`;
+            if (errors.length > 0) {
+                message += `\n错误详情:\n${errors.join('\n')}`;
+            }
+            if (success > 0) {
+                message += `\n\n成功启动的流已开始推流到远程服务器`;
+            }
+
+            alert(message);
             loadStreams();
         }
 
@@ -1225,7 +1287,7 @@
             document.execCommand('copy');
             document.body.removeChild(textarea);
             
-            // 显示提示
+            // 显示��示
             const toast = document.createElement('div');
             toast.className = 'alert alert-success position-fixed bottom-0 end-0 m-3';
             toast.style.zIndex = '9999';
