@@ -1466,7 +1466,7 @@
                 modal.show();
             } catch (error) {
                 console.error('Error loading stream details:', error);
-                alert('加载信息失败');
+                alert('加载��息失败');
             }
         }
 
@@ -1930,7 +1930,7 @@
         async function logout() {
             try {
                 await fetch('/api/logout', { method: 'POST' });
-                window.location.href = '/admin/login.html';
+                window.location.href = '/login.html';  // 修改这里的重定向路径
             } catch (error) {
                 console.error('Logout error:', error);
             }

@@ -50,7 +50,7 @@ async function updatePassword(username, newPassword) {
 function authMiddleware(req, res, next) {
     // 允许访问的公共路径
     const publicPaths = [
-        '/admin/login.html',
+        '/login.html',
         '/api/login',
         '/play',
         '/streams',
@@ -70,15 +70,15 @@ function authMiddleware(req, res, next) {
     const token = req.cookies.token;
     
     // 如果是访问管理页面且未登录，重定向到登录页
-    if (req.path === '/admin/' || req.path === '/admin/index.html') {
+    if (req.path === '/' || req.path === '/index.html') {
         if (!token) {
-            return res.redirect('/admin/login.html');
+            return res.redirect('/login.html');
         }
         try {
             jwt.verify(token, JWT_SECRET);
             return next();
         } catch (err) {
-            return res.redirect('/admin/login.html');
+            return res.redirect('/login.html');
         }
     }
 
