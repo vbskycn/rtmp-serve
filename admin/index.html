@@ -271,7 +271,7 @@
     <!-- 顶部状态栏 -->
     <div class="top-bar">
         <div class="d-flex justify-content-between align-items-center">
-            <h1 class="system-title">流媒体管理系统 v1.4.0</h1>
+            <h1 class="system-title">流媒体管理系统 v1.4.1</h1>
             <div class="stats-container">
                 <div class="stat-item">
                     <span class="stat-label">总流数量:</span>
@@ -373,8 +373,8 @@
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0"><i class="fa fa-list"></i> 流列表</h5>
                     <div class="btn-group">
-                        <button onclick="batchRestart()" class="btn btn-warning btn-sm" id="batchRestartBtn" disabled>
-                            <i class="fa fa-refresh"></i> 批量重启
+                        <button onclick="batchManualStart()" class="btn btn-warning btn-sm" id="batchRestartBtn" disabled>
+                            <i class="fa fa-refresh"></i> 批量手动启动
                         </button>
                         <button onclick="batchStop()" class="btn btn-secondary btn-sm" id="batchStopBtn" disabled>
                             <i class="fa fa-stop"></i> 批量停止
@@ -881,7 +881,7 @@
                 console.error('复制失败:', err);
                 alert('复制失败');
             } finally {
-                // 移除��时输入框
+                // 移除临时输入框
                 document.body.removeChild(input);
             }
         }
@@ -972,11 +972,11 @@
         }
 
         // 批量重启
-        async function batchRestart() {
+        async function batchManualStart() {
             const selectedStreams = getSelectedStreams();
             if (!selectedStreams.length) return;
             
-            if (!confirm(`确定要重启选中的 ${selectedStreams.length} 个流吗？`)) return;
+            if (!confirm(`确定要手动启动选中的 ${selectedStreams.length} 个流吗？这些流将会推流到远程服务器。`)) return;
 
             let success = 0;
             let failed = 0;
@@ -984,7 +984,11 @@
             for (const streamId of selectedStreams) {
                 try {
                     const response = await fetch(`/api/streams/${streamId}/restart`, {
-                        method: 'POST'
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ manual: true })
                     });
                     const result = await response.json();
                     if (result.success) {
@@ -993,12 +997,12 @@
                         failed++;
                     }
                 } catch (error) {
-                    console.error(`Error restarting stream ${streamId}:`, error);
+                    console.error(`Error manually starting stream ${streamId}:`, error);
                     failed++;
                 }
             }
             
-            alert(`批量重启完成\n成功: ${success}\n失败: ${failed}`);
+            alert(`批量手动启动完成\n成功: ${success}\n失败: ${failed}\n成功启动的流已开始推流到远程服务器`);
             loadStreams();
         }
 
@@ -1076,7 +1080,7 @@
                 document.getElementById('editStreamName').value = stream.name;
                 document.getElementById('editStreamUrl').value = stream.url;
                 
-                // ���示模态框
+                // 显示模态框
                 const modal = new bootstrap.Modal(document.getElementById('editStreamModal'));
                 modal.show();
             } catch (error) {
@@ -1225,7 +1229,7 @@
             const toast = document.createElement('div');
             toast.className = 'alert alert-success position-fixed bottom-0 end-0 m-3';
             toast.style.zIndex = '9999';
-            toast.textContent = '��流信息已复制到剪贴板';
+            toast.textContent = '推流信息已复制到剪贴板';
             document.body.appendChild(toast);
             setTimeout(() => toast.remove(), 2000);
         }
