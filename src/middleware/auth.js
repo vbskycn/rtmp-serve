@@ -71,7 +71,8 @@ function authMiddleware(req, res, next) {
         '/api/login',
         '/play',
         '/streams',
-        '/favicon.ico'
+        '/favicon.ico',
+        '/api/heartbeat'
     ];
 
     // 检查是否是公共路径
