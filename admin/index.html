@@ -280,7 +280,7 @@
                     });
                 }
 
-                // 只有在流的数量或顺序发生变化时才完全重新渲染
+                // 只有在流的数量或顺序发���变化时才完全重新渲染
                 const currentStreamIds = Array.from(tbody.querySelectorAll('tr[data-stream-id]'))
                     .map(row => row.dataset.streamId);
                 const newStreamIds = streams.map(stream => stream.id);
@@ -736,7 +736,7 @@
             }
         });
 
-        // ���选/取消全选
+        // 选/取消全选
         function toggleSelectAll(checkbox) {
             const checkboxes = document.getElementsByClassName('stream-checkbox');
             for (let box of checkboxes) {
@@ -766,7 +766,7 @@
             const selectedStreams = getSelectedStreams();
             if (!selectedStreams.length) return;
             
-            if (!confirm(`确定要手动启动选中的 ${selectedStreams.length} 个流吗？这些流将会推流到远程服务器。`)) return;
+            if (!confirm(`确定要手动启动选中的 ${selectedStreams.length} 个流吗？这些流将会推流到远程��务器。`)) return;
 
             // 显示进度提示
             const progressModal = document.createElement('div');
@@ -874,7 +874,7 @@
                     batch.map(async streamId => {
                         const success = await startStream(streamId);
                         if (!success) {
-                            failedStreams.set(streamId, 0); // 初始化重试���数为0
+                            failedStreams.set(streamId, 0); // 初始化重试次数为0
                         }
                         return { streamId, success };
                     })
@@ -1240,7 +1240,7 @@
             setTimeout(() => toast.remove(), 2000);
         }
 
-        // 添加工具面板��换功能
+        // 添加工具面板换功能
         function toggleTools() {
             const content = document.getElementById('toolsContent');
             content.classList.toggle('show');
@@ -1287,20 +1287,28 @@
         document.getElementById('serverConfigForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
-            const config = {
-                server: {
-                    host: document.getElementById('serverHost').value,
-                    port: parseInt(document.getElementById('serverPort').value)
-                }
-            };
-
             try {
+                // 先获取当前配置
+                const configResponse = await fetch('/api/config');
+                const currentConfig = await configResponse.json();
+                
+                // 创建新的配置对象，保留原有配置，只更新服务器地址和端口
+                const newConfig = {
+                    ...currentConfig,  // 保留所有现有配置
+                    server: {
+                        ...currentConfig.server,  // 保留服务器配置中的其他字段
+                        host: document.getElementById('serverHost').value,
+                        port: parseInt(document.getElementById('serverPort').value)
+                    }
+                };
+
+                // 发送更新后的完整配置
                 const response = await fetch('/api/config', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(config)
+                    body: JSON.stringify(newConfig)
                 });
 
                 const result = await response.json();
@@ -1361,7 +1369,7 @@
                 }
             } catch (error) {
                 console.error('Error saving server config:', error);
-                alert('保存配置失败');
+                alert('保存配置失败: ' + (error.message || '未知错误'));
             }
         });
 
