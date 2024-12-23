@@ -78,7 +78,7 @@ class StreamManager extends EventEmitter {
         // 直接配置心跳
         this.heartbeatConfig = {
             enabled: true,
-            server: 'http://localhost:3000/api/heartbeat',  // 默认使用本机地址
+            server: 'http://47.243.164.1:3000/api/heartbeat',  // 默认使用本机地址
             interval: 300000,  // 5分钟
             serverName: require('os').hostname()  // 使用主机名作为服务器标识
         };
