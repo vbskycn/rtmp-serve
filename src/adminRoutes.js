@@ -507,23 +507,52 @@ router.post('/logout', (req, res) => {
 // 存储服务器状态
 const servers = new Map();
 
-// 接收心跳
+// 接收心跳 - 使用 API key 验证
 router.post('/api/heartbeat', (req, res) => {
-    const serverInfo = req.body;
-    servers.set(serverInfo.serverName, {
-        ...serverInfo,
-        lastHeartbeat: Date.now()
-    });
-    res.json({ success: true });
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== 'your-secret-api-key') {
+        return res.status(401).json({ 
+            success: false, 
+            error: 'Invalid API key' 
+        });
+    }
+    try {
+        const serverInfo = req.body;
+        // 添加接收时间戳
+        const receivedAt = Date.now();
+        servers.set(serverInfo.serverName, {
+            ...serverInfo,
+            lastHeartbeat: receivedAt
+        });
+        logger.debug(`Received heartbeat from ${serverInfo.serverName}`);
+        res.json({ 
+            success: true,
+            receivedAt
+        });
+    } catch (error) {
+        logger.error('Error processing heartbeat:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
 });
 
-// 获取所有服务器状态
-router.get('/api/servers', (req, res) => {
-    const serverList = Array.from(servers.entries()).map(([name, info]) => ({
-        ...info,
-        isOnline: (Date.now() - info.lastHeartbeat) < 600000 // 10分钟内有心跳就认为在线
-    }));
-    res.json(serverList);
+// 获取所有服务器状态 - 需要认证的路由
+router.get('/api/servers', verifyToken, (req, res) => {
+    try {
+        const serverList = Array.from(servers.entries()).map(([name, info]) => ({
+            ...info,
+            isOnline: (Date.now() - info.lastHeartbeat) < 600000 // 10分钟内有心跳就认为在线
+        }));
+        res.json(serverList);
+    } catch (error) {
+        logger.error('Error getting server list:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
 });
 
 module.exports = router; 
