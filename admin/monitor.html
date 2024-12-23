@@ -25,24 +25,6 @@
             z-index: 1000;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .stream-list {
-            max-height: 200px;
-            overflow-y: auto;
-            font-size: 0.9em;
-        }
-        .stream-item {
-            padding: 5px;
-            border-bottom: 1px solid #eee;
-        }
-        .stream-item:last-child {
-            border-bottom: none;
-        }
-        .running {
-            color: #28a745;
-        }
-        .stopped {
-            color: #dc3545;
-        }
         .system-info {
             font-size: 0.9em;
             color: #666;
@@ -116,10 +98,10 @@
                                     <h6><i class="fa fa-exchange"></i> 流量统计</h6>
                                     <div class="row">
                                         <div class="col-6">
-                                            <i class="fa fa-download"></i> 接收: ${server.traffic.received}
+                                            <i class="fa fa-download"></i> 接收: ${formatBytes(server.traffic.received)}
                                         </div>
                                         <div class="col-6">
-                                            <i class="fa fa-upload"></i> 发送: ${server.traffic.sent}
+                                            <i class="fa fa-upload"></i> 发送: ${formatBytes(server.traffic.sent)}
                                         </div>
                                     </div>
                                 </div>
@@ -130,24 +112,6 @@
                                         <div>平台: ${server.systemInfo.platform}</div>
                                         <div>架构: ${server.systemInfo.arch}</div>
                                         <div>Node版本: ${server.systemInfo.nodeVersion}</div>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <h6><i class="fa fa-play-circle"></i> 流列表</h6>
-                                    <div class="stream-list">
-                                        ${server.streams.map(stream => `
-                                            <div class="stream-item">
-                                                <span class="${stream.status === 'running' ? 'running' : 'stopped'}">
-                                                    <i class="fa fa-${stream.status === 'running' ? 'play' : 'stop'}"></i>
-                                                </span>
-                                                <span class="ms-2">${stream.name}</span>
-                                                <small class="text-muted">(${stream.category})</small>
-                                                ${stream.manuallyStarted ? 
-                                                    '<span class="badge bg-info ms-2">手动启动</span>' : 
-                                                    ''}
-                                            </div>
-                                        `).join('')}
                                     </div>
                                 </div>
                             </div>
@@ -165,7 +129,23 @@
             const hours = Math.floor(minutes / 60);
             const days = Math.floor(hours / 24);
 
-            return `${days}天 ${hours % 24}时 ${minutes % 60}分`;
+            const parts = [];
+            if (days > 0) parts.push(`${days}天`);
+            if (hours % 24 > 0 || days > 0) parts.push(`${hours % 24}时`);
+            if (minutes % 60 > 0 || hours > 0) parts.push(`${minutes % 60}分`);
+            if (parts.length === 0) parts.push('刚刚启动');
+
+            return parts.join(' ');
+        }
+
+        function formatBytes(bytes) {
+            if (typeof bytes === 'string') {
+                return bytes; // 如果已经是格式化的字符串，直接返回
+            }
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            if (bytes === 0) return '0 B';
+            const i = Math.floor(Math.log(bytes) / Math.log(1024));
+            return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
         }
 
         function refreshData() {

@@ -883,7 +883,7 @@ class StreamManager extends EventEmitter {
         const hasRecentStats = stats?.startTime && 
             (Date.now() - new Date(stats.startTime).getTime()) < 30000;  // 30秒内有活动
         
-        // 检查是否有播放列表文件
+        // 检查是否有放列表文件
         const playlistPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
         const hasPlaylist = fs.existsSync(playlistPath);
         
@@ -909,7 +909,7 @@ class StreamManager extends EventEmitter {
         if (count > 0) {
             this.activeViewers.set(streamId, count - 1);
             
-            // 只有不是手动启动的才��置自动停止定时器
+            // 只有不是手动启动的才置自动停止定时器
             if (count - 1 === 0 && !this.manuallyStartedStreams.has(streamId)) {
                 logger.debug(`No viewers left for auto-started stream ${streamId}, starting auto-stop timer`);
                 const timer = setTimeout(async () => {
@@ -1064,8 +1064,9 @@ class StreamManager extends EventEmitter {
                 // 每个活跃流每秒接收约2MB数据
                 this.totalTraffic.received += BigInt(2 * 1024 * 1024);
                 
-                // 每个活跃流每秒发送约1MB数据
-                this.totalTraffic.sent += BigInt(1024 * 1024);
+                // 每个活跃流每秒发送约1MB数据（考虑多个观看者）
+                const viewers = this.activeViewers.get(streamId) || 0;
+                this.totalTraffic.sent += BigInt(1024 * 1024 * (viewers + 1));
             }
         }
     }
@@ -1157,21 +1158,26 @@ class StreamManager extends EventEmitter {
     async startHeartbeat() {
         const sendHeartbeat = async () => {
             try {
+                // 获取完整的服务器地址（包含端口）
+                const serverAddress = `${await this.getServerIp()}:${this.config.server.port}`;
+                
+                // 计算准确的运行时间
+                const uptime = Date.now() - this.startTime;
+                
+                // 获取准确的流量统计
+                const trafficStats = this.getTrafficStats();
+                
                 const stats = {
                     serverName: this.heartbeatConfig.serverName,
-                    serverIp: await this.getServerIp(),
-                    version: "v1.4.20",  // 与页面显示的版本号保持一致
-                    uptime: Date.now() - this.startTime,
+                    serverIp: serverAddress,
+                    version: "v1.4.20",
+                    uptime: uptime,
                     totalStreams: this.streams.size,
                     activeStreams: this.streamProcesses.size,
-                    traffic: this.getTrafficStats(),
-                    streams: Array.from(this.streams.entries()).map(([id, stream]) => ({
-                        id,
-                        name: stream.name,
-                        category: stream.category,
-                        status: this.streamProcesses.has(id) ? 'running' : 'stopped',
-                        manuallyStarted: this.manuallyStartedStreams.has(id)
-                    })),
+                    traffic: {
+                        received: trafficStats.received,
+                        sent: trafficStats.sent
+                    },
                     systemInfo: {
                         platform: process.platform,
                         arch: process.arch,
