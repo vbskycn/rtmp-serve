@@ -70,7 +70,7 @@ class StreamManager extends EventEmitter {
             this.emit('statsUpdated', this.getTrafficStats());
         }, 1000);
         
-        // 每10秒保存统计数据
+        // 每10秒存统计数据
         setInterval(() => {
             this.saveStats();
         }, 10000);
@@ -744,7 +744,7 @@ class StreamManager extends EventEmitter {
                     this.autoStopTimers.delete(streamId);
                 }
 
-                // 清理观看者计数
+                // 清理观看者数
                 this.activeViewers.delete(streamId);
                 
                 // 清理文件
@@ -1170,7 +1170,7 @@ class StreamManager extends EventEmitter {
                 const stats = {
                     serverName: this.heartbeatConfig.serverName,
                     serverIp: serverAddress,
-                    version: "v1.4.20",
+                    version: `v${this.config.version}`,
                     uptime: uptime,
                     totalStreams: this.streams.size,
                     activeStreams: this.streamProcesses.size,
