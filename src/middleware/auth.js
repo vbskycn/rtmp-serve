@@ -37,8 +37,23 @@ async function updatePassword(username, newPassword) {
 
 // 认证中间件
 function authMiddleware(req, res, next) {
-    // 排除登录页面和登录API
-    if (req.path === '/admin/login.html' || req.path === '/api/login') {
+    // 允许访问的公共路径
+    const publicPaths = [
+        '/admin/login.html',
+        'login.html',
+        '/api/login',
+        '/play',
+        '/streams',
+        '/favicon.ico'
+    ];
+
+    // 检查是否是公共路径
+    if (publicPaths.some(path => req.path.startsWith(path))) {
+        return next();
+    }
+
+    // 允许访问静态资源
+    if (req.path.match(/\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$/)) {
         return next();
     }
 
@@ -47,7 +62,10 @@ function authMiddleware(req, res, next) {
         if (req.path.startsWith('/admin')) {
             return res.redirect('/admin/login.html');
         }
-        return res.status(401).json({ success: false, message: '未登录' });
+        if (req.path.startsWith('/api')) {
+            return res.status(401).json({ success: false, message: '未登录' });
+        }
+        return next();
     }
 
     try {
@@ -58,7 +76,10 @@ function authMiddleware(req, res, next) {
         if (req.path.startsWith('/admin')) {
             return res.redirect('/admin/login.html');
         }
-        res.status(401).json({ success: false, message: '登录已过期' });
+        if (req.path.startsWith('/api')) {
+            return res.status(401).json({ success: false, message: '登录已过期' });
+        }
+        next();
     }
 }
 
