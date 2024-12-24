@@ -317,55 +317,41 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 修改 getStreamInfo 方法
+    // 修改 getStreamInfo 方法，简化状态检测逻辑
     async getStreamInfo(streamId) {
         try {
             const stream = this.streams.get(streamId);
             if (!stream) return null;
 
             const processInfo = this.streamProcesses.get(streamId);
-            const stats = this.streamStats.get(streamId);
-            const status = this.streamStatus.get(streamId) || 'stopped';
-            const isInvalid = this.streamRetries.get(streamId) >= 3;
+            const isInvalid = this.retryAttempts.get(streamId) >= 3;
 
-            // 检查进程是否真的在运行
+            // 检查进程是否在运行
             let isProcessRunning = false;
-            let isRtmpActive = false;
-
             if (processInfo && processInfo.ffmpeg) {
                 try {
                     // 检查进程是否存活
                     process.kill(processInfo.ffmpeg.pid, 0);
                     isProcessRunning = true;
-
-                    // 检查进程是否有错误
-                    if (processInfo.hasError || status === 'error') {
-                        isProcessRunning = false;
-                    }
-
-                    // 检查RTMP推流状态
-                    isRtmpActive = isProcessRunning && 
-                                 processInfo.isManualStart && 
-                                 !processInfo.hasError &&
-                                 status === 'running';
                 } catch (e) {
                     // 进程不存在
                     isProcessRunning = false;
-                    isRtmpActive = false;
                     this.streamProcesses.delete(streamId);
-                    this.streamStatus.set(streamId, 'stopped');
                 }
             }
 
             // 确定最终状态
-            let finalStatus = 'stopped';
+            let finalStatus;
             if (isInvalid) {
-                finalStatus = 'invalid';
-            } else if (status === 'error') {
-                finalStatus = 'error';
-            } else if (isProcessRunning && status === 'running') {
-                finalStatus = 'running';
+                finalStatus = 'invalid';  // 重试3次失败显示已失效
+            } else if (isProcessRunning) {
+                finalStatus = 'running';  // 进程在运行就显示运行中
+            } else {
+                finalStatus = 'stopped';  // 其他情况显示已停止
             }
+
+            // 确定推流状态 - 只有在进程运行且是手动启动的情况下才认为在推流
+            const isRtmpActive = isProcessRunning && processInfo?.isManualStart;
 
             return {
                 ...stream,
@@ -373,7 +359,7 @@ class StreamManager extends EventEmitter {
                 manuallyStarted: this.manuallyStartedStreams.has(streamId),
                 autoStart: this.autoStartStreams.has(streamId),
                 autoPlay: this.autoPlayStreams.has(streamId),
-                stats: stats || {},
+                stats: this.streamStats.get(streamId) || {},
                 status: finalStatus,
                 isRtmpActive: isRtmpActive,
                 invalid: isInvalid
@@ -440,7 +426,6 @@ class StreamManager extends EventEmitter {
             const attempts = this.retryAttempts.get(streamId) || 0;
             if (attempts >= this.MAX_RETRIES) {
                 logger.error(`Stream ${streamId} marked as invalid after ${attempts} retries`);
-                this.streamStatus.set(streamId, 'invalid');
                 this.retryAttempts.delete(streamId);
                 throw new Error(`Stream failed after ${attempts} retries`);
             }
@@ -483,16 +468,12 @@ class StreamManager extends EventEmitter {
                     const ffmpeg = spawn('ffmpeg', args);
                     let ffmpegError = '';
                     let hasStarted = false;
-                    let errorOccurred = false;
 
-                    // 保存进程引用，添加更多状态信息
+                    // 保存进程引用
                     this.streamProcesses.set(streamId, {
                         ffmpeg,
                         startTime: new Date(),
-                        isManualStart: isRtmpPush,
-                        retryCount: this.retryAttempts.get(streamId),
-                        hasError: false,
-                        lastError: null
+                        isManualStart: isRtmpPush
                     });
 
                     ffmpeg.stderr.on('data', (data) => {
@@ -502,32 +483,20 @@ class StreamManager extends EventEmitter {
                             message.includes('Invalid')) {
                             logger.error(`FFmpeg stderr: ${message}`);
                             ffmpegError += message;
-                            
-                            // 更新进程状态
-                            const processInfo = this.streamProcesses.get(streamId);
-                            if (processInfo) {
-                                processInfo.hasError = true;
-                                processInfo.lastError = message;
-                            }
-
-                            // 特别处理 HLS 分片错误
-                            if (message.includes('Failed to open segment') || 
-                                message.includes('HTTP error 404')) {
-                                errorOccurred = true;
-                                this.streamStatus.set(streamId, 'error');
-                                ffmpeg.kill('SIGTERM');
-                            }
                         }
                     });
 
                     ffmpeg.on('exit', (code, signal) => {
-                        if (code !== 0 || errorOccurred) {
-                            // 更新状态为停止
-                            this.streamStatus.set(streamId, 'stopped');
-                            this.streamProcesses.delete(streamId);
-                            
-                            const error = new Error(`FFmpeg exited with code ${code}`);
-                            reject(error);
+                        // 进程退出时清理状态
+                        this.streamProcesses.delete(streamId);
+                        
+                        if (code !== 0 && !signal) {
+                            // 非正常退出且不是手动停止
+                            reject(new Error(`FFmpeg exited with code ${code}`));
+                        } else if (signal === 'SIGTERM') {
+                            // 手动停止
+                            this.retryAttempts.delete(streamId);
+                            resolve({ success: true });
                         } else if (hasStarted) {
                             resolve({ success: true });
                         }
@@ -535,12 +504,16 @@ class StreamManager extends EventEmitter {
 
                     // 等待流启动
                     setTimeout(() => {
-                        if (!errorOccurred) {
+                        try {
+                            // 再次检查进程是否还在运行
+                            process.kill(ffmpeg.pid, 0);
                             hasStarted = true;
-                            // 重置重试计数
+                            // 如果成功启动，重置重试计数
                             this.retryAttempts.delete(streamId);
-                            this.streamStatus.set(streamId, 'running');
                             resolve({ success: true });
+                        } catch (e) {
+                            // 进程已经退出
+                            reject(new Error('Process exited before initialization completed'));
                         }
                     }, 3000);
 
