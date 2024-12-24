@@ -247,7 +247,7 @@ router.post('/api/streams/:id/updateId', async (req, res) => {
             streamManager.streamProcesses.delete(id);
         }
 
-        // 保存配置
+        // 保存配���
         await streamManager.saveStreams();
 
         res.json({ success: true });
@@ -561,8 +561,29 @@ router.get('/api/servers', verifyToken, (req, res) => {
     }
 });
 
-// 添加切换自动启动的路由
-router.post('/api/streams/:id/auto-start', async (req, res) => {
+// 修改启动流的路由
+router.post('/api/streams/:id/start', authMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { rtmpPush } = req.body;
+        
+        const result = await streamManager.startStreaming(id, rtmpPush);
+        if (!result.success) {
+            throw new Error(result.error);
+        }
+        
+        res.json({ success: true });
+    } catch (error) {
+        logger.error(`Error starting stream: ${id}`, error);
+        res.json({ 
+            success: false, 
+            error: error.message || '启动流失败'
+        });
+    }
+});
+
+// 修改自动启动配置的路由
+router.post('/api/streams/:id/auto-start', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
         const { autoStart } = req.body;

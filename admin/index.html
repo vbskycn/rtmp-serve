@@ -1586,15 +1586,32 @@
                     body: JSON.stringify({ rtmpPush: true })
                 });
                 
+                // 检查响应类型
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    // 如果不是 JSON 响应，可能是会话过期
+                    if (response.status === 401) {
+                        alert('会话已过期，请重新登录');
+                        window.location.href = '/login.html';
+                        return;
+                    }
+                    throw new Error('服务器返回了非预期的响应类型');
+                }
+
                 const result = await response.json();
                 if (!result.success) {
-                    throw new Error(result.error);
+                    throw new Error(result.error || '启动推流失败');
                 }
                 
                 loadStreams(); // 刷新列表
             } catch (error) {
                 console.error('Error starting RTMP push:', error);
-                alert('启动推流失败: ' + error.message);
+                if (error.message.includes('<!DOCTYPE')) {
+                    alert('会话已过期，请重新登录');
+                    window.location.href = '/login.html';
+                } else {
+                    alert('启动推流失败: ' + error.message);
+                }
             }
         }
 
@@ -1609,9 +1626,20 @@
                     body: JSON.stringify({ autoStart: enable })
                 });
                 
+                // 检查响应类型
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    if (response.status === 401) {
+                        alert('会话已过期，请重新登录');
+                        window.location.href = '/login.html';
+                        return;
+                    }
+                    throw new Error('服务器返回了非预期的响应类型');
+                }
+
                 const result = await response.json();
                 if (!result.success) {
-                    throw new Error(result.error);
+                    throw new Error(result.error || '设置自动启动失败');
                 }
                 
                 // 如果开启自启,立即启动推流
@@ -1622,7 +1650,12 @@
                 loadStreams(); // 刷新列表
             } catch (error) {
                 console.error('Error toggling auto-start:', error);
-                alert('设置自动启动失败: ' + error.message);
+                if (error.message.includes('<!DOCTYPE')) {
+                    alert('会话已过期，请重新登录');
+                    window.location.href = '/login.html';
+                } else {
+                    alert('设置自动启动失败: ' + error.message);
+                }
             }
         }
     </script>

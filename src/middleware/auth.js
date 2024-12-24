@@ -64,65 +64,32 @@ async function updatePassword(username, newPassword) {
 }
 
 // 认证中间件
-function authMiddleware(req, res, next) {
-    // 允许访问的公共路径
-    const publicPaths = [
-        '/login.html',
-        '/api/login',
-        '/play',
-        '/streams',
-        '/favicon.ico',
-        '/api/heartbeat'
-    ];
-
-    // 检查是否是公共路径
+const authMiddleware = (req, res, next) => {
+    // 跳过对登录和公共路由的认证
+    const publicPaths = ['/login', '/api/login', '/play', '/streams'];
     if (publicPaths.some(path => req.path.startsWith(path))) {
         return next();
     }
 
-    // 允许访问静态资源
-    if (req.path.match(/\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$/)) {
-        return next();
-    }
-
     const token = req.cookies.token;
-    
-    // 如果是访问管理页面且未登录，重定向到登录页
-    if (req.path === '/' || req.path === '/index.html') {
-        if (!token) {
-            return res.redirect('/login.html');
-        }
-        try {
-            jwt.verify(token, JWT_SECRET);
-            return next();
-        } catch (err) {
-            return res.redirect('/login.html');
-        }
+    if (!token) {
+        return res.status(401).json({
+            success: false,
+            error: 'Unauthorized: No token provided'
+        });
     }
 
-    // API接口的认证处理
-    if (req.path.startsWith('/api/')) {
-        if (!token) {
-            return res.status(401).json({ 
-                success: false, 
-                message: '未登录或登录已过期，请重新登录' 
-            });
-        }
-        try {
-            const decoded = jwt.verify(token, JWT_SECRET);
-            req.user = decoded;
-            return next();
-        } catch (err) {
-            return res.status(401).json({ 
-                success: false, 
-                message: '登录已过期，请重新登录' 
-            });
-        }
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = decoded;
+        next();
+    } catch (error) {
+        return res.status(401).json({
+            success: false,
+            error: 'Unauthorized: Invalid token'
+        });
     }
-
-    // 其他路径放行
-    next();
-}
+};
 
 // 添加 verifyToken 中间件
 const verifyToken = (req, res, next) => {
