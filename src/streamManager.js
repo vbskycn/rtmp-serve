@@ -323,29 +323,31 @@ class StreamManager extends EventEmitter {
             const status = this.streamStatus.get(streamId) || 'stopped';
             const isInvalid = this.streamRetries.get(streamId) >= 3;
 
-            // 检查进程是否真的在运行
+            // 检查进程是否真的在运行，并且没有错误
             let isProcessRunning = false;
+            let hasErrors = false;
             if (processInfo && processInfo.ffmpeg) {
                 try {
-                    // 发送空信号测试进程是否响应
                     process.kill(processInfo.ffmpeg.pid, 0);
                     isProcessRunning = true;
+                    // 检查最近的错误
+                    hasErrors = processInfo.errorCount > 0 || status === 'error';
                 } catch (e) {
-                    // 如果进程不存在，会抛出错误
                     isProcessRunning = false;
-                    // 清理无效的进程引用
                     this.streamProcesses.delete(streamId);
+                    this.streamStatus.set(streamId, 'stopped');
                 }
             }
 
             return {
                 ...stream,
-                processRunning: isProcessRunning,
+                processRunning: isProcessRunning && !hasErrors,
                 manuallyStarted: this.manuallyStartedStreams.has(streamId),
                 autoStart: this.autoStartStreams.has(streamId),
                 autoPlay: this.autoPlayStreams.has(streamId),
                 stats: stats || {},
                 status: isInvalid ? 'invalid' : 
+                       hasErrors ? 'error' :
                        isProcessRunning ? status : 'stopped',
                 invalid: isInvalid
             };
@@ -443,6 +445,8 @@ class StreamManager extends EventEmitter {
                     let ffmpegError = '';
                     let hasStarted = false;
                     let errorOccurred = false;
+                    let consecutiveErrors = 0;
+                    const MAX_CONSECUTIVE_ERRORS = 3;
 
                     ffmpeg.stderr.on('data', (data) => {
                         const message = data.toString();
@@ -451,13 +455,26 @@ class StreamManager extends EventEmitter {
                             message.includes('Invalid')) {
                             logger.error(`FFmpeg stderr: ${message}`);
                             ffmpegError += message;
-                            errorOccurred = true;
+                            consecutiveErrors++;
+                            
+                            // 如果连续错误超过阈值，标记为错误状态
+                            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                                errorOccurred = true;
+                                this.streamStatus.set(streamId, 'error');
+                                this.streamProcesses.delete(streamId);
+                                ffmpeg.kill('SIGTERM');
+                            }
+                        } else {
+                            // 重置连续错误计数
+                            consecutiveErrors = 0;
                         }
                     });
 
                     ffmpeg.on('error', (error) => {
                         logger.error(`FFmpeg spawn error for stream ${streamId}:`, error);
                         errorOccurred = true;
+                        this.streamStatus.set(streamId, 'error');
+                        this.streamProcesses.delete(streamId);
                         reject(error);
                     });
 
@@ -468,8 +485,8 @@ class StreamManager extends EventEmitter {
                             if (ffmpegError) {
                                 logger.error(`FFmpeg stderr: ${ffmpegError}`);
                             }
-                            // 更新流状态为停止
-                            this.streamStatus.set(streamId, 'stopped');
+                            // 更新流状态为错误
+                            this.streamStatus.set(streamId, 'error');
                             this.streamProcesses.delete(streamId);
                             reject(error);
                         } else if (hasStarted) {
@@ -481,25 +498,35 @@ class StreamManager extends EventEmitter {
                     this.streamProcesses.set(streamId, {
                         ffmpeg,
                         startTime: new Date(),
-                        isManualStart: isRtmpPush
+                        isManualStart: isRtmpPush,
+                        lastError: null,
+                        errorCount: 0
                     });
 
                     // 等待流启动，同时检查是否有错误
                     setTimeout(() => {
                         if (!errorOccurred) {
                             hasStarted = true;
-                            this.streamStatus.set(streamId, 'running');
-                            resolve({ success: true });
+                            // 只有在没有错误的情况下才设置为运行状态
+                            if (consecutiveErrors === 0) {
+                                this.streamStatus.set(streamId, 'running');
+                                resolve({ success: true });
+                            } else {
+                                this.streamStatus.set(streamId, 'error');
+                                reject(new Error('Stream started with errors'));
+                            }
                         }
                     }, 3000);
 
                 } catch (error) {
                     logger.error(`Error in startStreamingWithFFmpeg for stream ${streamId}:`, error);
+                    this.streamStatus.set(streamId, 'error');
                     reject(error);
                 }
             });
         } catch (error) {
             logger.error(`Error setting up FFmpeg for stream ${streamId}:`, error);
+            this.streamStatus.set(streamId, 'error');
             throw error;
         }
     }
