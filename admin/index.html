@@ -185,6 +185,12 @@
                         <button onclick="exportSourceUrls()" class="btn btn-light btn-sm">
                             <i class="fa fa-download"></i> 导出源地址
                         </button>
+                        <button onclick="batchAutoConfig('autoPlay', true)" class="btn btn-primary btn-sm">
+                            批量开启自动启停
+                        </button>
+                        <button onclick="batchAutoConfig('autoStart', true)" class="btn btn-primary btn-sm">
+                            批量开启自动启动
+                        </button>
                     </div>
                 </div>
                 <div class="card-body">
@@ -197,6 +203,7 @@
                                     </th>
                                     <th class="name-column">名称</th>
                                     <th class="status-column">状态</th>
+                                    <th class="auto-column">自动配置</th>
                                     <th class="rtmp-status-column">推流状态</th>
                                     <th class="source-column">源地址</th>
                                     <th class="play-column">播放地址</th>
@@ -280,7 +287,7 @@
                     });
                 }
 
-                // 只有在流的数量或顺序发���变化时才完全重新渲染
+                // 只有在流的数量或顺序发生变化时才完全重新渲染
                 const currentStreamIds = Array.from(tbody.querySelectorAll('tr[data-stream-id]'))
                     .map(row => row.dataset.streamId);
                 const newStreamIds = streams.map(stream => stream.id);
@@ -401,6 +408,20 @@
                                 <span class="status ${statusClass}" style="${statusStyle}">
                                     ${statusText}
                                 </span>
+                            </td>
+                            <td>
+                                <div class="form-check form-check-inline">
+                                    <input type="checkbox" class="form-check-input" 
+                                           onchange="updateAutoConfig('${stream.id}', 'autoPlay', this.checked)"
+                                           ${stream.autoPlay ? 'checked' : ''}>
+                                    <label class="form-check-label">自动启停</label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input type="checkbox" class="form-check-input"
+                                           onchange="updateAutoConfig('${stream.id}', 'autoStart', this.checked)"
+                                           ${stream.autoStart ? 'checked' : ''}>
+                                    <label class="form-check-label">自动启动</label>
+                                </div>
                             </td>
                             <td>
                                 <span class="status" style="${rtmpStatusStyle}">
@@ -1451,6 +1472,118 @@
             } catch (error) {
                 console.error('Logout error:', error);
             }
+        }
+
+        async function updateAutoConfig(streamId, type, value) {
+            try {
+                const response = await fetch(`/api/streams/${streamId}/auto-config`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        [type]: value
+                    })
+                });
+                
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error);
+                }
+                
+                loadStreams(); // 刷新列表
+            } catch (error) {
+                console.error('Error updating auto config:', error);
+                alert('更新自动配置失败: ' + error.message);
+            }
+        }
+
+        async function batchAutoConfig(type, value) {
+            const selectedStreams = getSelectedStreams();
+            if (!selectedStreams.length) {
+                alert('请先选择要操作的流');
+                return;
+            }
+            
+            // 显示进度模态框
+            const modal = showProgressModal('批量设置自动配置');
+            
+            try {
+                const response = await fetch('/api/streams/batch-auto-config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        streamIds: selectedStreams,
+                        [type]: value
+                    })
+                });
+                
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error);
+                }
+                
+                // 更新进度显示
+                updateProgressModal(modal, {
+                    success: result.stats.success,
+                    retrying: result.stats.retrying,
+                    total: result.stats.total
+                });
+                
+                // 3秒后关闭进度模态框
+                setTimeout(() => {
+                    modal.remove();
+                    loadStreams(); // 刷新列表
+                }, 3000);
+                
+            } catch (error) {
+                console.error('Error in batch auto config:', error);
+                alert('批量设置失败: ' + error.message);
+                modal.remove();
+            }
+        }
+
+        // 显示进度模态框的函数
+        function showProgressModal(title) {
+            const modal = document.createElement('div');
+            modal.className = 'modal fade show';
+            modal.style.display = 'block';
+            modal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+            modal.innerHTML = `
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">${title}</h5>
+                        </div>
+                        <div class="modal-body">
+                            <div class="progress mb-3">
+                                <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <div id="progressStats"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            return modal;
+        }
+
+        // 更新进度模态框的函数
+        function updateProgressModal(modal, stats) {
+            const { success, retrying, total } = stats;
+            const progress = ((success + retrying) / total * 100).toFixed(1);
+            
+            const progressBar = modal.querySelector('.progress-bar');
+            progressBar.style.width = `${progress}%`;
+            
+            const statsDiv = modal.querySelector('#progressStats');
+            statsDiv.innerHTML = `
+                <div>总数: ${total}</div>
+                <div class="text-success">成功: ${success}</div>
+                <div class="text-warning">重试中: ${retrying}</div>
+            `;
         }
     </script>
 

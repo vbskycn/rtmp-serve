@@ -561,4 +561,102 @@ router.get('/api/servers', verifyToken, (req, res) => {
     }
 });
 
+// 添加新的路由处理自动配置
+router.post('/api/streams/:id/auto-config', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { autoPlay, autoStart } = req.body;
+        
+        if (autoPlay !== undefined) {
+            if (autoPlay) {
+                streamManager.autoPlayStreams.add(id);
+            } else {
+                streamManager.autoPlayStreams.delete(id);
+            }
+        }
+        
+        if (autoStart !== undefined) {
+            if (autoStart) {
+                streamManager.autoStartStreams.add(id);
+                // 如果开启自动启动，立即启动流
+                await streamManager.startStreaming(id, true);
+            } else {
+                streamManager.autoStartStreams.delete(id);
+                // 如果关闭自动启动，停止流
+                await streamManager.stopStreaming(id);
+            }
+        }
+        
+        // 保存配置
+        await streamManager.saveAutoConfig();
+        
+        res.json({ success: true });
+    } catch (error) {
+        logger.error('Error updating auto config:', error);
+        res.json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// 添加批量设置自动配置的路由
+router.post('/api/streams/batch-auto-config', async (req, res) => {
+    try {
+        const { streamIds, autoPlay, autoStart } = req.body;
+        let success = 0;
+        let retrying = 0;
+        
+        for (const streamId of streamIds) {
+            try {
+                if (autoPlay !== undefined) {
+                    if (autoPlay) {
+                        streamManager.autoPlayStreams.add(streamId);
+                    } else {
+                        streamManager.autoPlayStreams.delete(streamId);
+                    }
+                }
+                
+                if (autoStart !== undefined) {
+                    if (autoStart) {
+                        streamManager.autoStartStreams.add(streamId);
+                        await streamManager.startStreaming(streamId, true);
+                        
+                        // 检查状态
+                        const status = streamManager.streamStatus.get(streamId);
+                        if (status === 'running') {
+                            success++;
+                        } else if (status === 'retrying') {
+                            retrying++;
+                        }
+                    } else {
+                        streamManager.autoStartStreams.delete(streamId);
+                        await streamManager.stopStreaming(streamId);
+                    }
+                }
+            } catch (error) {
+                logger.error(`Error processing stream ${streamId}:`, error);
+            }
+        }
+        
+        // 保存配置
+        await streamManager.saveAutoConfig();
+        
+        res.json({
+            success: true,
+            stats: {
+                total: streamIds.length,
+                success,
+                retrying
+            }
+        });
+    } catch (error) {
+        logger.error('Error in batch auto config:', error);
+        res.json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 module.exports = router; 

@@ -21,6 +21,10 @@ class StreamManager extends EventEmitter {
         this.autoStopTimers = new Map();
         this.manuallyStartedStreams = new Set();
         this.config = config;  // 保存配置引用
+        this.autoPlayStreams = new Set(); // 存储自动启停的流ID
+        this.autoStartStreams = new Set(); // 存储自动启动的流ID
+        this.streamRetries = new Map(); // 存储流的重试次数
+        this.streamStatus = new Map(); // 存储流的状态
         
         // 修改配置加载逻辑
         try {
@@ -109,6 +113,14 @@ class StreamManager extends EventEmitter {
         logger.info('Environment version:', process.env.APP_VERSION);
         logger.info('Config file version:', require('../config/config.json').version);
         logger.info('Final config version:', this.config.version);
+
+        // 加载保存的自动配置
+        this.loadAutoConfig();
+        
+        // 如果是自动启动的流，在服务器启动时就开始
+        setTimeout(() => {
+            this.startAutoStartStreams();
+        }, 5000); // 延迟5秒启动，等待系统初始化
     }
 
     // 加载保存的流配置
@@ -317,54 +329,45 @@ class StreamManager extends EventEmitter {
                 throw new Error('Stream not found');
             }
 
+            // 更新流状态
+            this.streamStatus.set(streamId, 'starting');
+            this.emit('streamStatusChanged', streamId, 'starting');
+
             // 如果是手动启动，记录到集合中
             if (isManualStart) {
                 this.manuallyStartedStreams.add(streamId);
-                logger.info(`Stream ${streamId} marked as manually started`);
             }
 
-            // 初始化统计信息
-            const stats = this.streamStats.get(streamId);
-            if (stats) {
-                stats.startTime = new Date();
-                stats.uptime = 0;
-                stats.errors = 0;
-            }
-
-            // 获取统计信息引用
-            const configStats = stream.stats;
-            
-            // 更新统计信息
-            const now = new Date();
-            if (stats) {
-                stats.startTime = now;
-                stats.errors = 0;
-            }
-            if (configStats) {
-                configStats.startTime = now;
-                configStats.errors = 0;
-            }
-
-            // 使用 FFmpeg 处理流
             await this.startStreamingWithFFmpeg(streamId, stream, isManualStart);
+            
+            // 更新状态为运行中
+            this.streamStatus.set(streamId, 'running');
+            this.emit('streamStatusChanged', streamId, 'running');
+            
+            // 重置重试次数
+            this.streamRetries.delete(streamId);
 
         } catch (error) {
-            logger.error(`Error starting stream: ${streamId}`, { 
-                error: error.message,
-                stack: error.stack 
-            });
-            
-            // 更新错误统计
-            const stats = this.streamStats.get(streamId);
-            if (stats) {
-                stats.errors++;
+            // 处理启动失败
+            const retryCount = (this.streamRetries.get(streamId) || 0) + 1;
+            this.streamRetries.set(streamId, retryCount);
+
+            if (retryCount >= 3) {
+                // 标记为失效
+                this.streamStatus.set(streamId, 'invalid');
+                this.emit('streamStatusChanged', streamId, 'invalid');
+                logger.error(`Stream ${streamId} marked as invalid after 3 retries`);
+            } else {
+                // 标记为重试中
+                this.streamStatus.set(streamId, 'retrying');
+                this.emit('streamStatusChanged', streamId, 'retrying');
+                
+                // 1分钟后重试
+                setTimeout(() => {
+                    this.startStreaming(streamId, isManualStart);
+                }, 60000);
             }
-            
-            if (configStats) {
-                configStats.errors++;
-                configStats.startTime = null;
-            }
-            
+
             throw error;
         }
     }
@@ -931,18 +934,17 @@ class StreamManager extends EventEmitter {
         if (count > 0) {
             this.activeViewers.set(streamId, count - 1);
             
-            // 只有不是手动启动的才置自动停止定时器
-            if (count - 1 === 0 && !this.manuallyStartedStreams.has(streamId)) {
-                logger.debug(`No viewers left for auto-started stream ${streamId}, starting auto-stop timer`);
+            // 如果是自动启停的流且没有观看者，1分钟后停止
+            if (count - 1 === 0 && 
+                this.autoPlayStreams.has(streamId) && 
+                !this.manuallyStartedStreams.has(streamId)) {
+                
                 const timer = setTimeout(async () => {
-                    // 再次检查是否还有观看者
                     const currentCount = this.activeViewers.get(streamId) || 0;
                     if (currentCount === 0) {
-                        logger.info(`Auto-stopping inactive stream: ${streamId}`);
                         await this.stopStreaming(streamId);
-                        this.autoStopTimers.delete(streamId);
                     }
-                }, 3 * 60 * 1000); // 3分钟后自动停止
+                }, 60000); // 1分钟后停止
                 
                 this.autoStopTimers.set(streamId, timer);
             }
@@ -1256,6 +1258,47 @@ class StreamManager extends EventEmitter {
         } catch (error) {
             logger.error('Error getting server IP:', error);
             return 'unknown';
+        }
+    }
+
+    // 新增方法：加载自动配置
+    loadAutoConfig() {
+        try {
+            const autoConfigPath = path.join(__dirname, '../config/auto_config.json');
+            if (fs.existsSync(autoConfigPath)) {
+                const data = JSON.parse(fs.readFileSync(autoConfigPath, 'utf8'));
+                this.autoPlayStreams = new Set(data.autoPlay || []);
+                this.autoStartStreams = new Set(data.autoStart || []);
+            }
+        } catch (error) {
+            logger.error('Error loading auto config:', error);
+        }
+    }
+
+    // 新增方法：保存自动配置
+    async saveAutoConfig() {
+        try {
+            const autoConfigPath = path.join(__dirname, '../config/auto_config.json');
+            const data = {
+                autoPlay: Array.from(this.autoPlayStreams),
+                autoStart: Array.from(this.autoStartStreams)
+            };
+            await fs.promises.writeFile(autoConfigPath, JSON.stringify(data, null, 2));
+        } catch (error) {
+            logger.error('Error saving auto config:', error);
+        }
+    }
+
+    // 新增方法：启动所有自动启动的流
+    async startAutoStartStreams() {
+        for (const streamId of this.autoStartStreams) {
+            try {
+                if (!this.streamProcesses.has(streamId)) {
+                    await this.startStreaming(streamId, true);
+                }
+            } catch (error) {
+                logger.error(`Error auto-starting stream ${streamId}:`, error);
+            }
         }
     }
 }
