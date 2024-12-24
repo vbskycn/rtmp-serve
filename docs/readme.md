@@ -46,6 +46,7 @@ docker run -d \
   -v $(pwd)/streams:/app/streams \
   -v $(pwd)/logs:/app/logs \
   -e NODE_ENV=production \
+  -e SERVER_HOST=your.server.ip \
   -e TZ=Asia/Shanghai \
   zhoujie218/rtmp-serve:latest
 
@@ -55,6 +56,7 @@ docker run -d \
   --restart unless-stopped \
   -p 3000:3000 \
   -e NODE_ENV=production \
+  -e SERVER_HOST=your.server.ip \
   -e TZ=Asia/Shanghai \
   zhoujie218/rtmp-serve:latest
   
@@ -64,6 +66,7 @@ docker run -d \
   --restart unless-stopped \
   -p 3009:3000 \
   -e NODE_ENV=production \
+  -e SERVER_HOST=your.server.ip \
   -e TZ=Asia/Shanghai \
   zhoujie218/rtmp-serve:latest
   
