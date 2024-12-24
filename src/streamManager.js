@@ -46,6 +46,11 @@ class StreamManager extends EventEmitter {
             sent: 0,
             lastUpdate: Date.now()
         };
+
+        // 添加重试相关的配置
+        this.MAX_RETRIES = 3;        // 最大重试次数
+        this.RETRY_DELAY = 3000;     // 重试间隔（毫秒）
+        this.retryAttempts = new Map(); // 记录每个流的重试次数
     }
 
     // 加载配置
@@ -409,6 +414,18 @@ class StreamManager extends EventEmitter {
     // 添加启动FFmpeg的方法
     async startStreamingWithFFmpeg(streamId, streamConfig, isRtmpPush = false) {
         try {
+            // 检查重试次数
+            const attempts = this.retryAttempts.get(streamId) || 0;
+            if (attempts >= this.MAX_RETRIES) {
+                logger.error(`Stream ${streamId} marked as invalid after ${attempts} retries`);
+                this.streamStatus.set(streamId, 'invalid');
+                this.retryAttempts.delete(streamId);
+                throw new Error(`Stream failed after ${attempts} retries`);
+            }
+
+            // 更新重试计数
+            this.retryAttempts.set(streamId, attempts + 1);
+
             // 确保输出目录存在
             const outputPath = path.join(__dirname, '../streams', streamId);
             if (!fs.existsSync(outputPath)) {
@@ -446,7 +463,6 @@ class StreamManager extends EventEmitter {
                     let hasStarted = false;
                     let errorOccurred = false;
                     let consecutiveErrors = 0;
-                    const MAX_CONSECUTIVE_ERRORS = 3;
 
                     ffmpeg.stderr.on('data', (data) => {
                         const message = data.toString();
@@ -457,16 +473,41 @@ class StreamManager extends EventEmitter {
                             ffmpegError += message;
                             consecutiveErrors++;
                             
-                            // 如果连续错误超过阈值，标记为错误状态
-                            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                                errorOccurred = true;
-                                this.streamStatus.set(streamId, 'error');
-                                this.streamProcesses.delete(streamId);
-                                ffmpeg.kill('SIGTERM');
+                            // 特别处理 HLS 分片错误
+                            if (message.includes('Failed to open segment') || 
+                                message.includes('HTTP error 404')) {
+                                // 如果连续3次无法获取分片，认为源地址已失效
+                                if (consecutiveErrors >= 3) {
+                                    logger.error(`Stream ${streamId} failed to access HLS segments after ${consecutiveErrors} attempts`);
+                                    errorOccurred = true;
+                                    this.streamStatus.set(streamId, 'error');
+                                    ffmpeg.kill('SIGTERM');
+                                    
+                                    // 如果未达到最大重试次数，尝试重试
+                                    if (this.retryAttempts.get(streamId) < this.MAX_RETRIES) {
+                                        logger.info(`Retrying stream ${streamId} in ${this.RETRY_DELAY}ms...`);
+                                        setTimeout(() => {
+                                            this.startStreaming(streamId, isRtmpPush)
+                                                .catch(error => {
+                                                    logger.error(`Error in retry for stream ${streamId}:`, error);
+                                                    // 如果重试也失败，标记为无效
+                                                    if (this.retryAttempts.get(streamId) >= this.MAX_RETRIES) {
+                                                        logger.error(`Stream ${streamId} marked as invalid after ${this.MAX_RETRIES} retries`);
+                                                        this.streamStatus.set(streamId, 'invalid');
+                                                        this.retryAttempts.delete(streamId);
+                                                    }
+                                                });
+                                        }, this.RETRY_DELAY);
+                                    } else {
+                                        logger.error(`Stream ${streamId} marked as invalid after ${this.MAX_RETRIES} retries`);
+                                        this.streamStatus.set(streamId, 'invalid');
+                                        this.retryAttempts.delete(streamId);
+                                    }
+                                }
+                            } else {
+                                // 如果收到正常的输出，重置连续错误计数
+                                consecutiveErrors = 0;
                             }
-                        } else {
-                            // 重置连续错误计数
-                            consecutiveErrors = 0;
                         }
                     });
 
@@ -474,7 +515,6 @@ class StreamManager extends EventEmitter {
                         logger.error(`FFmpeg spawn error for stream ${streamId}:`, error);
                         errorOccurred = true;
                         this.streamStatus.set(streamId, 'error');
-                        this.streamProcesses.delete(streamId);
                         reject(error);
                     });
 
@@ -485,9 +525,19 @@ class StreamManager extends EventEmitter {
                             if (ffmpegError) {
                                 logger.error(`FFmpeg stderr: ${ffmpegError}`);
                             }
-                            // 更新流状态为错误
-                            this.streamStatus.set(streamId, 'error');
-                            this.streamProcesses.delete(streamId);
+                            
+                            // 如果不是手动停止，且未达到最大重试次数，则尝试重试
+                            if (signal !== 'SIGTERM' && this.retryAttempts.get(streamId) < this.MAX_RETRIES) {
+                                setTimeout(() => {
+                                    this.startStreaming(streamId, isRtmpPush)
+                                        .catch(error => {
+                                            logger.error(`Error in retry for stream ${streamId}:`, error);
+                                        });
+                                }, this.RETRY_DELAY);
+                            } else {
+                                this.streamStatus.set(streamId, 'invalid');
+                                this.streamProcesses.delete(streamId);
+                            }
                             reject(error);
                         } else if (hasStarted) {
                             resolve({ success: true });
@@ -499,34 +549,27 @@ class StreamManager extends EventEmitter {
                         ffmpeg,
                         startTime: new Date(),
                         isManualStart: isRtmpPush,
-                        lastError: null,
-                        errorCount: 0
+                        retryCount: this.retryAttempts.get(streamId)
                     });
 
-                    // 等待流启动，同时检查是否有错误
+                    // 等待流启动
                     setTimeout(() => {
                         if (!errorOccurred) {
                             hasStarted = true;
-                            // 只有在没有错误的情况下才设置为运行状态
-                            if (consecutiveErrors === 0) {
-                                this.streamStatus.set(streamId, 'running');
-                                resolve({ success: true });
-                            } else {
-                                this.streamStatus.set(streamId, 'error');
-                                reject(new Error('Stream started with errors'));
-                            }
+                            // 重置重试计数
+                            this.retryAttempts.delete(streamId);
+                            this.streamStatus.set(streamId, 'running');
+                            resolve({ success: true });
                         }
                     }, 3000);
 
                 } catch (error) {
                     logger.error(`Error in startStreamingWithFFmpeg for stream ${streamId}:`, error);
-                    this.streamStatus.set(streamId, 'error');
                     reject(error);
                 }
             });
         } catch (error) {
             logger.error(`Error setting up FFmpeg for stream ${streamId}:`, error);
-            this.streamStatus.set(streamId, 'error');
             throw error;
         }
     }
