@@ -492,14 +492,6 @@
                             statusStyle = 'background-color: #6c757d;';  // 灰色
                         }
 
-                        // 添加状态样式
-                        const statusStyle = stream.invalid ? 'background-color: #dc3545;' :
-                                          (statusClass === 'active' ? 'background-color: #28a745;' : 'background-color: #6c757d;');
-
-                        // 添加推流状态样式
-                        const rtmpStatusStyle = isManuallyStarted ? 'background-color: #28a745;' : 'background-color: #6c757d;';
-                        const rtmpStatusText = isManuallyStarted ? '推流中' : '未推流';
-
                         tr.innerHTML = `
                             <td>
                                 <input type="checkbox" class="stream-checkbox" value="${stream.id}" onchange="updateBatchButtons()">
@@ -1741,7 +1733,7 @@
             }
         }
 
-        // 添加切换自动启动的函数
+        // ���加切���自动启动的函数
         async function toggleAutoStart(streamId, enable) {
             try {
                 // 1. 设置自动启动状态
