@@ -131,6 +131,132 @@ class StreamManager extends EventEmitter {
             this.createDefaultAutoConfig(path.join(__dirname, '../config/auto_config.json'));
         }
     }
+
+    // 添加 loadStreams 方法
+    loadStreams() {
+        try {
+            if (fs.existsSync(this.configPath)) {
+                const data = JSON.parse(fs.readFileSync(this.configPath, 'utf8'));
+                if (Array.isArray(data)) {
+                    data.forEach(stream => {
+                        if (stream.id) {
+                            this.streams.set(stream.id, stream);
+                        }
+                    });
+                }
+                logger.info(`Loaded ${this.streams.size} streams from config`);
+            } else {
+                // 如果配置文件不存在，创建一个空的配置文件
+                fs.writeFileSync(this.configPath, JSON.stringify([], null, 2));
+                logger.info('Created empty streams config file');
+            }
+        } catch (error) {
+            logger.error('Error loading streams:', error);
+            // 如果加载失败，确保 streams 是空的 Map
+            this.streams = new Map();
+        }
+    }
+
+    // 添加保存流配置的方法
+    async saveStreams() {
+        try {
+            const streamsArray = Array.from(this.streams.values());
+            await fs.promises.writeFile(this.configPath, JSON.stringify(streamsArray, null, 2));
+            logger.info(`Saved ${streamsArray.length} streams to config`);
+            return true;
+        } catch (error) {
+            logger.error('Error saving streams:', error);
+            return false;
+        }
+    }
+
+    // 添加更新流配置的方法
+    async updateStream(streamId, streamData) {
+        try {
+            const existingStream = this.streams.get(streamId);
+            if (!existingStream) {
+                throw new Error('Stream not found');
+            }
+
+            // 更新流配置
+            const updatedStream = {
+                ...existingStream,
+                ...streamData,
+                id: streamId // 确保 ID 不变
+            };
+
+            this.streams.set(streamId, updatedStream);
+            await this.saveStreams();
+
+            return {
+                success: true,
+                stream: updatedStream
+            };
+        } catch (error) {
+            logger.error(`Error updating stream ${streamId}:`, error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    // 添加流的方法
+    async addStream(streamData) {
+        try {
+            if (this.streams.has(streamData.id)) {
+                throw new Error('Stream ID already exists');
+            }
+
+            this.streams.set(streamData.id, streamData);
+            await this.saveStreams();
+
+            return {
+                success: true,
+                streamId: streamData.id
+            };
+        } catch (error) {
+            logger.error('Error adding stream:', error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    // 添加删除流的方法
+    async deleteStream(streamId) {
+        try {
+            // 先停止流（如果正在运行）
+            await this.stopStreaming(streamId);
+
+            // 从所有集合中移除
+            this.streams.delete(streamId);
+            this.autoPlayStreams.delete(streamId);
+            this.autoStartStreams.delete(streamId);
+            this.manuallyStartedStreams.delete(streamId);
+            this.streamStatus.delete(streamId);
+            this.streamRetries.delete(streamId);
+
+            // 保存配置
+            await this.saveStreams();
+            await this.saveAutoConfig();
+
+            // 清理流的目录
+            const streamDir = path.join(__dirname, '../streams', streamId);
+            if (fs.existsSync(streamDir)) {
+                fs.rmSync(streamDir, { recursive: true, force: true });
+            }
+
+            return { success: true };
+        } catch (error) {
+            logger.error(`Error deleting stream ${streamId}:`, error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
 }
 
 module.exports = { StreamManager }; 
