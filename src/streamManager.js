@@ -848,7 +848,7 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 添加标记流为失效��方法
+    // 添加标记流为失效的方法
     async markStreamAsInvalid(streamId) {
         const stream = this.streams.get(streamId);
         if (stream) {
@@ -1229,12 +1229,49 @@ class StreamManager extends EventEmitter {
         try {
             const autoConfigPath = path.join(__dirname, '../config/auto_config.json');
             if (fs.existsSync(autoConfigPath)) {
-                const data = JSON.parse(fs.readFileSync(autoConfigPath, 'utf8'));
-                this.autoPlayStreams = new Set(data.autoPlay || []);
-                this.autoStartStreams = new Set(data.autoStart || []);
+                const data = fs.readFileSync(autoConfigPath, 'utf8');
+                if (data.trim()) {  // 检查文件是否为空
+                    const config = JSON.parse(data);
+                    this.autoPlayStreams = new Set(config.autoPlay || []);
+                    this.autoStartStreams = new Set(config.autoStart || []);
+                } else {
+                    // 如果文件为空，创建默认配置
+                    this.createDefaultAutoConfig(autoConfigPath);
+                }
+            } else {
+                // 如果文件不存在，创建默认配置
+                this.createDefaultAutoConfig(autoConfigPath);
             }
         } catch (error) {
             logger.error('Error loading auto config:', error);
+            // 发生错误时创建默认配置
+            this.createDefaultAutoConfig(path.join(__dirname, '../config/auto_config.json'));
+        }
+    }
+
+    // 添加创建默认配置的方法
+    createDefaultAutoConfig(configPath) {
+        try {
+            const defaultConfig = {
+                autoPlay: [],
+                autoStart: []
+            };
+            
+            // 确保目录存在
+            const configDir = path.dirname(configPath);
+            if (!fs.existsSync(configDir)) {
+                fs.mkdirSync(configDir, { recursive: true });
+            }
+            
+            // 写入默认配置
+            fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
+            logger.info('Created default auto config file');
+            
+            // 初始化集合
+            this.autoPlayStreams = new Set();
+            this.autoStartStreams = new Set();
+        } catch (error) {
+            logger.error('Error creating default auto config:', error);
         }
     }
 

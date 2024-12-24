@@ -5,7 +5,7 @@ const logger = require('./utils/logger');
 const path = require('path');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
-const { verifyUser, updatePassword, JWT_SECRET, verifyToken } = require('./middleware/auth');
+const { verifyUser, updatePassword, JWT_SECRET, verifyToken, authMiddleware } = require('./middleware/auth');
 const config = require('../config/config.json');
 
 // 创建 StreamManager 实例
@@ -247,7 +247,7 @@ router.post('/api/streams/:id/updateId', async (req, res) => {
             streamManager.streamProcesses.delete(id);
         }
 
-        // 保存配���
+        // 保存配置
         await streamManager.saveStreams();
 
         res.json({ success: true });
