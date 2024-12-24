@@ -563,8 +563,8 @@ router.get('/api/servers', verifyToken, (req, res) => {
 
 // 修改启动流的路由
 router.post('/api/streams/:streamId/start', authMiddleware, async (req, res) => {
+    const { streamId } = req.params;
     try {
-        const { streamId } = req.params;
         const { rtmpPush } = req.body;
         
         const result = await streamManager.startStreaming(streamId, rtmpPush);
@@ -583,17 +583,17 @@ router.post('/api/streams/:streamId/start', authMiddleware, async (req, res) => 
 });
 
 // 修改自动启动配置的路由
-router.post('/api/streams/:id/auto-start', authMiddleware, async (req, res) => {
+router.post('/api/streams/:streamId/auto-start', authMiddleware, async (req, res) => {
+    const { streamId } = req.params;
     try {
-        const { id } = req.params;
         const { autoStart } = req.body;
         
         if (autoStart) {
-            streamManager.autoStartStreams.add(id);
+            streamManager.autoStartStreams.add(streamId);
         } else {
-            streamManager.autoStartStreams.delete(id);
+            streamManager.autoStartStreams.delete(streamId);
             // 如果关闭自动启动,停止流
-            await streamManager.stopStreaming(id);
+            await streamManager.stopStreaming(streamId);
         }
         
         // 保存配置
@@ -601,7 +601,7 @@ router.post('/api/streams/:id/auto-start', authMiddleware, async (req, res) => {
         
         res.json({ success: true });
     } catch (error) {
-        logger.error('Error updating auto-start config:', error);
+        logger.error(`Error updating auto-start config for stream: ${streamId}`, error);
         res.json({
             success: false,
             error: error.message

@@ -5,6 +5,7 @@ const logger = require('./utils/logger');
 const axios = require('axios');
 const EventEmitter = require('events');
 const config = require('../config/config.json');
+const { spawn } = require('child_process');
 
 class StreamManager extends EventEmitter {
     constructor() {
@@ -571,7 +572,7 @@ class StreamManager extends EventEmitter {
                 return;
             }
 
-            // 检查失��次数
+            // 检查失败次数
             const failureCount = this.failureCount.get(streamId) || 0;
             if (failureCount >= 3) {
                 logger.info(`Stream ${streamId} has failed too many times, marking as invalid`);
