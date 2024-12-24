@@ -367,6 +367,10 @@
                     statusClass = 'error';
                     statusText = '已失效';
                     statusStyle = 'background-color: #dc3545;';  // 红色
+                } else if (stream.status === 'error') {
+                    statusClass = 'error';
+                    statusText = '错误';
+                    statusStyle = 'background-color: #dc3545;';  // 红色
                 } else if (stream.processRunning && stream.status === 'running') {
                     statusClass = 'active';
                     statusText = '运行中';
@@ -381,15 +385,11 @@
             // 更新推流状态
             const rtmpStatusCell = row.querySelector('.rtmp-status');
             if (rtmpStatusCell) {
-                const isRtmpActive = stream.processRunning && 
-                                    stream.status === 'running' && 
-                                    stream.manuallyStarted;
-                
-                const rtmpStatusStyle = isRtmpActive ? 
+                const rtmpStatusStyle = stream.isRtmpActive ? 
                     'background-color: #28a745;' : 
                     'background-color: #6c757d;';
                 
-                const rtmpStatusText = isRtmpActive ? '推流中' : '未推流';
+                const rtmpStatusText = stream.isRtmpActive ? '推流中' : '未推流';
                 
                 rtmpStatusCell.style = rtmpStatusStyle;
                 rtmpStatusCell.textContent = rtmpStatusText;
@@ -724,7 +724,7 @@
             
             // 选择并复制
             input.select();
-            input.setSelectionRange(0, 99999); // 用于移动设备
+            input.setSelectionRange(0, 99999); // 用于��动设备
             
             try {
                 // 执行复制命令
@@ -739,7 +739,7 @@
                 setTimeout(() => toast.remove(), 2000);
             } catch (err) {
                 console.error('复制失败:', err);
-                alert('复制失败');
+                alert('复制��败');
             } finally {
                 // 移除临时输入框
                 document.body.removeChild(input);
@@ -1715,7 +1715,7 @@
 
                 const autoStartResult = await autoStartResponse.json();
                 if (!autoStartResult.success) {
-                    throw new Error(autoStartResult.error || '设��自动启动失败');
+                    throw new Error(autoStartResult.error || '设置自动启动失败');
                 }
 
                 // 2. 如果是开启自启动，还需要立即启动流
