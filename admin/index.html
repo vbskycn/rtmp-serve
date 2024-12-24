@@ -85,16 +85,65 @@
             font-size: 12px;
             display: inline-block;
             text-align: center;
-            min-width: 100px;  /* 调整最小宽度 */
+            min-width: 70px;  /* 减小最小宽度 */
         }
 
         .gap-2 {
-            gap: 0.5rem !important;
+            gap: 0.25rem !important;  /* 减小间距 */
         }
 
         /* 确保推流状态单元格内容垂直居中 */
         .table td {
             vertical-align: middle;
+        }
+
+        /* 调整状态标签的样式 */
+        .status {
+            padding: 2px 8px;
+            border-radius: 4px;
+            color: white;
+            font-size: 12px;
+            display: inline-block;
+            text-align: center;
+            min-width: 70px;  /* 减小最小宽度 */
+        }
+
+        /* 调整推流状态的显示 */
+        .d-flex.justify-content-between.gap-2 {
+            gap: 0.25rem !important;  /* 减小间距 */
+        }
+
+        /* 调整地址输入框的样式 */
+        .input-group-compact input.form-control {
+            font-size: 12px;  /* 稍微减小字体大小 */
+            padding: 4px 8px;  /* 减小内边距 */
+        }
+
+        /* 调整操作按钮组的样式 */
+        .stream-actions .btn-group .btn {
+            padding: 2px 8px;  /* 减小按钮内边距 */
+            font-size: 12px;   /* 减小按钮字体大小 */
+        }
+
+        /* 确保表格单元格内容不会换行 */
+        .table td {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* 源地址和播放地址的输入框容器样式 */
+        .input-group-compact {
+            width: 100%;
+            display: flex;
+        }
+
+        /* 调整复制和播放按钮的样式 */
+        .btn-outline-primary,
+        .btn-outline-success,
+        .btn-outline-secondary {
+            padding: 2px 8px;
+            font-size: 12px;
         }
     </style>
 </head>
@@ -284,15 +333,15 @@
                         <table class="table table-hover">
                             <thead>
                                 <tr>
-                                    <th class="check-column">
+                                    <th class="check-column" style="width: 3%">  <!-- 复选框列 -->
                                         <input type="checkbox" id="selectAll" onclick="toggleSelectAll()">
                                     </th>
-                                    <th style="width: 12%">名称</th>
-                                    <th style="width: 5%">状态</th>
-                                    <th style="width: 12%">推流状态</th>
-                                    <th style="width: 18%">源地址</th>
-                                    <th style="width: 23%">播放地址</th>
-                                    <th style="width: 30%">操作</th>
+                                    <th style="width: 15%">名称</th>            <!-- 增加名称列宽度 -->
+                                    <th style="width: 8%">状态</th>             <!-- 调整状态列宽度 -->
+                                    <th style="width: 15%">推流状态</th>        <!-- 调整推流状态列宽度 -->
+                                    <th style="width: 20%">源地址</th>          <!-- 调整源地址列宽度 -->
+                                    <th style="width: 20%">播放地址</th>        <!-- 调整播放地址列宽度 -->
+                                    <th style="width: 19%">操作</th>            <!-- 调整操作列宽度 -->
                                 </tr>
                             </thead>
                             <tbody id="streamTable"></tbody>
