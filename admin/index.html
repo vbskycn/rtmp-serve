@@ -436,15 +436,15 @@
                         <table class="table table-hover">
                             <thead>
                                 <tr>
-                                    <th class="check-column" style="width: 3%">  <!-- 复选框列 -->
+                                    <th class="check-column" style="width: 3%">
                                         <input type="checkbox" id="selectAll" onclick="toggleSelectAll()">
                                     </th>
                                     <th style="width: 10%">名称</th>            <!-- 增加名称列宽度 -->
                                     <th style="width: 7%">状态</th>             <!-- 调整状态列宽度 -->
                                     <th style="width: 16%">推流状态</th>        <!-- 调整推流状态列宽度 -->
-                                    <th style="width: 18%">源地址</th>          <!-- 调整源地址列宽度 -->
+                                    <th style="width: 14%">源地址</th>          <!-- 调整源地址列宽度 -->
                                     <th style="width: 22%">播放地址</th>        <!-- 调整播放地址列宽度 -->
-                                    <th style="width: 24%">操作</th>            <!-- 调整操作列宽度 -->
+                                    <th style="width: 28%">操作</th>            <!-- 调整操作列宽度 -->
                                 </tr>
                             </thead>
                             <tbody id="streamTable"></tbody>
@@ -651,7 +651,9 @@
 
                         tr.innerHTML = `
                             <td>
-                                <input type="checkbox" class="stream-checkbox" value="${stream.id}" onchange="updateBatchButtons()">
+                                <input type="checkbox" class="stream-checkbox" value="${stream.id}" 
+                                       onchange="updateBatchButtons()" 
+                                       ${document.getElementById('selectAll').checked ? 'checked' : ''}>
                             </td>
                             <td>
                                 <div class="d-flex align-items-center">
@@ -1006,12 +1008,17 @@
             }
         });
 
-        // 选/取消全选
-        function toggleSelectAll(checkbox) {
+        // 修改 toggleSelectAll 函数
+        function toggleSelectAll() {
+            const selectAllCheckbox = document.getElementById('selectAll');
             const checkboxes = document.getElementsByClassName('stream-checkbox');
+            
+            // 使用 selectAllCheckbox.checked 来确定是否全选
             for (let box of checkboxes) {
-                box.checked = checkbox.checked;
+                box.checked = selectAllCheckbox.checked;
             }
+            
+            // 更新批量操作按钮状态
             updateBatchButtons();
         }
 
@@ -2112,7 +2119,7 @@
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">修改密码</h5>
+                    <h5 class="modal-title">���改密���</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
