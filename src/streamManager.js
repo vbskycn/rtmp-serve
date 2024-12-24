@@ -39,6 +39,13 @@ class StreamManager extends EventEmitter {
         setTimeout(() => {
             this.startAutoStartStreams();
         }, 5000);
+
+        // 添加流量统计
+        this.trafficStats = {
+            received: 0,
+            sent: 0,
+            lastUpdate: Date.now()
+        };
     }
 
     // 加载配置
@@ -313,16 +320,34 @@ class StreamManager extends EventEmitter {
 
             const processInfo = this.streamProcesses.get(streamId);
             const stats = this.streamStats.get(streamId);
+            const status = this.streamStatus.get(streamId) || 'stopped';
+            const isInvalid = this.streamRetries.get(streamId) >= 3;
+
+            // 检查进程是否真的在运行
+            let isProcessRunning = false;
+            if (processInfo && processInfo.ffmpeg) {
+                try {
+                    // 发送空信号测试进程是否响应
+                    process.kill(processInfo.ffmpeg.pid, 0);
+                    isProcessRunning = true;
+                } catch (e) {
+                    // 如果进程不存在，会抛出错误
+                    isProcessRunning = false;
+                    // 清理无效的进程引用
+                    this.streamProcesses.delete(streamId);
+                }
+            }
 
             return {
                 ...stream,
-                processRunning: !!processInfo,
+                processRunning: isProcessRunning,
                 manuallyStarted: this.manuallyStartedStreams.has(streamId),
                 autoStart: this.autoStartStreams.has(streamId),
                 autoPlay: this.autoPlayStreams.has(streamId),
                 stats: stats || {},
-                status: this.streamStatus.get(streamId) || 'stopped',
-                invalid: this.streamRetries.get(streamId) >= 3
+                status: isInvalid ? 'invalid' : 
+                       isProcessRunning ? status : 'stopped',
+                invalid: isInvalid
             };
         } catch (error) {
             logger.error(`Error getting stream info for ${streamId}:`, error);
@@ -417,6 +442,7 @@ class StreamManager extends EventEmitter {
                     const ffmpeg = spawn('ffmpeg', args);
                     let ffmpegError = '';
                     let hasStarted = false;
+                    let errorOccurred = false;
 
                     ffmpeg.stderr.on('data', (data) => {
                         const message = data.toString();
@@ -425,21 +451,26 @@ class StreamManager extends EventEmitter {
                             message.includes('Invalid')) {
                             logger.error(`FFmpeg stderr: ${message}`);
                             ffmpegError += message;
+                            errorOccurred = true;
                         }
                     });
 
                     ffmpeg.on('error', (error) => {
                         logger.error(`FFmpeg spawn error for stream ${streamId}:`, error);
+                        errorOccurred = true;
                         reject(error);
                     });
 
                     ffmpeg.on('exit', (code, signal) => {
-                        if (code !== 0) {
+                        if (code !== 0 || errorOccurred) {
                             const error = new Error(`FFmpeg exited with code ${code}`);
                             logger.error(`Stream error for stream ${streamId}:`, error);
                             if (ffmpegError) {
                                 logger.error(`FFmpeg stderr: ${ffmpegError}`);
                             }
+                            // 更新流状态为停止
+                            this.streamStatus.set(streamId, 'stopped');
+                            this.streamProcesses.delete(streamId);
                             reject(error);
                         } else if (hasStarted) {
                             resolve({ success: true });
@@ -453,10 +484,13 @@ class StreamManager extends EventEmitter {
                         isManualStart: isRtmpPush
                     });
 
-                    // 等待流启动
+                    // 等待流启动，同时检查是否有错误
                     setTimeout(() => {
-                        hasStarted = true;
-                        resolve({ success: true });
+                        if (!errorOccurred) {
+                            hasStarted = true;
+                            this.streamStatus.set(streamId, 'running');
+                            resolve({ success: true });
+                        }
                     }, 3000);
 
                 } catch (error) {
@@ -498,6 +532,24 @@ class StreamManager extends EventEmitter {
             logger.error(`Error stopping stream ${streamId}:`, error);
             return false;
         }
+    }
+
+    // 添加获取流量统计的方法
+    getTrafficStats() {
+        return {
+            received: this.formatBytes(this.trafficStats.received),
+            sent: this.formatBytes(this.trafficStats.sent),
+            lastUpdate: this.trafficStats.lastUpdate
+        };
+    }
+
+    // 添加格式化字节的辅助方法
+    formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 }
 

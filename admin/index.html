@@ -359,28 +359,40 @@
             // 更新状态
             const statusCell = row.querySelector('.status');
             if (statusCell) {
-                const statusClass = stream.processRunning ? 'active' : 'inactive';
-                const statusText = stream.processRunning ? '运行中' : '已停止';
-                const statusStyle = stream.invalid ? 'background-color: #dc3545;' :
-                                   (statusClass === 'active' ? 'background-color: #28a745;' : 'background-color: #6c757d;');
-                
-                if (statusCell.className !== `status ${statusClass}` || statusCell.textContent !== statusText) {
-                    statusCell.className = `status ${statusClass}`;
-                    statusCell.style = statusStyle;
-                    statusCell.textContent = statusText;
+                let statusClass = 'inactive';
+                let statusText = '已停止';
+                let statusStyle = 'background-color: #6c757d;';  // 灰色
+
+                if (stream.invalid) {
+                    statusClass = 'error';
+                    statusText = '已失效';
+                    statusStyle = 'background-color: #dc3545;';  // 红色
+                } else if (stream.processRunning && stream.status === 'running') {
+                    statusClass = 'active';
+                    statusText = '运行中';
+                    statusStyle = 'background-color: #28a745;';  // 绿色
                 }
+                
+                statusCell.className = `status ${statusClass}`;
+                statusCell.style = statusStyle;
+                statusCell.textContent = statusText;
             }
 
             // 更新推流状态
             const rtmpStatusCell = row.querySelector('.rtmp-status');
             if (rtmpStatusCell) {
-                const rtmpStatusStyle = stream.manuallyStarted ? 'background-color: #28a745;' : 'background-color: #6c757d;';
-                const rtmpStatusText = stream.manuallyStarted ? '推流中' : '未推流';
+                const isRtmpActive = stream.processRunning && 
+                                    stream.status === 'running' && 
+                                    stream.manuallyStarted;
                 
-                if (rtmpStatusCell.textContent !== rtmpStatusText) {
-                    rtmpStatusCell.style = rtmpStatusStyle;
-                    rtmpStatusCell.textContent = rtmpStatusText;
-                }
+                const rtmpStatusStyle = isRtmpActive ? 
+                    'background-color: #28a745;' : 
+                    'background-color: #6c757d;';
+                
+                const rtmpStatusText = isRtmpActive ? '推流中' : '未推流';
+                
+                rtmpStatusCell.style = rtmpStatusStyle;
+                rtmpStatusCell.textContent = rtmpStatusText;
             }
 
             // 更新自启动按钮状态
@@ -1619,17 +1631,22 @@
 
         // 更新进度模态框的函数
         function updateProgressModal(modal, stats) {
-            const { success, retrying, total } = stats;
-            const progress = ((success + retrying) / total * 100).toFixed(1);
+            const { success, failed, total, current } = stats;
+            const progress = ((current || success) / total * 100).toFixed(1);
             
             const progressBar = modal.querySelector('.progress-bar');
             progressBar.style.width = `${progress}%`;
+            progressBar.style.backgroundColor = success > 0 ? '#28a745' : '#dc3545';
             
             const statsDiv = modal.querySelector('#progressStats');
             statsDiv.innerHTML = `
-                <div>总数: ${total}</div>
-                <div class="text-success">成功: ${success}</div>
-                <div class="text-warning">重试中: ${retrying}</div>
+                <div class="text-center">
+                    <div class="h5 mb-2">处理进度: ${current || (success + (failed || 0))}/${total}</div>
+                    <div class="text-success">成功: ${success}</div>
+                    ${failed ? `<div class="text-danger">失败: ${failed}</div>` : ''}
+                    ${current < total ? '<div class="text-info mt-2">正在处理中...</div>' : 
+                                      '<div class="text-success mt-2">处理完成!</div>'}
+                </div>
             `;
         }
 
@@ -1698,7 +1715,7 @@
 
                 const autoStartResult = await autoStartResponse.json();
                 if (!autoStartResult.success) {
-                    throw new Error(autoStartResult.error || '设置自动启动失败');
+                    throw new Error(autoStartResult.error || '设��自动启动失败');
                 }
 
                 // 2. 如果是开启自启动，还需要立即启动流
@@ -1745,6 +1762,7 @@
             try {
                 let success = 0;
                 let failed = 0;
+                let current = 0;
                 
                 for (const streamId of selectedStreams) {
                     try {
@@ -1780,26 +1798,19 @@
 
                         success++;
                         
-                        // 更新进度显示
-                        updateProgressModal(modal, {
-                            success,
-                            failed,
-                            total: selectedStreams.length,
-                            current: success + failed
-                        });
-
                     } catch (error) {
                         console.error(`Error setting auto-start for stream ${streamId}:`, error);
                         failed++;
-                        
-                        // 更新进度显示
-                        updateProgressModal(modal, {
-                            success,
-                            failed,
-                            total: selectedStreams.length,
-                            current: success + failed
-                        });
                     }
+                    
+                    current = success + failed;
+                    // 更新进度显示
+                    updateProgressModal(modal, {
+                        success,
+                        failed,
+                        total: selectedStreams.length,
+                        current
+                    });
                 }
 
                 // 3秒后关闭进度模态框
