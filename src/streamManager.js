@@ -106,7 +106,36 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 修改 loadAutoConfig 方法
+    // 添加创建默认自动配置的方法
+    createDefaultAutoConfig(autoConfigPath) {
+        try {
+            const defaultConfig = {
+                autoPlay: [],
+                autoStart: []
+            };
+            
+            // 确保目录存在
+            const configDir = path.dirname(autoConfigPath);
+            if (!fs.existsSync(configDir)) {
+                fs.mkdirSync(configDir, { recursive: true, mode: 0o777 });
+            }
+            
+            // 写入默认配置
+            fs.writeFileSync(autoConfigPath, JSON.stringify(defaultConfig, null, 2));
+            logger.info('Created default auto config file');
+            
+            // 初始化集合
+            this.autoPlayStreams = new Set();
+            this.autoStartStreams = new Set();
+        } catch (error) {
+            logger.error('Error creating default auto config:', error);
+            // 确保即使创建失败也有默认的空集合
+            this.autoPlayStreams = new Set();
+            this.autoStartStreams = new Set();
+        }
+    }
+
+    // 修改 loadAutoConfig 方法，确保正确调用 createDefaultAutoConfig
     loadAutoConfig() {
         try {
             const autoConfigPath = path.join(__dirname, '../config/auto_config.json');
