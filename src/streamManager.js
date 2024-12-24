@@ -51,6 +51,12 @@ class StreamManager extends EventEmitter {
         this.MAX_RETRIES = 3;        // 最大重试次数
         this.RETRY_DELAY = 3000;     // 重试间隔（毫秒）
         this.retryAttempts = new Map(); // 记录每个流的重试次数
+
+        // 添加启动时间记录
+        this.startTime = Date.now();
+
+        // 启动流量统计更新定时器
+        setInterval(() => this.updateTrafficStats(), 5000);
     }
 
     // 加载配置
@@ -678,16 +684,96 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 添加获取流量统计的方法
+    // 修改获取系统统计信息的方法
+    async getSystemStats() {
+        try {
+            // 获取活跃流数量（包括HLS推流的流）
+            const activeStreams = Array.from(this.streams.keys()).filter(async streamId => {
+                const hlsActive = await this.checkHlsStatus(streamId);
+                return hlsActive;
+            });
+
+            // 计算运行时间
+            const uptime = Date.now() - this.startTime;
+            const formattedUptime = this.formatUptime(uptime);
+
+            // 获取当前流量统计
+            const traffic = await this.getTrafficStats();
+
+            return {
+                totalStreams: this.streams.size,
+                activeStreams: activeStreams.length,
+                uptime: formattedUptime,
+                traffic: {
+                    received: traffic.received,
+                    sent: traffic.sent
+                }
+            };
+        } catch (error) {
+            logger.error('Error getting system stats:', error);
+            throw error;
+        }
+    }
+
+    // 添加更新流量统计的方法
+    async updateTrafficStats() {
+        try {
+            // 遍历所有活跃的流程序
+            for (const [streamId, processInfo] of this.streamProcesses) {
+                if (!processInfo || !processInfo.ffmpeg) continue;
+
+                const outputPath = path.join(__dirname, '../streams', streamId);
+                
+                // 计算 HLS 段文件的大小
+                const files = await fs.promises.readdir(outputPath);
+                const tsFiles = files.filter(f => f.endsWith('.ts'));
+                
+                let totalSize = 0;
+                for (const file of tsFiles) {
+                    const stats = await fs.promises.stat(path.join(outputPath, file));
+                    totalSize += stats.size;
+                }
+
+                // 更新接收和发送的流量
+                this.trafficStats.received += totalSize;
+                this.trafficStats.sent += totalSize;
+            }
+
+            this.trafficStats.lastUpdate = Date.now();
+        } catch (error) {
+            logger.error('Error updating traffic stats:', error);
+        }
+    }
+
+    // 修改格式化运行时间的方法
+    formatUptime(ms) {
+        const seconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const hours = Math.floor(minutes / 60);
+        const days = Math.floor(hours / 24);
+
+        if (days > 0) {
+            return `${days}天${hours % 24}小时${minutes % 60}分`;
+        } else if (hours > 0) {
+            return `${hours}小时${minutes % 60}分${seconds % 60}秒`;
+        } else if (minutes > 0) {
+            return `${minutes}分${seconds % 60}秒`;
+        } else {
+            return `${seconds}秒`;
+        }
+    }
+
+    // 修改获取流量统计的方法
     getTrafficStats() {
-        return {
+        const stats = {
             received: this.formatBytes(this.trafficStats.received),
             sent: this.formatBytes(this.trafficStats.sent),
             lastUpdate: this.trafficStats.lastUpdate
         };
+        return stats;
     }
 
-    // 添加格式化字节的辅助方法
+    // 修改格式化字节的方法
     formatBytes(bytes) {
         if (bytes === 0) return '0 B';
         const k = 1024;
