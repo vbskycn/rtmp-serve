@@ -330,28 +330,29 @@ class StreamManager extends EventEmitter {
             let isProcessRunning = false;
             if (processInfo && processInfo.ffmpeg) {
                 try {
-                    // 检查进程是否存活
                     process.kill(processInfo.ffmpeg.pid, 0);
                     isProcessRunning = true;
                 } catch (e) {
-                    // 进程不存在
                     isProcessRunning = false;
                     this.streamProcesses.delete(streamId);
+                    this.manuallyStartedStreams.delete(streamId);  // 清理手动启动状态
                 }
             }
 
             // 确定最终状态
             let finalStatus;
             if (isInvalid) {
-                finalStatus = 'invalid';  // 重试3次失败显示已失效
+                finalStatus = 'invalid';
             } else if (isProcessRunning) {
-                finalStatus = 'running';  // 进程在运行就显示运行中
+                finalStatus = 'running';
             } else {
-                finalStatus = 'stopped';  // 其他情况显示已停止
+                finalStatus = 'stopped';
             }
 
-            // 确定推流状态 - 只有在进程运行且是手动启动的情况下才认为在推流
-            const isRtmpActive = isProcessRunning && processInfo?.isManualStart;
+            // 推流状态只有在进程运行且成功拉流的情况下才为 true
+            const isRtmpActive = isProcessRunning && 
+                               processInfo?.isManualStart && 
+                               processInfo?.streamStarted;
 
             return {
                 ...stream,
@@ -469,7 +470,8 @@ class StreamManager extends EventEmitter {
                     let ffmpegError = '';
                     let hasStarted = false;
                     let consecutiveErrors = 0;
-                    const MAX_SEGMENT_ERRORS = 3;  // 连续3次分片错误就停止
+                    let streamStarted = false;  // 添加流是否成功启动的标志
+                    const MAX_SEGMENT_ERRORS = 3;
 
                     ffmpeg.stderr.on('data', (data) => {
                         const message = data.toString();
@@ -479,10 +481,11 @@ class StreamManager extends EventEmitter {
                             consecutiveErrors++;
                             logger.error(`FFmpeg stderr: ${message}`);
                             
-                            // 如果连续多次无法获取分片，终止进程
                             if (consecutiveErrors >= MAX_SEGMENT_ERRORS) {
                                 logger.error(`Stream ${streamId} failed to get segments after ${consecutiveErrors} attempts, stopping...`);
-                                ffmpeg.kill('SIGTERM');  // 终止进程
+                                // 清理状态
+                                this.manuallyStartedStreams.delete(streamId);
+                                ffmpeg.kill('SIGTERM');
                                 this.streamProcesses.delete(streamId);
                                 reject(new Error('Failed to get stream segments'));
                                 return;
@@ -492,22 +495,30 @@ class StreamManager extends EventEmitter {
                             logger.error(`FFmpeg stderr: ${message}`);
                             ffmpegError += message;
                             
-                            // 对于其他严重错误，立即终止
+                            // 对于严重错误，立即停止
                             if (message.includes('Server error') || 
-                                message.includes('Invalid data found')) {
+                                message.includes('Invalid data found') ||
+                                message.includes('Operation not permitted')) {
+                                // 清理状态
+                                this.manuallyStartedStreams.delete(streamId);
                                 ffmpeg.kill('SIGTERM');
                                 this.streamProcesses.delete(streamId);
                                 reject(new Error(message));
                                 return;
                             }
-                        } else {
-                            // 如果收到正常输出，重置错误计数
+                        } else if (message.includes('Opening')) {
+                            // 重置错误计数
                             consecutiveErrors = 0;
+                            if (!streamStarted) {
+                                streamStarted = true;  // 标记流已经开始
+                            }
                         }
                     });
 
                     ffmpeg.on('exit', (code, signal) => {
+                        // 进程退出时清理所有状态
                         this.streamProcesses.delete(streamId);
+                        this.manuallyStartedStreams.delete(streamId);
                         
                         if (code !== 0 && !signal) {
                             // 非正常退出且不是手动停止
@@ -522,6 +533,14 @@ class StreamManager extends EventEmitter {
                         }
                     });
 
+                    // 保存进程引用
+                    this.streamProcesses.set(streamId, {
+                        ffmpeg,
+                        startTime: new Date(),
+                        isManualStart: isRtmpPush,
+                        streamStarted: false  // 初始状态为未启动
+                    });
+
                     // 等待流启动
                     setTimeout(() => {
                         try {
@@ -530,14 +549,28 @@ class StreamManager extends EventEmitter {
                             
                             // 检查是否有错误累积
                             if (consecutiveErrors >= MAX_SEGMENT_ERRORS) {
+                                // 清理状态
+                                this.manuallyStartedStreams.delete(streamId);
                                 ffmpeg.kill('SIGTERM');
                                 reject(new Error('Failed to start stream: too many segment errors'));
                                 return;
                             }
                             
-                            hasStarted = true;
-                            this.retryAttempts.delete(streamId);
-                            resolve({ success: true });
+                            // 只有在流真正启动后才设置状态
+                            if (streamStarted) {
+                                hasStarted = true;
+                                this.retryAttempts.delete(streamId);
+                                // 只有在成功拉流的情况下才添加到手动启动集合
+                                if (isRtmpPush) {
+                                    this.manuallyStartedStreams.add(streamId);
+                                }
+                                resolve({ success: true });
+                            } else {
+                                // 如果流没有真正启动，清理状态并停止
+                                this.manuallyStartedStreams.delete(streamId);
+                                ffmpeg.kill('SIGTERM');
+                                reject(new Error('Stream failed to start properly'));
+                            }
                         } catch (e) {
                             reject(new Error('Process exited before initialization completed'));
                         }
