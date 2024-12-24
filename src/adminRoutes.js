@@ -7,6 +7,7 @@ const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const { verifyUser, updatePassword, JWT_SECRET, verifyToken, authMiddleware } = require('./middleware/auth');
 const config = require('../config/config.json');
+const { exec } = require('child_process');
 
 // 创建 StreamManager 实例
 const streamManager = new StreamManager();
@@ -609,6 +610,59 @@ router.post('/api/streams/:streamId/auto-start', authMiddleware, async (req, res
         res.json({
             success: false,
             error: error.message
+        });
+    }
+});
+
+// 添加重启服务器的路由
+router.post('/api/server/restart', authMiddleware, async (req, res) => {
+    try {
+        logger.info('Server restart requested');
+
+        // 保存所有配置
+        await streamManager.saveStreams();
+        await streamManager.saveAutoConfig();
+
+        // 停止所有流
+        for (const [streamId, processInfo] of streamManager.streamProcesses) {
+            try {
+                await streamManager.stopStreaming(streamId);
+            } catch (error) {
+                logger.error(`Error stopping stream ${streamId} during restart:`, error);
+            }
+        }
+
+        // 发送成功响应
+        res.json({ success: true });
+
+        // 延迟1秒后重启进程
+        setTimeout(() => {
+            logger.info('Executing server restart');
+            // 如果使用 PM2
+            if (process.env.PM2_HOME) {
+                exec('pm2 restart all', (error) => {
+                    if (error) {
+                        logger.error('PM2 restart error:', error);
+                    }
+                });
+            } else {
+                // 如果直接运行 Node.js
+                process.on('exit', () => {
+                    require('child_process').spawn(process.argv.shift(), process.argv, {
+                        cwd: process.cwd(),
+                        detached: true,
+                        stdio: 'inherit'
+                    });
+                });
+                process.exit();
+            }
+        }, 1000);
+
+    } catch (error) {
+        logger.error('Error during server restart:', error);
+        res.status(500).json({
+            success: false,
+            error: '重启服务器失败: ' + error.message
         });
     }
 });
