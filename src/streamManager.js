@@ -848,7 +848,7 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 添加标记流为失效的方法
+    // 添加标记流为失效��方法
     async markStreamAsInvalid(streamId) {
         const stream = this.streams.get(streamId);
         if (stream) {
@@ -1263,6 +1263,20 @@ class StreamManager extends EventEmitter {
                 logger.error(`Error auto-starting stream ${streamId}:`, error);
             }
         }
+    }
+
+    // 修改获取流信息的方法,添加自动启动状态
+    async getStreamInfo(streamId) {
+        const stream = this.streams.get(streamId);
+        if (!stream) return null;
+
+        return {
+            ...stream,
+            autoStart: this.autoStartStreams.has(streamId),
+            processRunning: this.streamProcesses.has(streamId),
+            manuallyStarted: this.manuallyStartedStreams.has(streamId),
+            status: this.streamStatus.get(streamId) || 'stopped'
+        };
     }
 }
 

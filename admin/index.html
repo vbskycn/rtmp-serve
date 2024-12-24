@@ -203,7 +203,6 @@
                                     </th>
                                     <th class="name-column">名称</th>
                                     <th class="status-column">状态</th>
-                                    <th class="auto-column">自动配置</th>
                                     <th class="rtmp-status-column">推流状态</th>
                                     <th class="source-column">源地址</th>
                                     <th class="play-column">播放地址</th>
@@ -450,6 +449,11 @@
                                     <button onclick="stopStream('${stream.id}')" class="btn btn-secondary btn-sm">
                                         <i class="fa fa-stop"></i> 停止
                                     </button>
+                                    <button onclick="toggleAutoStart('${stream.id}', ${!stream.autoStart})" 
+                                            class="btn ${stream.autoStart ? 'btn-warning' : 'btn-light'} btn-sm">
+                                        <i class="fa ${stream.autoStart ? 'fa-sun-o' : 'fa-moon-o'}"></i> 
+                                        ${stream.autoStart ? '自启关' : '自启开'}
+                                    </button>
                                     <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
                                         <i class="fa fa-trash"></i> 删除
                                     </button>
@@ -645,7 +649,7 @@
             }
         }
 
-        // ��改复制到剪贴板函数
+        // 修改复制到剪贴板函数
         function copyToClipboard(text) {
             // 创建临时输入框
             const input = document.createElement('input');
@@ -831,7 +835,7 @@
                         updateProgress(`跳过已手动启动的流: ${streamId}`);
                         return true;
                     }
-                    // 注��：不再检查 processRunning，因为我们要把普通运行的流转换为手动启动状态
+                    // 注意：不再检查 processRunning，因为我们要把普通运行的流转换为手动启动状态
 
                     // 设置单个流的超时
                     const controller = new AbortController();
@@ -1591,6 +1595,34 @@
             } catch (error) {
                 console.error('Error starting RTMP push:', error);
                 alert('启动推流失败: ' + error.message);
+            }
+        }
+
+        // 添加切换自动启动的函数
+        async function toggleAutoStart(streamId, enable) {
+            try {
+                const response = await fetch(`/api/streams/${streamId}/auto-start`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ autoStart: enable })
+                });
+                
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error);
+                }
+                
+                // 如果开启自启,立即启动推流
+                if (enable) {
+                    await startRtmpPush(streamId);
+                }
+                
+                loadStreams(); // 刷新列表
+            } catch (error) {
+                console.error('Error toggling auto-start:', error);
+                alert('设置自动启动失败: ' + error.message);
             }
         }
     </script>
