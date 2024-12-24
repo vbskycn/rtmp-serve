@@ -48,6 +48,34 @@
         .auto-start-btn i {
             margin-right: 4px;
         }
+
+        .table td {
+            max-width: 0;  /* 允许单元格内容换行 */
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* 源地址和名称列的特殊样式 */
+        .table td:nth-child(2),  /* 名称列 */
+        .table td:nth-child(3) { /* 源地址列 */
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* 添加悬停时显示完整内容的提示 */
+        .table td:nth-child(2):hover,
+        .table td:nth-child(3):hover {
+            white-space: normal;
+            word-break: break-all;
+            position: relative;
+        }
+
+        /* 确保操作按钮组不会换行 */
+        .stream-actions .btn-group {
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
@@ -214,9 +242,6 @@
                         <button onclick="batchAutoStart(false)" class="btn btn-warning btn-sm" id="batchAutoStartOffBtn" disabled>
                             <i class="fa fa-moon-o"></i> 自启关
                         </button>
-                        <button onclick="refreshStreams()" class="btn btn-light btn-sm">
-                            <i class="fa fa-refresh"></i> 刷新
-                        </button>
                         <button onclick="exportM3U()" class="btn btn-light btn-sm">
                             <i class="fa fa-download"></i> 导出M3U
                         </button>
@@ -240,14 +265,14 @@
                             <thead>
                                 <tr>
                                     <th class="check-column">
-                                        <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
+                                        <input type="checkbox" id="selectAll" onclick="toggleSelectAll()">
                                     </th>
-                                    <th class="name-column">名称</th>
-                                    <th class="status-column">状态</th>
-                                    <th class="rtmp-status-column">推流状态</th>
-                                    <th class="source-column">源地址</th>
-                                    <th class="play-column">播放地址</th>
-                                    <th class="action-column">操作</th>
+                                    <th style="width: 15%">名称</th>
+                                    <th style="width: 20%">源地址</th>
+                                    <th style="width: 10%">状态</th>
+                                    <th style="width: 10%">推流状态</th>
+                                    <th style="width: 25%">播放地址</th>
+                                    <th style="width: 20%">操作</th>
                                 </tr>
                             </thead>
                             <tbody id="streamTable"></tbody>
@@ -516,7 +541,7 @@
                                     <button onclick="toggleAutoStart('${stream.id}', ${!stream.autoStart})" 
                                             class="btn ${stream.autoStart ? 'btn-warning' : 'btn-success'} btn-sm auto-start-btn">
                                         <i class="fa ${stream.autoStart ? 'fa-moon-o' : 'fa-sun-o'}"></i> 
-                                        ${stream.autoStart ? '自启关' : '自启开'}
+                                        ${stream.autoStart ? '自启���' : '自启开'}
                                     </button>
                                     <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
                                         <i class="fa fa-trash"></i> 删除
@@ -724,7 +749,7 @@
             
             // 选择并复制
             input.select();
-            input.setSelectionRange(0, 99999); // 用于��动设备
+            input.setSelectionRange(0, 99999); // 用于动设备
             
             try {
                 // 执行复制命令
@@ -739,7 +764,7 @@
                 setTimeout(() => toast.remove(), 2000);
             } catch (err) {
                 console.error('复制失败:', err);
-                alert('复制��败');
+                alert('复制失败');
             } finally {
                 // 移除临时输入框
                 document.body.removeChild(input);
@@ -905,7 +930,7 @@
                         updateProgress(`跳过已手动启动的流: ${streamId}`);
                         return true;
                     }
-                    // 注意：不再检查 processRunning，因为我们要把普通运行的流转换为手动启动状态
+                    // 注意：不再检查 processRunning，因为我们要把普通运行的���转换为手动启动状态
 
                     // 设置单个流的超时
                     const controller = new AbortController();
