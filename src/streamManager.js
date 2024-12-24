@@ -21,27 +21,19 @@ class StreamManager extends EventEmitter {
         this.activeViewers = new Map();
         this.autoStopTimers = new Map();
         this.manuallyStartedStreams = new Set();
-        this.autoPlayStreams = new Set(); // 存储自动启停的流ID
-        this.autoStartStreams = new Set(); // 存储自动启动的流ID
-        this.streamRetries = new Map(); // 存储流的重试次数
-        this.streamStatus = new Map(); // 存储流的状态
+        this.autoPlayStreams = new Set();
+        this.autoStartStreams = new Set();
+        this.streamRetries = new Map();
+        this.streamStatus = new Map();
 
-        // 1. 首先加载配置
+        // 加载配置
         this.loadConfig();
         
-        // 2. 加载流配置
+        // 加载流配置
         this.loadStreams();
         
-        // 3. 加载自动配置
+        // 加载自动配置
         this.loadAutoConfig();
-
-        // 4. 确保目录存在
-        this.ensureDirectories();
-
-        // 5. 启动自动启动的流（使用Promise确保异步操作完成）
-        this.initializeAutoStart();
-
-        // ... 其他初始化代码 ...
     }
 
     // 加载配置
@@ -132,23 +124,27 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 添加 loadStreams 方法
+    // 修改 loadStreams 方法
     loadStreams() {
         try {
             if (fs.existsSync(this.configPath)) {
-                const data = JSON.parse(fs.readFileSync(this.configPath, 'utf8'));
-                if (Array.isArray(data)) {
-                    data.forEach(stream => {
-                        if (stream.id) {
-                            this.streams.set(stream.id, stream);
-                        }
-                    });
+                const data = fs.readFileSync(this.configPath, 'utf8');
+                if (data.trim()) {
+                    const streams = JSON.parse(data);
+                    if (Array.isArray(streams)) {
+                        streams.forEach(stream => {
+                            if (stream.id) {
+                                this.streams.set(stream.id, stream);
+                            }
+                        });
+                    }
+                    logger.info(`Loaded ${this.streams.size} streams from config`);
+                } else {
+                    logger.info('Streams config file is empty');
                 }
-                logger.info(`Loaded ${this.streams.size} streams from config`);
             } else {
-                // 如果配置文件不存在，创建一个空的配置文件
+                logger.info('Creating empty streams config file');
                 fs.writeFileSync(this.configPath, JSON.stringify([], null, 2));
-                logger.info('Created empty streams config file');
             }
         } catch (error) {
             logger.error('Error loading streams:', error);
@@ -157,7 +153,7 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 添加保存流配置的方法
+    // 修改 saveStreams 方法
     async saveStreams() {
         try {
             const streamsArray = Array.from(this.streams.values());
@@ -166,6 +162,23 @@ class StreamManager extends EventEmitter {
             return true;
         } catch (error) {
             logger.error('Error saving streams:', error);
+            return false;
+        }
+    }
+
+    // 修改 saveAutoConfig 方法
+    async saveAutoConfig() {
+        try {
+            const autoConfigPath = path.join(__dirname, '../config/auto_config.json');
+            const data = {
+                autoPlay: Array.from(this.autoPlayStreams),
+                autoStart: Array.from(this.autoStartStreams)
+            };
+            await fs.promises.writeFile(autoConfigPath, JSON.stringify(data, null, 2));
+            logger.info(`Saved auto config with ${this.autoStartStreams.size} auto-start streams`);
+            return true;
+        } catch (error) {
+            logger.error('Error saving auto config:', error);
             return false;
         }
     }
@@ -255,6 +268,31 @@ class StreamManager extends EventEmitter {
                 success: false,
                 error: error.message
             };
+        }
+    }
+
+    // 修改 getStreamInfo 方法
+    async getStreamInfo(streamId) {
+        try {
+            const stream = this.streams.get(streamId);
+            if (!stream) return null;
+
+            const processInfo = this.streamProcesses.get(streamId);
+            const stats = this.streamStats.get(streamId);
+
+            return {
+                ...stream,
+                processRunning: !!processInfo,
+                manuallyStarted: this.manuallyStartedStreams.has(streamId),
+                autoStart: this.autoStartStreams.has(streamId),
+                autoPlay: this.autoPlayStreams.has(streamId),
+                stats: stats || {},
+                status: this.streamStatus.get(streamId) || 'stopped',
+                invalid: this.streamRetries.get(streamId) >= 3
+            };
+        } catch (error) {
+            logger.error(`Error getting stream info for ${streamId}:`, error);
+            return null;
         }
     }
 }
