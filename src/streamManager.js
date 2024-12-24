@@ -34,6 +34,11 @@ class StreamManager extends EventEmitter {
         
         // 加载自动配置
         this.loadAutoConfig();
+
+        // 初始化自动启动流
+        setTimeout(() => {
+            this.startAutoStartStreams();
+        }, 5000);
     }
 
     // 加载配置
@@ -293,6 +298,176 @@ class StreamManager extends EventEmitter {
         } catch (error) {
             logger.error(`Error getting stream info for ${streamId}:`, error);
             return null;
+        }
+    }
+
+    // 添加启动流的方法
+    async startStreaming(streamId, isRtmpPush = false) {
+        try {
+            const stream = this.streams.get(streamId);
+            if (!stream) {
+                throw new Error('Stream not found');
+            }
+
+            // 更新流状态
+            this.streamStatus.set(streamId, 'starting');
+            this.emit('streamStatusChanged', streamId, 'starting');
+
+            // 如果是推流模式，标记为手动启动
+            if (isRtmpPush) {
+                this.manuallyStartedStreams.add(streamId);
+            }
+
+            const result = await this.startStreamingWithFFmpeg(streamId, stream, isRtmpPush);
+            
+            if (result && !result.success) {
+                throw new Error(result.error);
+            }
+
+            // 更新状态为运行中
+            this.streamStatus.set(streamId, 'running');
+            this.emit('streamStatusChanged', streamId, 'running');
+            
+            return { success: true };
+        } catch (error) {
+            logger.error(`Error starting stream ${streamId}:`, error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // 添加启动自动启动流的方法
+    async startAutoStartStreams() {
+        logger.info(`Starting auto-start streams, count: ${this.autoStartStreams.size}`);
+        for (const streamId of this.autoStartStreams) {
+            try {
+                if (!this.streamProcesses.has(streamId)) {
+                    logger.info(`Auto-starting stream: ${streamId}`);
+                    await this.startStreaming(streamId, true);
+                }
+            } catch (error) {
+                logger.error(`Error auto-starting stream ${streamId}:`, error);
+            }
+        }
+    }
+
+    // 添加启动FFmpeg的方法
+    async startStreamingWithFFmpeg(streamId, streamConfig, isRtmpPush = false) {
+        try {
+            // 确保输出目录存在
+            const outputPath = path.join(__dirname, '../streams', streamId);
+            if (!fs.existsSync(outputPath)) {
+                fs.mkdirSync(outputPath, { recursive: true, mode: 0o777 });
+            }
+
+            // 设置 FFmpeg 参数
+            const args = [
+                '-i', streamConfig.url,
+                // HLS 输出
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-ar', '44100',
+                '-hls_time', '10',
+                '-hls_list_size', '6',
+                '-hls_flags', 'delete_segments',
+                '-hls_segment_filename', path.join(outputPath, 'segment_%d.ts'),
+                path.join(outputPath, 'playlist.m3u8')
+            ];
+
+            // 如果是推流模式，添加RTMP输出
+            if (isRtmpPush) {
+                args.push(
+                    '-c:v', 'copy',
+                    '-c:a', 'aac',
+                    '-f', 'flv',
+                    `${this.config.rtmp.pushServer}${streamId}`
+                );
+            }
+
+            return new Promise((resolve, reject) => {
+                try {
+                    const ffmpeg = spawn('ffmpeg', args);
+                    let ffmpegError = '';
+                    let hasStarted = false;
+
+                    ffmpeg.stderr.on('data', (data) => {
+                        const message = data.toString();
+                        if (message.includes('Error') || 
+                            message.includes('Failed') ||
+                            message.includes('Invalid')) {
+                            logger.error(`FFmpeg stderr: ${message}`);
+                            ffmpegError += message;
+                        }
+                    });
+
+                    ffmpeg.on('error', (error) => {
+                        logger.error(`FFmpeg spawn error for stream ${streamId}:`, error);
+                        reject(error);
+                    });
+
+                    ffmpeg.on('exit', (code, signal) => {
+                        if (code !== 0) {
+                            const error = new Error(`FFmpeg exited with code ${code}`);
+                            logger.error(`Stream error for stream ${streamId}:`, error);
+                            if (ffmpegError) {
+                                logger.error(`FFmpeg stderr: ${ffmpegError}`);
+                            }
+                            reject(error);
+                        } else if (hasStarted) {
+                            resolve({ success: true });
+                        }
+                    });
+
+                    // 保存进程引用
+                    this.streamProcesses.set(streamId, {
+                        ffmpeg,
+                        startTime: new Date(),
+                        isManualStart: isRtmpPush
+                    });
+
+                    // 等待流启动
+                    setTimeout(() => {
+                        hasStarted = true;
+                        resolve({ success: true });
+                    }, 3000);
+
+                } catch (error) {
+                    logger.error(`Error in startStreamingWithFFmpeg for stream ${streamId}:`, error);
+                    reject(error);
+                }
+            });
+        } catch (error) {
+            logger.error(`Error setting up FFmpeg for stream ${streamId}:`, error);
+            throw error;
+        }
+    }
+
+    // 添加停止流的方法
+    async stopStreaming(streamId) {
+        try {
+            const processInfo = this.streamProcesses.get(streamId);
+            if (processInfo) {
+                const { ffmpeg } = processInfo;
+                ffmpeg.kill('SIGTERM');
+                
+                // 等待进程完全退出
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // 如果进程还在运行，强制结束
+                if (ffmpeg.exitCode === null) {
+                    ffmpeg.kill('SIGKILL');
+                }
+                
+                this.streamProcesses.delete(streamId);
+                this.manuallyStartedStreams.delete(streamId);
+                this.streamStatus.set(streamId, 'stopped');
+                
+                logger.info(`Stream stopped: ${streamId}`);
+                return true;
+            }
+            return false;
+        } catch (error) {
+            logger.error(`Error stopping stream ${streamId}:`, error);
+            return false;
         }
     }
 }
