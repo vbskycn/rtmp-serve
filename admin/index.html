@@ -382,6 +382,17 @@
                     rtmpStatusCell.textContent = rtmpStatusText;
                 }
             }
+
+            // 更新自启动按钮状态
+            const autoStartBtn = row.querySelector('.auto-start-btn');
+            if (autoStartBtn) {
+                autoStartBtn.className = `btn ${stream.autoStart ? 'btn-warning' : 'btn-success'} btn-sm auto-start-btn`;
+                autoStartBtn.innerHTML = `
+                    <i class="fa ${stream.autoStart ? 'fa-moon-o' : 'fa-sun-o'}"></i> 
+                    ${stream.autoStart ? '自启关' : '自启开'}
+                `;
+                autoStartBtn.onclick = () => toggleAutoStart(stream.id, !stream.autoStart);
+            }
         }
 
         // 修改 renderFullTable 函数
@@ -1665,18 +1676,19 @@
         // 添加切换自动启动的函数
         async function toggleAutoStart(streamId, enable) {
             try {
-                const response = await fetch(`/api/streams/${streamId}/auto-start`, {
+                // 1. 设置自动启动状态
+                const autoStartResponse = await fetch(`/api/streams/${streamId}/auto-start`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({ autoStart: enable })
                 });
-                
+
                 // 检查响应类型
-                const contentType = response.headers.get('content-type');
+                const contentType = autoStartResponse.headers.get('content-type');
                 if (!contentType || !contentType.includes('application/json')) {
-                    if (response.status === 401) {
+                    if (autoStartResponse.status === 401) {
                         alert('会话已过期，请重新登录');
                         window.location.href = '/login.html';
                         return;
@@ -1684,17 +1696,30 @@
                     throw new Error('服务器返回了非预期的响应类型');
                 }
 
-                const result = await response.json();
-                if (!result.success) {
-                    throw new Error(result.error || '设置自动启动失败');
+                const autoStartResult = await autoStartResponse.json();
+                if (!autoStartResult.success) {
+                    throw new Error(autoStartResult.error || '设置自动启动失败');
                 }
-                
-                // 如果开启自启,立即启动推流
+
+                // 2. 如果是开启自启动，还需要立即启动流
                 if (enable) {
-                    await startRtmpPush(streamId);
+                    const startResponse = await fetch(`/api/streams/${streamId}/start`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ rtmpPush: true })
+                    });
+
+                    const startResult = await startResponse.json();
+                    if (!startResult.success) {
+                        throw new Error(startResult.error || '启动流失败');
+                    }
                 }
-                
-                loadStreams(); // 刷新列表
+
+                // 3. 刷新列表以更新状态
+                await loadStreams();
+
             } catch (error) {
                 console.error('Error toggling auto-start:', error);
                 if (error.message.includes('<!DOCTYPE')) {
