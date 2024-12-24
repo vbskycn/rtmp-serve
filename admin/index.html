@@ -410,20 +410,6 @@
                                 </span>
                             </td>
                             <td>
-                                <div class="form-check form-check-inline">
-                                    <input type="checkbox" class="form-check-input" 
-                                           onchange="updateAutoConfig('${stream.id}', 'autoPlay', this.checked)"
-                                           ${stream.autoPlay ? 'checked' : ''}>
-                                    <label class="form-check-label">自动启停</label>
-                                </div>
-                                <div class="form-check form-check-inline">
-                                    <input type="checkbox" class="form-check-input"
-                                           onchange="updateAutoConfig('${stream.id}', 'autoStart', this.checked)"
-                                           ${stream.autoStart ? 'checked' : ''}>
-                                    <label class="form-check-label">自动启动</label>
-                                </div>
-                            </td>
-                            <td>
                                 <span class="status" style="${rtmpStatusStyle}">
                                     ${rtmpStatusText}
                                 </span>
@@ -450,11 +436,6 @@
                                         <button class="btn btn-outline-success btn-sm" onclick="window.open('player.html?id=${stream.id}', '_blank')">
                                             <i class="fa fa-play"></i> 播放
                                         </button>
-                                        ${isManuallyStarted ? `
-                                            <button class="btn btn-outline-info btn-sm" onclick="copyRtmpInfo('${stream.id}')">
-                                                <i class="fa fa-external-link"></i> 推流
-                                            </button>
-                                        ` : ''}
                                     </div>
                                 </div>
                             </td>
@@ -463,8 +444,8 @@
                                     <button onclick="editStream('${stream.id}')" class="btn btn-info btn-sm">
                                         <i class="fa fa-edit"></i> 编辑
                                     </button>
-                                    <button onclick="restartStream('${stream.id}', true)" class="btn btn-warning btn-sm">
-                                        <i class="fa fa-refresh"></i> ${isManuallyStarted ? '重启' : '手动启动'}
+                                    <button onclick="startRtmpPush('${stream.id}')" class="btn btn-success btn-sm">
+                                        <i class="fa fa-upload"></i> 推流
                                     </button>
                                     <button onclick="stopStream('${stream.id}')" class="btn btn-secondary btn-sm">
                                         <i class="fa fa-stop"></i> 停止
@@ -664,7 +645,7 @@
             }
         }
 
-        // 修改复制到剪贴板函数
+        // ��改复制到剪贴板函数
         function copyToClipboard(text) {
             // 创建临时输入框
             const input = document.createElement('input');
@@ -850,7 +831,7 @@
                         updateProgress(`跳过已手动启动的流: ${streamId}`);
                         return true;
                     }
-                    // 注意：不再检查 processRunning，因为我们要把普通运行的流转换为手动启动状态
+                    // 注��：不再检查 processRunning，因为我们要把普通运行的流转换为手动启动状态
 
                     // 设置单个流的超时
                     const controller = new AbortController();
@@ -1213,6 +1194,10 @@
             };
 
             try {
+                // 先停止流
+                await stopStream(streamId);
+                
+                // 然后更新配置
                 const response = await fetch(`/api/streams/${streamId}`, {
                     method: 'PUT',
                     headers: {
@@ -1222,20 +1207,20 @@
                 });
 
                 const result = await response.json();
-                if (result.success) {
-                    // 关闭模态框
-                    const modal = bootstrap.Modal.getInstance(document.getElementById('editStreamModal'));
-                    modal.hide();
-                    
-                    // 刷新流列表
-                    loadStreams();
-                    alert('更新成功');
-                } else {
-                    alert('更新失败: ' + result.error);
+                if (!result.success) {
+                    throw new Error(result.error);
                 }
+
+                // 关闭模态框
+                const modal = bootstrap.Modal.getInstance(document.getElementById('editStreamModal'));
+                modal.hide();
+                
+                // 刷新流列表
+                loadStreams();
+                alert('更新成功');
             } catch (error) {
                 console.error('Error updating stream:', error);
-                alert('更新失败');
+                alert('更新失败: ' + error.message);
             }
         }
 
@@ -1584,6 +1569,29 @@
                 <div class="text-success">成功: ${success}</div>
                 <div class="text-warning">重试中: ${retrying}</div>
             `;
+        }
+
+        // 添加推流功能
+        async function startRtmpPush(streamId) {
+            try {
+                const response = await fetch(`/api/streams/${streamId}/start`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ rtmpPush: true })
+                });
+                
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error);
+                }
+                
+                loadStreams(); // 刷新列表
+            } catch (error) {
+                console.error('Error starting RTMP push:', error);
+                alert('启动推流失败: ' + error.message);
+            }
         }
     </script>
 

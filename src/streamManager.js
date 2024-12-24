@@ -69,6 +69,14 @@ class StreamManager extends EventEmitter {
         // 加载保存的流配置
         this.loadStreams();
         
+        // 所有流默认自动启停
+        for (const [id] of this.streams) {
+            this.autoPlayStreams.add(id);
+        }
+        
+        // 保存自动配置
+        this.saveAutoConfig();
+        
         // 每小时运行一次清理
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
         // 每5分钟运行一次健康检查
@@ -260,6 +268,10 @@ class StreamManager extends EventEmitter {
             // 立即保存配置到文件
             await this.saveStreams();
 
+            // 新增:自动设置为自动启停
+            this.autoPlayStreams.add(streamId);
+            await this.saveAutoConfig();
+
             return {
                 success: true,
                 streamId: streamId
@@ -322,7 +334,7 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    async startStreaming(streamId, isManualStart = false) {
+    async startStreaming(streamId, isRtmpPush = false) {
         try {
             const stream = this.streams.get(streamId);
             if (!stream) {
@@ -333,42 +345,24 @@ class StreamManager extends EventEmitter {
             this.streamStatus.set(streamId, 'starting');
             this.emit('streamStatusChanged', streamId, 'starting');
 
-            // 如果是手动启动，记录到集合中
-            if (isManualStart) {
+            // 如果是推流模式,标记为手动启动
+            if (isRtmpPush) {
                 this.manuallyStartedStreams.add(streamId);
             }
 
-            await this.startStreamingWithFFmpeg(streamId, stream, isManualStart);
+            const result = await this.startStreamingWithFFmpeg(streamId, stream, isRtmpPush);
             
+            if (result && !result.success) {
+                throw result.error;
+            }
+
             // 更新状态为运行中
             this.streamStatus.set(streamId, 'running');
             this.emit('streamStatusChanged', streamId, 'running');
             
-            // 重置重试次数
-            this.streamRetries.delete(streamId);
-
+            return { success: true };
         } catch (error) {
-            // 处理启动失败
-            const retryCount = (this.streamRetries.get(streamId) || 0) + 1;
-            this.streamRetries.set(streamId, retryCount);
-
-            if (retryCount >= 3) {
-                // 标记为失效
-                this.streamStatus.set(streamId, 'invalid');
-                this.emit('streamStatusChanged', streamId, 'invalid');
-                logger.error(`Stream ${streamId} marked as invalid after 3 retries`);
-            } else {
-                // 标记为重试中
-                this.streamStatus.set(streamId, 'retrying');
-                this.emit('streamStatusChanged', streamId, 'retrying');
-                
-                // 1分钟后重试
-                setTimeout(() => {
-                    this.startStreaming(streamId, isManualStart);
-                }, 60000);
-            }
-
-            throw error;
+            return { success: false, error };
         }
     }
 
@@ -473,28 +467,13 @@ class StreamManager extends EventEmitter {
                         message.includes('Invalid') ||
                         message.includes('timeout')) {
                         logger.error(`FFmpeg stderr: ${message}`);
-                    } else if (message.includes('fps=') || message.includes('speed=')) {
-                        // 忽略常规的进度信息
-                        return;
-                    } else {
-                        logger.debug(`FFmpeg stderr: ${message}`);
                     }
                 });
 
                 ffmpeg.on('error', (error) => {
                     logger.error(`FFmpeg error for stream ${streamId}:`, error);
-                    if (retryCount < maxRetries) {
-                        retryCount++;
-                        logger.info(`Retrying stream ${streamId} (attempt ${retryCount}/${maxRetries})`);
-                        setTimeout(() => {
-                            // 保持手动启动状态进行重试
-                            const wasManuallyStarted = this.manuallyStartedStreams.has(streamId);
-                            this.restartStream(streamId, wasManuallyStarted);
-                        }, retryDelay);
-                    } else {
-                        logger.error(`Max retries reached for stream ${streamId}, stopping stream`);
-                        this.stopStreaming(streamId);
-                    }
+                    this.handleStreamError(streamId, error, isManualStart);
+                    reject(error);
                 });
 
                 ffmpeg.on('exit', (code) => {
@@ -502,25 +481,9 @@ class StreamManager extends EventEmitter {
                         logger.error(`FFmpeg exited with code ${code} for stream ${streamId}`);
                         logger.error(`FFmpeg stderr: ${ffmpegError}`);
                         
-                        // 检查是否包含致命错误
-                        if (ffmpegError.includes('Server returned 400') ||
-                            ffmpegError.includes('Server returned 403') ||
-                            ffmpegError.includes('Server returned 404') ||
-                            ffmpegError.includes('Server returned 500')) {
-                            logger.error(`Fatal error detected for stream ${streamId}, stopping stream`);
-                            this.stopStreaming(streamId);
-                        } else if (retryCount < maxRetries && this.activeViewers.get(streamId) > 0) {
-                            // 只有在有观看者的情况下才重试
-                            retryCount++;
-                            logger.info(`Retrying stream ${streamId} (attempt ${retryCount}/${maxRetries})`);
-                            setTimeout(() => {
-                                const wasManuallyStarted = this.manuallyStartedStreams.has(streamId);
-                                this.restartStream(streamId, wasManuallyStarted);
-                            }, retryDelay);
-                        } else {
-                            logger.error(`Max retries reached or no viewers for stream ${streamId}, stopping stream`);
-                            this.stopStreaming(streamId);
-                        }
+                        const error = new Error(`FFmpeg exited with code ${code}`);
+                        this.handleStreamError(streamId, error, isManualStart);
+                        reject(error);
                     }
                 });
 
@@ -531,29 +494,71 @@ class StreamManager extends EventEmitter {
                     isManualStart: isManualStart || this.manuallyStartedStreams.has(streamId)
                 });
 
-                // 等待播放表文件创建
+                // 等待播放列表文件创建
+                let checkAttempts = 0;
+                const maxCheckAttempts = 30; // 30秒超时
                 const checkInterval = setInterval(() => {
-                    if (fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
+                    const playlistPath = path.join(outputPath, 'playlist.m3u8');
+                    if (fs.existsSync(playlistPath)) {
                         clearInterval(checkInterval);
-                        logger.info(`Stream ${streamId} started successfully`);
                         resolve();
+                        return;
+                    }
+
+                    checkAttempts++;
+                    if (checkAttempts >= maxCheckAttempts) {
+                        clearInterval(checkInterval);
+                        const error = new Error('Stream start timeout');
+                        this.handleStreamError(streamId, error, isManualStart);
+                        reject(error);
                     }
                 }, 1000);
 
-                // 设置检查超时
-                setTimeout(() => {
-                    clearInterval(checkInterval);
-                    if (!fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
-                        logger.error(`Stream ${streamId} failed to start within timeout`);
-                        this.stopStreaming(streamId);
-                        reject(new Error('Stream start timeout'));
-                    }
-                }, 30000);
-
             } catch (error) {
+                this.handleStreamError(streamId, error, isManualStart);
                 reject(error);
             }
+        }).catch(error => {
+            // 捕获并处理 Promise 的错误，避免未处理的 rejection
+            logger.error(`Error in startStreamingWithFFmpeg for stream ${streamId}:`, error);
+            // 不再抛出错误，而是返回一个表示失败的结果
+            return { success: false, error };
         });
+    }
+
+    // 添加新的错误处理方法
+    async handleStreamError(streamId, error, isManualStart) {
+        try {
+            logger.error(`Stream error for ${streamId}:`, error);
+
+            // 更新重试次数
+            const retryCount = (this.streamRetries.get(streamId) || 0) + 1;
+            this.streamRetries.set(streamId, retryCount);
+
+            // 更新流状态
+            if (retryCount >= 3) {
+                this.streamStatus.set(streamId, 'invalid');
+                this.emit('streamStatusChanged', streamId, 'invalid');
+                logger.error(`Stream ${streamId} marked as invalid after 3 retries`);
+                
+                // 停止流
+                await this.stopStreaming(streamId);
+            } else {
+                this.streamStatus.set(streamId, 'retrying');
+                this.emit('streamStatusChanged', streamId, 'retrying');
+                
+                // 1分钟后重试
+                setTimeout(() => {
+                    if (this.streams.has(streamId)) { // 确保流还存在
+                        this.startStreaming(streamId, isManualStart).catch(err => {
+                            logger.error(`Retry failed for stream ${streamId}:`, err);
+                        });
+                    }
+                }, 60000);
+            }
+        } catch (error) {
+            logger.error(`Error handling stream error for ${streamId}:`, error);
+        }
     }
 
     // 加清理旧分的方法
@@ -720,7 +725,6 @@ class StreamManager extends EventEmitter {
 
     async stopStreaming(streamId) {
         try {
-            const wasManuallyStarted = this.manuallyStartedStreams.has(streamId);
             const processes = this.streamProcesses.get(streamId);
             if (processes) {
                 // 停止 FFmpeg 进程
@@ -733,65 +737,24 @@ class StreamManager extends EventEmitter {
                     }
                 }
                 
-                // 清理进程引用
+                // 清理所有状态
                 this.streamProcesses.delete(streamId);
-                
-                // 清理手动启动标记
                 this.manuallyStartedStreams.delete(streamId);
+                this.activeViewers.delete(streamId);
                 
-                // 重置统计信息
-                const stats = this.streamStats.get(streamId);
-                if (stats) {
-                    stats.startTime = null;
-                    stats.uptime = 0;
-                    stats.errors = 0;
-                }
-
-                // 更新流配置中的状态
-                const stream = this.streams.get(streamId);
-                if (stream) {
-                    stream.stats = {
-                        ...stream.stats,
-                        startTime: null,
-                        lastStopped: new Date()
-                    };
-                }
-                
-                // 清理健康检查定时器
-                if (this.healthChecks.has(streamId)) {
-                    clearInterval(this.healthChecks.get(streamId));
-                    this.healthChecks.delete(streamId);
-                }
-
-                // 清理自动停止定时器
+                // 清理定时器
                 if (this.autoStopTimers.has(streamId)) {
                     clearTimeout(this.autoStopTimers.get(streamId));
                     this.autoStopTimers.delete(streamId);
                 }
-
-                // 清理观看者数
-                this.activeViewers.delete(streamId);
                 
                 // 清理文件
                 const outputPath = path.join(__dirname, '../streams', streamId);
                 if (fs.existsSync(outputPath)) {
-                    try {
-                        const files = fs.readdirSync(outputPath);
-                        for (const file of files) {
-                            if (file.endsWith('.ts') || file.endsWith('.m3u8')) {
-                                fs.unlinkSync(path.join(outputPath, file));
-                            }
-                        }
-                        fs.rmdirSync(outputPath);
-                    } catch (error) {
-                        logger.error(`Error cleaning up files for stream ${streamId}:`, error);
-                    }
+                    fs.rmSync(outputPath, { recursive: true });
                 }
                 
-                // 保存配置
-                await this.saveStreams();
-                
-                logger.info(`Stream stopped: ${streamId} (was manually started: ${wasManuallyStarted})`);
+                logger.info(`Stream stopped: ${streamId}`);
                 return true;
             }
             return false;

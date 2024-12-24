@@ -375,10 +375,15 @@ router.get('/api/config', (req, res) => {
     }
 });
 
-// 添加更新流的路由
+// 修改更新流的路由
 router.put('/api/streams/:streamId', async (req, res) => {
     try {
         const { streamId } = req.params;
+        
+        // 先停止流
+        await streamManager.stopStreaming(streamId);
+        
+        // 然后更新配置
         const result = await streamManager.updateStream(streamId, req.body);
         res.json(result);
     } catch (error) {
@@ -655,6 +660,27 @@ router.post('/api/streams/batch-auto-config', async (req, res) => {
         res.json({
             success: false,
             error: error.message
+        });
+    }
+});
+
+// 修改启动流的路由
+router.post('/api/streams/:id/start', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { rtmpPush } = req.body;
+        
+        const result = await streamManager.startStreaming(id, rtmpPush);
+        if (!result.success) {
+            throw new Error(result.error);
+        }
+        
+        res.json({ success: true });
+    } catch (error) {
+        logger.error(`Error starting stream: ${id}`, error);
+        res.json({ 
+            success: false, 
+            error: error.message || '启动流失败'
         });
     }
 });
