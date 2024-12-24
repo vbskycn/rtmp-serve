@@ -282,9 +282,9 @@
                                     <th class="check-column">
                                         <input type="checkbox" id="selectAll" onclick="toggleSelectAll()">
                                     </th>
-                                    <th style="width: 15%">名称</th>
+                                    <th style="width: 10%">名称</th>
                                     <th style="width: 7%">状态</th>
-                                    <th style="width: 7%">推流状态</th>
+                                    <th style="width: 12%">推流状态</th>
                                     <th style="width: 18%">源地址</th>
                                     <th style="width: 23%">播放地址</th>
                                     <th style="width: 30%">操作</th>
@@ -556,8 +556,8 @@
                                     <button onclick="stopStream('${stream.id}')" class="btn btn-secondary btn-sm">
                                         <i class="fa fa-stop"></i> 停止
                                     </button>
-                                    <button onclick="toggleAutoStart('${stream.id}', ${!stream.autoStart})" 
-                                            class="btn ${stream.autoStart ? 'btn-warning' : 'btn-success'} btn-sm auto-start-btn">
+                                    <button class="btn ${stream.autoStart ? 'btn-warning' : 'btn-success'} btn-sm auto-start-btn" 
+                                            onclick="toggleAutoStart('${stream.id}', ${!stream.autoStart})">
                                         <i class="fa ${stream.autoStart ? 'fa-moon-o' : 'fa-sun-o'}"></i> 
                                         ${stream.autoStart ? '自启关' : '自启开'}
                                     </button>
@@ -1733,9 +1733,17 @@
             }
         }
 
-        // ���加切���自动启动的函数
+        // 修改批量自启动处理函数
         async function toggleAutoStart(streamId, enable) {
             try {
+                // 显示加载提示
+                const button = document.querySelector(`button[onclick="toggleAutoStart('${streamId}', ${!enable})"]`);
+                if (button) {
+                    const originalHtml = button.innerHTML;
+                    button.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 处理中...';
+                    button.disabled = true;
+                }
+
                 // 1. 设置自动启动状态
                 const autoStartResponse = await fetch(`/api/streams/${streamId}/auto-start`, {
                     method: 'POST',
@@ -1745,15 +1753,8 @@
                     body: JSON.stringify({ autoStart: enable })
                 });
 
-                // 检查响应类型
-                const contentType = autoStartResponse.headers.get('content-type');
-                if (!contentType || !contentType.includes('application/json')) {
-                    if (autoStartResponse.status === 401) {
-                        alert('会话已过期，请重新登录');
-                        window.location.href = '/login.html';
-                        return;
-                    }
-                    throw new Error('服务器返回了非预期的响应类型');
+                if (!autoStartResponse.ok) {
+                    throw new Error('请求失败: ' + autoStartResponse.status);
                 }
 
                 const autoStartResult = await autoStartResponse.json();
@@ -1771,6 +1772,10 @@
                         body: JSON.stringify({ rtmpPush: true })
                     });
 
+                    if (!startResponse.ok) {
+                        throw new Error('启动流失败: ' + startResponse.status);
+                    }
+
                     const startResult = await startResponse.json();
                     if (!startResult.success) {
                         throw new Error(startResult.error || '启动流失败');
@@ -1780,13 +1785,27 @@
                 // 3. 刷新列表以更新状态
                 await loadStreams();
 
+                // 显示成功提示
+                const toast = document.createElement('div');
+                toast.className = 'alert alert-success position-fixed bottom-0 end-0 m-3';
+                toast.style.zIndex = '9999';
+                toast.textContent = enable ? '已开启自动启动' : '已关闭自动启动';
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 2000);
+
             } catch (error) {
                 console.error('Error toggling auto-start:', error);
-                if (error.message.includes('<!DOCTYPE')) {
-                    alert('会话已过期，请重新登录');
-                    window.location.href = '/login.html';
-                } else {
-                    alert('设置自动启动失败: ' + error.message);
+                // 显示错误提示
+                alert('设置自动启动失败: ' + error.message);
+            } finally {
+                // 恢复按钮状态
+                const button = document.querySelector(`button[onclick="toggleAutoStart('${streamId}', ${!enable})"]`);
+                if (button) {
+                    button.innerHTML = `
+                        <i class="fa ${enable ? 'fa-moon-o' : 'fa-sun-o'}"></i> 
+                        ${enable ? '自启关' : '自启开'}
+                    `;
+                    button.disabled = false;
                 }
             }
         }

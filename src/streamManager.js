@@ -332,17 +332,24 @@ class StreamManager extends EventEmitter {
             if (processInfo && processInfo.ffmpeg) {
                 try {
                     process.kill(processInfo.ffmpeg.pid, 0);
-                    isProcessRunning = true;
+                    // 检查进程是否真正启动了流
+                    isProcessRunning = processInfo.streamStarted === true;
                 } catch (e) {
                     isProcessRunning = false;
+                    // 清理无效的进程信息
+                    this.streamProcesses.delete(streamId);
+                    this.manuallyStartedStreams.delete(streamId);
                 }
             }
+
+            // 检查 HLS 文件是否存在且最近有更新
+            const hlsActive = await this.checkHlsStatus(streamId);
 
             // 确定流状态
             let finalStatus;
             if (retries >= this.MAX_RETRIES) {
                 finalStatus = 'invalid';  // 已失效
-            } else if (isProcessRunning && status === 'running') {
+            } else if ((isProcessRunning || hlsActive) && status === 'running') {
                 finalStatus = 'running';  // 已运行
             } else {
                 finalStatus = 'stopped';  // 已停止
@@ -355,7 +362,7 @@ class StreamManager extends EventEmitter {
 
             return {
                 ...stream,
-                processRunning: isProcessRunning,
+                processRunning: isProcessRunning || hlsActive,  // 如果HLS活跃也认为是运行中
                 status: finalStatus,
                 isRtmpActive,
                 stats: this.streamStats.get(streamId) || {},
@@ -364,6 +371,44 @@ class StreamManager extends EventEmitter {
         } catch (error) {
             logger.error(`Error getting stream info for ${streamId}:`, error);
             return null;
+        }
+    }
+
+    // 添加检查 HLS 状态的方法
+    async checkHlsStatus(streamId) {
+        try {
+            const playlistPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
+            if (!fs.existsSync(playlistPath)) {
+                return false;
+            }
+
+            // 检查文件最后修改时间
+            const stats = fs.statSync(playlistPath);
+            const fileAge = Date.now() - stats.mtimeMs;
+            
+            // 如果文件在最近30秒内有更新，认为是活跃的
+            if (fileAge < 30000) {
+                return true;
+            }
+
+            // 检查最新的 ts 文件
+            const streamDir = path.join(__dirname, '../streams', streamId);
+            const files = fs.readdirSync(streamDir);
+            const tsFiles = files.filter(f => f.endsWith('.ts'));
+            
+            if (tsFiles.length > 0) {
+                const latestTs = tsFiles.sort().pop();
+                const tsStats = fs.statSync(path.join(streamDir, latestTs));
+                const tsAge = Date.now() - tsStats.mtimeMs;
+                
+                // 如果最新的ts文件在30秒内有更新，认为是活跃的
+                return tsAge < 30000;
+            }
+
+            return false;
+        } catch (error) {
+            logger.error(`Error checking HLS status for ${streamId}:`, error);
+            return false;
         }
     }
 
@@ -475,14 +520,26 @@ class StreamManager extends EventEmitter {
             return new Promise((resolve, reject) => {
                 try {
                     const ffmpeg = spawn('ffmpeg', args);
-                    let ffmpegError = '';
-                    let hasStarted = false;
-                    let consecutiveErrors = 0;
                     let streamStarted = false;
-                    const MAX_SEGMENT_ERRORS = 3;
+                    let consecutiveErrors = 0;
 
                     ffmpeg.stderr.on('data', (data) => {
                         const message = data.toString();
+                        
+                        // 检测成功的标志
+                        if (message.includes('Opening') || 
+                            message.includes('Stream mapping')) {
+                            consecutiveErrors = 0;
+                            if (!streamStarted) {
+                                streamStarted = true;
+                                // 更新进程信息
+                                this.streamProcesses.set(streamId, {
+                                    ffmpeg,
+                                    streamStarted: true
+                                });
+                                this.streamStatus.set(streamId, 'running');
+                            }
+                        }
                         
                         // 检测分片错误
                         if (message.includes('Failed to open segment')) {
@@ -523,18 +580,6 @@ class StreamManager extends EventEmitter {
                                 return;
                             }
                         }
-                        // 检测成功的标志
-                        else if (message.includes('Opening') || 
-                                message.includes('Stream mapping')) {
-                            consecutiveErrors = 0;
-                            if (!streamStarted) {
-                                streamStarted = true;
-                                this.streamStatus.set(streamId, 'running');
-                                if (isRtmpPush) {
-                                    this.manuallyStartedStreams.add(streamId);
-                                }
-                            }
-                        }
                     });
 
                     ffmpeg.on('exit', (code, signal) => {
@@ -549,6 +594,12 @@ class StreamManager extends EventEmitter {
                             this.cleanupStream(streamId);
                             resolve({ success: true });
                         }
+                    });
+
+                    // 初始化进程信息
+                    this.streamProcesses.set(streamId, {
+                        ffmpeg,
+                        streamStarted: false
                     });
 
                     // 等待流启动
@@ -573,12 +624,10 @@ class StreamManager extends EventEmitter {
                     }, 3000);
 
                 } catch (error) {
-                    this.cleanupStream(streamId);
                     reject(error);
                 }
             });
         } catch (error) {
-            this.cleanupStream(streamId);
             throw error;
         }
     }
