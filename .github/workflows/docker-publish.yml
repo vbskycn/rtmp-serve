@@ -78,3 +78,8 @@ jobs:
           echo "Repository: ${{ env.DOCKER_HUB_USERNAME }}/${{ env.IMAGE_NAME }}"
           echo "Version tag: ${{ steps.set_version.outputs.version }}"
           echo "Latest tag: latest" 
+
+# 添加环境变量配置
+environment:
+  SERVER_HOST: "your.server.ip"  # 实际的服务器IP或域名
+  SERVER_PORT: "3000"            # 实际的服务端口 

@@ -202,14 +202,12 @@
         const MAX_RECONNECT_ATTEMPTS = 10;
         const RECONNECT_DELAY = 5000;
 
-        async function initPlayer() {
+        async function initPlayer(playUrl) {
             try {
                 // 获取流信息
                 const response = await fetch(`/api/streams/${streamId}`);
                 const stream = await response.json();
                 document.querySelector('.stream-title').textContent = stream.name;
-
-                const playUrl = `/play/${streamId}`;
 
                 // 销毁现有播放器
                 if (dp) {
@@ -552,6 +550,30 @@
         // 初始化
         loadPlaylist();
         initPlayer();
+
+        async function loadStreamInfo() {
+            try {
+                // 获取服务器配置
+                const configResponse = await fetch('/api/config');
+                const config = await configResponse.json();
+                const serverHost = config.server.host;
+                const serverPort = config.server.port;
+
+                const streamId = new URLSearchParams(window.location.search).get('id');
+                if (!streamId) return;
+
+                const response = await fetch(`/api/streams/${streamId}`);
+                const stream = await response.json();
+                
+                if (stream) {
+                    document.title = stream.name;
+                    const playUrl = `http://${serverHost}:${serverPort}/play/${stream.id}`;
+                    initPlayer(playUrl);
+                }
+            } catch (error) {
+                console.error('Error loading stream:', error);
+            }
+        }
     </script>
 </body>
 </html> 

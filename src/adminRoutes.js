@@ -79,9 +79,14 @@ router.post('/api/streams', async (req, res) => {
 router.get('/api/streams', async (req, res) => {
     try {
         const streams = [];
+        const serverHost = process.env.SERVER_HOST || req.hostname;
+        const serverPort = process.env.SERVER_PORT || config.server.port;
+        
         for (const [id, streamConfig] of streamManager.streams.entries()) {
             const streamInfo = await streamManager.getStreamInfo(id);
             if (streamInfo) {
+                // 添加完整的播放地址
+                streamInfo.playUrl = `http://${serverHost}:${serverPort}/play/${id}`;
                 streams.push(streamInfo);
             }
         }
@@ -357,9 +362,16 @@ async function checkStreamStatus(streamId) {
 // 添加获取服务器配置的路由
 router.get('/api/config', (req, res) => {
     try {
+        // 获取实际的服务器 IP
+        const serverHost = process.env.SERVER_HOST || req.hostname;
+        const serverPort = process.env.SERVER_PORT || config.server.port;
+        
         res.json({
             version: config.version,
-            server: config.server,
+            server: {
+                host: serverHost,
+                port: serverPort
+            },
             rtmp: config.rtmp
         });
     } catch (error) {

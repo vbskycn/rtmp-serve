@@ -63,18 +63,25 @@ class StreamManager extends EventEmitter {
     loadConfig() {
         try {
             this.config = require('../config/config.json');
+            
+            // 如果配置中的 host 是 auto，则尝试获取实际 IP
+            if (this.config.server.host === 'auto') {
+                // 这里先设置一个默认值，实际 IP 会在服务启动时通过 API 更新
+                this.config.server.host = process.env.SERVER_HOST || 'localhost';
+            }
+            
             logger.info(`Loaded config with version: ${this.config.version}`);
         } catch (error) {
             logger.error('Error loading config:', error);
             this.config = {
                 version: process.env.APP_VERSION || 'unknown',
                 server: {
-                    host: 'localhost',
-                    port: 3000
+                    host: process.env.SERVER_HOST || 'localhost',
+                    port: process.env.SERVER_PORT || 3000
                 },
                 rtmp: {
-                    pushServer: 'rtmp://ali.push.yximgs.com/live/',
-                    pullServer: 'http://ali.hlspull.yximgs.com/live/'
+                    pushServer: process.env.RTMP_PUSH_SERVER || 'rtmp://ali.push.yximgs.com/live/',
+                    pullServer: process.env.RTMP_PULL_SERVER || 'http://ali.hlspull.yximgs.com/live/'
                 }
             };
         }
