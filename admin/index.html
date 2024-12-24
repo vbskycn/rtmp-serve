@@ -5,6 +5,28 @@
     <link href="https://lf9-cdn-tos.bytecdntp.com/cdn/expire-1-M/twitter-bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://lf9-cdn-tos.bytecdntp.com/cdn/expire-1-M/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet">
     <link href="css/style.css" rel="stylesheet">
+    <style>
+        .auto-start-btn.btn-primary {
+            background-color: #28a745;  /* 绿色 */
+            border-color: #28a745;
+            font-weight: bold;
+        }
+
+        .auto-start-btn.btn-danger {
+            background-color: #dc3545;  /* 红色 */
+            border-color: #dc3545;
+            font-weight: bold;
+        }
+
+        .auto-start-btn:hover {
+            transform: scale(1.05);
+            transition: transform 0.2s;
+        }
+
+        .auto-start-btn i {
+            margin-right: 4px;
+        }
+    </style>
 </head>
 <body>
     <!-- 顶部状态栏 -->
@@ -158,14 +180,17 @@
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0"><i class="fa fa-list"></i> 流列表</h5>
                     <div class="btn-group">
-                        <button onclick="batchManualStart()" class="btn btn-warning btn-sm" id="batchRestartBtn" disabled>
-                            <i class="fa fa-refresh"></i> 批量手动启动
-                        </button>
                         <button onclick="batchStop()" class="btn btn-secondary btn-sm" id="batchStopBtn" disabled>
                             <i class="fa fa-stop"></i> 批量停止
                         </button>
                         <button onclick="batchDelete()" class="btn btn-danger btn-sm" id="batchDeleteBtn" disabled>
                             <i class="fa fa-trash"></i> 批量删除
+                        </button>
+                        <button onclick="batchAutoStart(true)" class="btn btn-success btn-sm" id="batchAutoStartOnBtn" disabled>
+                            <i class="fa fa-sun-o"></i> 自启开
+                        </button>
+                        <button onclick="batchAutoStart(false)" class="btn btn-warning btn-sm" id="batchAutoStartOffBtn" disabled>
+                            <i class="fa fa-moon-o"></i> 自启关
                         </button>
                         <button onclick="refreshStreams()" class="btn btn-light btn-sm">
                             <i class="fa fa-refresh"></i> 刷新
@@ -184,12 +209,6 @@
                         </button>
                         <button onclick="exportSourceUrls()" class="btn btn-light btn-sm">
                             <i class="fa fa-download"></i> 导出源地址
-                        </button>
-                        <button onclick="batchAutoConfig('autoPlay', true)" class="btn btn-primary btn-sm">
-                            批量开启自动启停
-                        </button>
-                        <button onclick="batchAutoConfig('autoStart', true)" class="btn btn-primary btn-sm">
-                            批量开启自动启动
                         </button>
                     </div>
                 </div>
@@ -300,7 +319,7 @@
             }
         }
 
-        // 添加平滑更新统计元素的函数
+        // 添加平滑更新���计元素的函数
         function updateStatElement(elementId, newValue) {
             const element = document.getElementById(elementId);
             if (element.textContent !== String(newValue)) {
@@ -450,8 +469,8 @@
                                         <i class="fa fa-stop"></i> 停止
                                     </button>
                                     <button onclick="toggleAutoStart('${stream.id}', ${!stream.autoStart})" 
-                                            class="btn ${stream.autoStart ? 'btn-warning' : 'btn-light'} btn-sm">
-                                        <i class="fa ${stream.autoStart ? 'fa-sun-o' : 'fa-moon-o'}"></i> 
+                                            class="btn ${stream.autoStart ? 'btn-danger' : 'btn-primary'} btn-sm auto-start-btn">
+                                        <i class="fa ${stream.autoStart ? 'fa-power-off' : 'fa-power-off'}"></i> 
                                         ${stream.autoStart ? '自启关' : '自启开'}
                                     </button>
                                     <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
@@ -754,9 +773,15 @@
         // 更新量操作按钮状态
         function updateBatchButtons() {
             const selectedCount = getSelectedStreams().length;
-            document.getElementById('batchRestartBtn').disabled = selectedCount === 0;
-            document.getElementById('batchStopBtn').disabled = selectedCount === 0;
-            document.getElementById('batchDeleteBtn').disabled = selectedCount === 0;
+            const batchStopBtn = document.getElementById('batchStopBtn');
+            const batchDeleteBtn = document.getElementById('batchDeleteBtn');
+            const batchAutoStartOnBtn = document.getElementById('batchAutoStartOnBtn');
+            const batchAutoStartOffBtn = document.getElementById('batchAutoStartOffBtn');
+
+            batchStopBtn.disabled = selectedCount === 0;
+            batchDeleteBtn.disabled = selectedCount === 0;
+            batchAutoStartOnBtn.disabled = selectedCount === 0;
+            batchAutoStartOffBtn.disabled = selectedCount === 0;
         }
 
         // 获取选中的流
@@ -1656,6 +1681,63 @@
                 } else {
                     alert('设置自动启动失败: ' + error.message);
                 }
+            }
+        }
+
+        // 添加批量自启动处理函数
+        async function batchAutoStart(enable) {
+            const selectedStreams = getSelectedStreams();
+            if (!selectedStreams.length) {
+                alert('请先选择要操作的流');
+                return;
+            }
+
+            // 显示进度模态框
+            const modal = showProgressModal(`批量${enable ? '开启' : '关闭'}自动启动`);
+            
+            try {
+                let success = 0;
+                let failed = 0;
+                
+                for (const streamId of selectedStreams) {
+                    try {
+                        const response = await fetch(`/api/streams/${streamId}/auto-start`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ autoStart: enable })
+                        });
+
+                        const result = await response.json();
+                        if (result.success) {
+                            success++;
+                        } else {
+                            failed++;
+                        }
+                    } catch (error) {
+                        console.error(`Error setting auto-start for stream ${streamId}:`, error);
+                        failed++;
+                    }
+                }
+
+                // 更新进度显示
+                updateProgressModal(modal, {
+                    success,
+                    failed,
+                    total: selectedStreams.length
+                });
+
+                // 3秒后关闭进度模态框
+                setTimeout(() => {
+                    modal.remove();
+                    loadStreams(); // 刷新列表
+                }, 3000);
+
+            } catch (error) {
+                console.error('Error in batch auto-start:', error);
+                alert('批量设置失败: ' + error.message);
+                modal.remove();
             }
         }
     </script>

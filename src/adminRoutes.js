@@ -562,19 +562,19 @@ router.get('/api/servers', verifyToken, (req, res) => {
 });
 
 // 修改启动流的路由
-router.post('/api/streams/:id/start', authMiddleware, async (req, res) => {
+router.post('/api/streams/:streamId/start', authMiddleware, async (req, res) => {
     try {
-        const { id } = req.params;
+        const { streamId } = req.params;
         const { rtmpPush } = req.body;
         
-        const result = await streamManager.startStreaming(id, rtmpPush);
+        const result = await streamManager.startStreaming(streamId, rtmpPush);
         if (!result.success) {
             throw new Error(result.error);
         }
         
         res.json({ success: true });
     } catch (error) {
-        logger.error(`Error starting stream: ${id}`, error);
+        logger.error(`Error starting stream: ${streamId}`, error);
         res.json({ 
             success: false, 
             error: error.message || '启动流失败'

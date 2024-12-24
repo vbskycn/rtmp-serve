@@ -129,6 +129,14 @@ class StreamManager extends EventEmitter {
         setTimeout(() => {
             this.startAutoStartStreams();
         }, 5000); // 延迟5秒启动，等待系统初始化
+
+        // 确保streams目录存在且有正确的权限
+        const streamsDir = path.join(__dirname, '../streams');
+        if (!fs.existsSync(streamsDir)) {
+            fs.mkdirSync(streamsDir, { recursive: true, mode: 0o777 });
+        } else {
+            fs.chmodSync(streamsDir, 0o777);
+        }
     }
 
     // 加载保存的流配置
@@ -367,163 +375,103 @@ class StreamManager extends EventEmitter {
     }
 
     async startStreamingWithFFmpeg(streamId, streamConfig, isManualStart = false) {
-        const { spawn } = require('child_process');
-        const outputPath = path.join(__dirname, '../streams', streamId);
-        
-        if (!fs.existsSync(outputPath)) {
-            fs.mkdirSync(outputPath, { recursive: true });
-        }
+        try {
+            // 确保输出目录存在
+            const outputPath = path.join(__dirname, '../streams', streamId);
+            if (!fs.existsSync(outputPath)) {
+                fs.mkdirSync(outputPath, { recursive: true, mode: 0o777 }); // 添加权限设置
+            }
 
-        // 如果已经有进程在运行，先停止它
-        if (this.streamProcesses.has(streamId)) {
-            await this.stopStreaming(streamId);
-        }
-
-        // 构建 FFmpeg 输入参数
-        const inputArgs = [
-            '-hide_banner',
-            '-nostats',
-            '-y',
-            '-fflags', '+genpts+igndts+discardcorrupt',
-            '-avoid_negative_ts', 'make_zero',
-            '-analyzeduration', '2000000',
-            '-probesize', '1000000',
-            '-rw_timeout', '5000000',
-            '-thread_queue_size', '4096',
-            '-reconnect', '1',
-            '-reconnect_streamed', '1',
-            '-reconnect_delay_max', '2',
-            '-multiple_requests', '1',
-            '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            '-i', streamConfig.url
-        ];
-
-        // 构建 FFmpeg 输出参数
-        const outputArgs = [
-            // HLS输出
-            '-c:v', 'copy',
-            '-c:a', 'aac',
-            '-b:a', '128k',
-            '-ac', '2',
-            '-ar', '44100',
-            '-f', 'hls',
-            '-hls_time', '2',
-            '-hls_list_size', '6',
-            '-hls_flags', 'delete_segments+append_list+discont_start+independent_segments',
-            '-hls_segment_type', 'mpegts',
-            '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
-            `${outputPath}/playlist.m3u8`
-        ];
-
-        // 如果是手动启动，添加 RTMP 推流输出
-        if (isManualStart || this.manuallyStartedStreams.has(streamId)) {
-            outputArgs.push(
+            // 设置 FFmpeg 参数
+            const args = [
+                '-i', streamConfig.url,
+                // HLS 输出
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-ar', '44100',
+                '-hls_time', '10',
+                '-hls_list_size', '6',
+                '-hls_flags', 'delete_segments',
+                '-hls_segment_filename', path.join(outputPath, 'segment_%d.ts'),
+                path.join(outputPath, 'playlist.m3u8'),
+                // RTMP 输出
                 '-c:v', 'copy',
                 '-c:a', 'aac',
                 '-f', 'flv',
                 `${this.config.rtmp.pushServer}${streamId}`
-            );
-            // 确保流被标记为手动启动
-            this.manuallyStartedStreams.add(streamId);
-            logger.info(`Adding RTMP output for manually started stream: ${streamId}`);
-        }
+            ];
 
-        // 合并所有参数
-        const args = [...inputArgs, ...outputArgs];
+            return new Promise((resolve, reject) => {
+                try {
+                    // 确保目录有正确的权限
+                    fs.chmodSync(outputPath, 0o777);
 
-        logger.info(`Starting FFmpeg for stream: ${streamId} (manual: ${isManualStart})`);
-        logger.debug(`FFmpeg command: ffmpeg ${args.join(' ')}`);
+                    const ffmpeg = spawn('ffmpeg', args);
+                    let ffmpegError = '';
+                    let hasStarted = false;
 
-        return new Promise((resolve, reject) => {
-            try {
-                const ffmpeg = spawn('ffmpeg', args);
-                let ffmpegError = '';
-                let retryCount = 0;
-                const maxRetries = 3;
-                const retryDelay = 5000;
+                    ffmpeg.stderr.on('data', (data) => {
+                        const message = data.toString();
+                        ffmpegError += message;
 
-                ffmpeg.stderr.on('data', (data) => {
-                    const message = data.toString();
-                    ffmpegError += message;
-
-                    // 检查是否是致命错误
-                    const isFatalError = 
-                        message.includes('Connection timed out') ||
-                        message.includes('Server returned 404') || 
-                        message.includes('Failed to open segment') ||
-                        message.includes('Error when loading first segment') ||
-                        message.includes('Failed to reload playlist');
-
-                    if (isFatalError) {
-                        const stats = this.streamStats.get(streamId);
-                        if (stats) {
-                            stats.errors++;
+                        // 检查是否是致命错误
+                        if (message.includes('No such file or directory') ||
+                            message.includes('Permission denied')) {
+                            logger.error(`FFmpeg permission error for stream ${streamId}:`, message);
+                            ffmpeg.kill('SIGTERM');
+                            reject(new Error('Permission error'));
+                            return;
                         }
-                    }
 
-                    // 只记录重要的错误信息
-                    if (message.includes('Error') || 
-                        message.includes('Failed') ||
-                        message.includes('Invalid') ||
-                        message.includes('timeout')) {
-                        logger.error(`FFmpeg stderr: ${message}`);
-                    }
-                });
+                        // 记录重要的错误信息
+                        if (message.includes('Error') || 
+                            message.includes('Failed') ||
+                            message.includes('Invalid')) {
+                            logger.error(`FFmpeg stderr: ${message}`);
+                        }
+                    });
 
-                ffmpeg.on('error', (error) => {
-                    logger.error(`FFmpeg error for stream ${streamId}:`, error);
-                    this.handleStreamError(streamId, error, isManualStart);
+                    ffmpeg.on('error', (error) => {
+                        logger.error(`FFmpeg spawn error for stream ${streamId}:`, error);
+                        reject(error);
+                    });
+
+                    ffmpeg.on('exit', (code, signal) => {
+                        if (code !== 0) {
+                            const error = new Error(`FFmpeg exited with code ${code}`);
+                            if (ffmpegError) {
+                                logger.error(`FFmpeg stderr: ${ffmpegError}`);
+                            }
+                            reject(error);
+                        } else if (hasStarted) {
+                            resolve();
+                        }
+                    });
+
+                    // 保存进程引用
+                    this.streamProcesses.set(streamId, {
+                        ffmpeg,
+                        startTime: new Date(),
+                        isManualStart: isManualStart
+                    });
+
+                    // 等待流启动
+                    this.waitForStream(streamId, outputPath)
+                        .then(() => {
+                            hasStarted = true;
+                            resolve();
+                        })
+                        .catch(reject);
+
+                } catch (error) {
+                    logger.error(`Error in startStreamingWithFFmpeg for stream ${streamId}:`, error);
                     reject(error);
-                });
-
-                ffmpeg.on('exit', (code) => {
-                    if (code !== 0) {
-                        logger.error(`FFmpeg exited with code ${code} for stream ${streamId}`);
-                        logger.error(`FFmpeg stderr: ${ffmpegError}`);
-                        
-                        const error = new Error(`FFmpeg exited with code ${code}`);
-                        this.handleStreamError(streamId, error, isManualStart);
-                        reject(error);
-                    }
-                });
-
-                // 保存进程引用
-                this.streamProcesses.set(streamId, {
-                    ffmpeg,
-                    startTime: new Date(),
-                    isManualStart: isManualStart || this.manuallyStartedStreams.has(streamId)
-                });
-
-                // 等待播放列表文件创建
-                let checkAttempts = 0;
-                const maxCheckAttempts = 30; // 30秒超时
-                const checkInterval = setInterval(() => {
-                    const playlistPath = path.join(outputPath, 'playlist.m3u8');
-                    if (fs.existsSync(playlistPath)) {
-                        clearInterval(checkInterval);
-                        resolve();
-                        return;
-                    }
-
-                    checkAttempts++;
-                    if (checkAttempts >= maxCheckAttempts) {
-                        clearInterval(checkInterval);
-                        const error = new Error('Stream start timeout');
-                        this.handleStreamError(streamId, error, isManualStart);
-                        reject(error);
-                    }
-                }, 1000);
-
-            } catch (error) {
-                this.handleStreamError(streamId, error, isManualStart);
-                reject(error);
-            }
-        }).catch(error => {
-            // 捕获并处理 Promise 的错误，避免未处理的 rejection
-            logger.error(`Error in startStreamingWithFFmpeg for stream ${streamId}:`, error);
-            // 不再抛出错误，而是返回一个表示失败的结果
-            return { success: false, error };
-        });
+                }
+            });
+        } catch (error) {
+            logger.error(`Error setting up FFmpeg for stream ${streamId}:`, error);
+            throw error;
+        }
     }
 
     // 添加新的错误处理方法
@@ -623,7 +571,7 @@ class StreamManager extends EventEmitter {
                 return;
             }
 
-            // 检查失败次数
+            // 检查失��次数
             const failureCount = this.failureCount.get(streamId) || 0;
             if (failureCount >= 3) {
                 logger.info(`Stream ${streamId} has failed too many times, marking as invalid`);
