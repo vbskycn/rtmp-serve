@@ -76,6 +76,21 @@
         .stream-actions .btn-group {
             white-space: nowrap;
         }
+
+        /* 在现有style标签中添加 */
+        .status {
+            padding: 2px 8px;
+            border-radius: 4px;
+            color: white;
+            font-size: 12px;
+            display: inline-block;
+            text-align: center;
+            min-width: 80px;
+        }
+
+        .table td {
+            vertical-align: middle;
+        }
     </style>
 </head>
 <body>
@@ -410,14 +425,16 @@
             // 更新推流状态
             const rtmpStatusCell = row.querySelector('.rtmp-status');
             if (rtmpStatusCell) {
-                const rtmpStatusStyle = stream.isRtmpActive ? 
-                    'background-color: #28a745;' : 
-                    'background-color: #6c757d;';
-                
-                const rtmpStatusText = stream.isRtmpActive ? '推流中' : '未推流';
-                
-                rtmpStatusCell.style = rtmpStatusStyle;
-                rtmpStatusCell.textContent = rtmpStatusText;
+                rtmpStatusCell.innerHTML = `
+                    <div class="d-flex flex-column">
+                        <span class="status mb-1" style="background-color: ${stream.processRunning ? '#28a745' : '#6c757d'};">
+                            HLS: ${stream.processRunning ? '推流中' : '未推流'}
+                        </span>
+                        <span class="status" style="background-color: ${stream.isRtmpActive ? '#28a745' : '#6c757d'};">
+                            RTMP: ${stream.isRtmpActive ? '推流中' : '未推流'}
+                        </span>
+                    </div>
+                `;
             }
 
             // 更新自启动按钮状态
@@ -457,18 +474,22 @@
                         const isManuallyStarted = stream.manuallyStarted;
                         
                         // 修改状态判断逻辑
-                        let statusClass = 'inactive';
-                        let statusText = '已停止';
+                        let statusClass = '';
+                        let statusText = '';
+                        let statusStyle = '';
                         
-                        // 检查流是否失效
-                        if (stream.invalid) {
+                        if (stream.status === 'invalid') {
                             statusClass = 'error';
                             statusText = '已失效';
-                        } 
-                        // 检查流是否在（包括通过播放链接启动的）
-                        else if (stream.processRunning || stream.stats?.startTime) {
+                            statusStyle = 'background-color: #dc3545;';  // 红色
+                        } else if (stream.status === 'running') {
                             statusClass = 'active';
                             statusText = '运行中';
+                            statusStyle = 'background-color: #28a745;';  // 绿色
+                        } else {
+                            statusClass = 'inactive';
+                            statusText = '已停止';
+                            statusStyle = 'background-color: #6c757d;';  // 灰色
                         }
 
                         // 添加状态样式
@@ -498,9 +519,14 @@
                                 </span>
                             </td>
                             <td>
-                                <span class="status" style="${rtmpStatusStyle}">
-                                    ${rtmpStatusText}
+                                <div class="d-flex flex-column">
+                                    <span class="status mb-1" style="background-color: ${stream.processRunning ? '#28a745' : '#6c757d'};">
+                                        HLS: ${stream.processRunning ? '推流中' : '未推流'}
                                 </span>
+                                    <span class="status" style="background-color: ${stream.isRtmpActive ? '#28a745' : '#6c757d'};">
+                                        RTMP: ${stream.isRtmpActive ? '推流中' : '未推流'}
+                                    </span>
+                                </div>
                             </td>
                             <td>
                                 <div class="d-flex align-items-center">
@@ -708,8 +734,8 @@
             await loadServerConfig();
             await loadStreams();
             
-            // 每10秒更新一次状态
-            setInterval(loadStreams, 10000);
+            // 每5秒更新一次状态
+            setInterval(loadStreams, 5000);  // 从10000改为5000
         }
 
         // 启动始化
@@ -930,7 +956,7 @@
                         updateProgress(`跳过已手动启动的流: ${streamId}`);
                         return true;
                     }
-                    // 注意：不再检查 processRunning，因为我们要把普通运行的���转换为手动启动状态
+                    // 注意：不再检查 processRunning，因为我们要把普通运行的流转换为手动启动状态
 
                     // 设置单个流的超时
                     const controller = new AbortController();

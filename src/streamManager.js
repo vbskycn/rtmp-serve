@@ -325,47 +325,41 @@ class StreamManager extends EventEmitter {
 
             const processInfo = this.streamProcesses.get(streamId);
             const status = this.streamStatus.get(streamId) || 'stopped';
-            const isInvalid = this.retryAttempts.get(streamId) >= 3;
-
+            const retries = this.retryAttempts.get(streamId) || 0;
+            
             // 检查进程是否在运行
             let isProcessRunning = false;
             if (processInfo && processInfo.ffmpeg) {
                 try {
                     process.kill(processInfo.ffmpeg.pid, 0);
-                    isProcessRunning = true && processInfo.streamStarted;
+                    isProcessRunning = true;
                 } catch (e) {
                     isProcessRunning = false;
-                    this.streamProcesses.delete(streamId);
-                    this.manuallyStartedStreams.delete(streamId);
-                    this.streamStatus.set(streamId, 'stopped');
                 }
             }
 
-            // 确定最终状态
+            // 确定流状态
             let finalStatus;
-            if (isInvalid) {
-                finalStatus = 'invalid';
+            if (retries >= this.MAX_RETRIES) {
+                finalStatus = 'invalid';  // 已失效
             } else if (isProcessRunning && status === 'running') {
-                finalStatus = 'running';
+                finalStatus = 'running';  // 已运行
             } else {
-                finalStatus = 'stopped';
+                finalStatus = 'stopped';  // 已停止
             }
 
-            // 推流状态只有在进程运行且是手动启动的情况下才为 true
+            // 确定推流状态
             const isRtmpActive = isProcessRunning && 
-                               processInfo?.isManualStart && 
-                               this.manuallyStartedStreams.has(streamId);
+                               (this.autoStartStreams.has(streamId) || 
+                                this.manuallyStartedStreams.has(streamId));
 
             return {
                 ...stream,
                 processRunning: isProcessRunning,
-                manuallyStarted: this.manuallyStartedStreams.has(streamId),
-                autoStart: this.autoStartStreams.has(streamId),
-                autoPlay: this.autoPlayStreams.has(streamId),
-                stats: this.streamStats.get(streamId) || {},
                 status: finalStatus,
-                isRtmpActive: isRtmpActive,
-                invalid: isInvalid
+                isRtmpActive,
+                stats: this.streamStats.get(streamId) || {},
+                retryCount: retries
             };
         } catch (error) {
             logger.error(`Error getting stream info for ${streamId}:`, error);
@@ -434,6 +428,9 @@ class StreamManager extends EventEmitter {
     // 修改 startStreamingWithFFmpeg 方法中的错误处理
     async startStreamingWithFFmpeg(streamId, streamConfig, isRtmpPush = false) {
         try {
+            // 重置重试计数
+            this.retryAttempts.set(streamId, 0);
+            
             // 检查重试次数
             const attempts = this.retryAttempts.get(streamId) || 0;
             if (attempts >= this.MAX_RETRIES) {
