@@ -589,10 +589,14 @@ router.post('/api/streams/:streamId/auto-start', authMiddleware, async (req, res
         const { autoStart } = req.body;
         
         if (autoStart) {
+            // 添加到自动启动集合
             streamManager.autoStartStreams.add(streamId);
+            // 立即启动流并推送到远程服务器
+            await streamManager.startStreaming(streamId, true);
         } else {
+            // 从自动启动集合中移除
             streamManager.autoStartStreams.delete(streamId);
-            // 如果关闭自动启动,停止流
+            // 停止流
             await streamManager.stopStreaming(streamId);
         }
         

@@ -126,7 +126,7 @@ class StreamManager extends EventEmitter {
         // 加载保存的自动配置
         this.loadAutoConfig();
         
-        // 如果是自动启动的流，在服务器启动时就开始
+        // 修改：延迟启动自动启动的流
         setTimeout(() => {
             this.startAutoStartStreams();
         }, 5000); // 延迟5秒启动，等待系统初始化
@@ -354,7 +354,7 @@ class StreamManager extends EventEmitter {
             this.streamStatus.set(streamId, 'starting');
             this.emit('streamStatusChanged', streamId, 'starting');
 
-            // 如果是推流模式,标记为手动启动
+            // 如果是推流模式，标记为手动启动
             if (isRtmpPush) {
                 this.manuallyStartedStreams.add(streamId);
             }
@@ -362,7 +362,7 @@ class StreamManager extends EventEmitter {
             const result = await this.startStreamingWithFFmpeg(streamId, stream, isRtmpPush);
             
             if (result && !result.success) {
-                throw result.error;
+                throw new Error(result.error);
             }
 
             // 更新状态为运行中
@@ -768,7 +768,7 @@ class StreamManager extends EventEmitter {
         return this.streamStats.get(streamId);
     }
 
-    // 添加一个强制停止的方法
+    // 添加一个强制停止��方法
     async forceStopStreaming(streamId) {
         try {
             const processes = this.streamProcesses.get(streamId);
@@ -1233,16 +1233,22 @@ class StreamManager extends EventEmitter {
                 autoStart: Array.from(this.autoStartStreams)
             };
             await fs.promises.writeFile(autoConfigPath, JSON.stringify(data, null, 2));
+            logger.info(`Saved auto config with ${this.autoStartStreams.size} auto-start streams`);
         } catch (error) {
             logger.error('Error saving auto config:', error);
+            throw error;
         }
     }
 
     // 新增方法：启动所有自动启动的流
     async startAutoStartStreams() {
+        logger.info(`Starting auto-start streams, count: ${this.autoStartStreams.size}`);
         for (const streamId of this.autoStartStreams) {
             try {
                 if (!this.streamProcesses.has(streamId)) {
+                    logger.info(`Auto-starting stream: ${streamId}`);
+                    // 修改：设置为手动启动并启动推流
+                    this.manuallyStartedStreams.add(streamId);
                     await this.startStreaming(streamId, true);
                 }
             } catch (error) {
