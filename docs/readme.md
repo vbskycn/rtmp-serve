@@ -83,7 +83,26 @@ chmod +x start.sh
 
 # 4. 运行启动脚本
 ./start.sh
+
+# 清理旧文件，不保留本地文件拉取最新文件
+git fetch origin
+git reset --hard origin/main
+git clean -fd
+git pull
+
 ```
+
+```
+npm install
+```
+
+```
+npm start
+```
+
+
+
+
 
 ## 容器管理
 
