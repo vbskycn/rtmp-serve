@@ -85,9 +85,14 @@
             font-size: 12px;
             display: inline-block;
             text-align: center;
-            min-width: 80px;
+            min-width: 100px;  /* 调整最小宽度 */
         }
 
+        .gap-2 {
+            gap: 0.5rem !important;
+        }
+
+        /* 确保推流状态单元格内容垂直居中 */
         .table td {
             vertical-align: middle;
         }
@@ -282,8 +287,8 @@
                                     <th class="check-column">
                                         <input type="checkbox" id="selectAll" onclick="toggleSelectAll()">
                                     </th>
-                                    <th style="width: 10%">名称</th>
-                                    <th style="width: 7%">状态</th>
+                                    <th style="width: 12%">名称</th>
+                                    <th style="width: 5%">状态</th>
                                     <th style="width: 12%">推流状态</th>
                                     <th style="width: 18%">源地址</th>
                                     <th style="width: 23%">播放地址</th>
@@ -394,7 +399,7 @@
             }
         }
 
-        // 添加更新单个流行的函数
+        // 添���更新单个流行的函数
         function updateStreamRow(row, stream) {
             // 更新状态
             const statusCell = row.querySelector('.status');
@@ -426,11 +431,11 @@
             const rtmpStatusCell = row.querySelector('.rtmp-status');
             if (rtmpStatusCell) {
                 rtmpStatusCell.innerHTML = `
-                    <div class="d-flex flex-column">
-                        <span class="status mb-1" style="background-color: ${stream.processRunning ? '#28a745' : '#6c757d'};">
+                    <div class="d-flex justify-content-between gap-2">
+                        <span class="status flex-grow-1" style="background-color: ${stream.processRunning ? '#28a745' : '#6c757d'};">
                             HLS: ${stream.processRunning ? '推流中' : '未推流'}
                         </span>
-                        <span class="status" style="background-color: ${stream.isRtmpActive ? '#28a745' : '#6c757d'};">
+                        <span class="status flex-grow-1" style="background-color: ${stream.isRtmpActive ? '#28a745' : '#6c757d'};">
                             RTMP: ${stream.isRtmpActive ? '推流中' : '未推流'}
                         </span>
                     </div>
@@ -511,11 +516,11 @@
                                 </span>
                             </td>
                             <td>
-                                <div class="d-flex flex-column">
-                                    <span class="status mb-1" style="background-color: ${stream.processRunning ? '#28a745' : '#6c757d'};">
+                                <div class="d-flex justify-content-between gap-2">
+                                    <span class="status flex-grow-1" style="background-color: ${stream.processRunning ? '#28a745' : '#6c757d'};">
                                         HLS: ${stream.processRunning ? '推流中' : '未推流'}
-                                </span>
-                                    <span class="status" style="background-color: ${stream.isRtmpActive ? '#28a745' : '#6c757d'};">
+                                    </span>
+                                    <span class="status flex-grow-1" style="background-color: ${stream.isRtmpActive ? '#28a745' : '#6c757d'};">
                                         RTMP: ${stream.isRtmpActive ? '推流中' : '未推流'}
                                     </span>
                                 </div>

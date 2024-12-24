@@ -522,6 +522,7 @@ class StreamManager extends EventEmitter {
                     const ffmpeg = spawn('ffmpeg', args);
                     let streamStarted = false;
                     let consecutiveErrors = 0;
+                    let errorMessages = [];  // 用于收集错误信息
 
                     ffmpeg.stderr.on('data', (data) => {
                         const message = data.toString();
@@ -545,8 +546,9 @@ class StreamManager extends EventEmitter {
                         if (message.includes('Failed to open segment')) {
                             consecutiveErrors++;
                             logger.error(`FFmpeg stderr: ${message}`);
+                            errorMessages.push(message);
                             
-                            if (consecutiveErrors >= MAX_SEGMENT_ERRORS) {
+                            if (consecutiveErrors >= 3) {  // MAX_SEGMENT_ERRORS
                                 logger.error(`Stream ${streamId} failed to get segments after ${consecutiveErrors} attempts, stopping...`);
                                 // 清理所有状态
                                 this.cleanupStream(streamId);
@@ -567,7 +569,7 @@ class StreamManager extends EventEmitter {
                         else if (message.includes('Error') || 
                                 message.includes('Invalid')) {
                             logger.error(`FFmpeg stderr: ${message}`);
-                            ffmpegError += message;
+                            errorMessages.push(message);
                             
                             // 对于严重错误，立即停止
                             if (message.includes('Server error') || 
@@ -576,7 +578,7 @@ class StreamManager extends EventEmitter {
                                 message.includes('Connection reset by peer')) {
                                 this.cleanupStream(streamId);
                                 ffmpeg.kill('SIGTERM');
-                                reject(new Error(message));
+                                reject(new Error(errorMessages.join('\n')));
                                 return;
                             }
                         }
@@ -587,7 +589,7 @@ class StreamManager extends EventEmitter {
                             // 非正常退出且不是手动停止
                             logger.error(`Stream ${streamId} exited with code ${code}`);
                             this.cleanupStream(streamId);
-                            reject(new Error(`FFmpeg exited with code ${code}`));
+                            reject(new Error(`FFmpeg exited with code ${code}: ${errorMessages.join('\n')}`));
                         } else if (signal === 'SIGTERM') {
                             // 手动停止
                             logger.info(`Stream ${streamId} manually stopped`);
