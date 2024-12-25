@@ -10,6 +10,7 @@ const { spawn } = require('child_process');
 class StreamManager extends EventEmitter {
     constructor() {
         super();
+        this.logger = logger;
         this.streams = new Map();
         this.activeStreams = new Map();
         this.streamProcesses = new Map();
@@ -25,6 +26,22 @@ class StreamManager extends EventEmitter {
         this.autoStartStreams = new Set();
         this.streamRetries = new Map();
         this.streamStatus = new Map();
+
+        // 添加 streams 目录路径
+        this.streamsPath = path.join(__dirname, '../streams');
+        
+        // 确保 streams 目录存在
+        if (!fs.existsSync(this.streamsPath)) {
+            fs.mkdirSync(this.streamsPath, { recursive: true });
+        }
+
+        // 初始化全局统计信息
+        this.globalStats = {
+            traffic: {
+                received: '0 B',
+                sent: '0 B'
+            }
+        };
 
         // 加载配置
         this.loadConfig();
@@ -588,6 +605,7 @@ class StreamManager extends EventEmitter {
                 }
             });
         } catch (error) {
+            logger.error(`Error in startStreamingWithFFmpeg: ${error}`);
             throw error;
         }
     }
@@ -744,7 +762,7 @@ class StreamManager extends EventEmitter {
             };
 
         } catch (err) {
-            this.logger.error('Error updating global traffic stats:', err);
+            logger.error('Error updating global traffic stats:', err);
         }
     }
 
