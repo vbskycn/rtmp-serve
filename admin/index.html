@@ -287,7 +287,7 @@
     <!-- 顶部状态栏 -->
     <div class="top-bar">
         <div class="d-flex justify-content-between align-items-center">
-            <h1 class="system-title">流媒体管理系统 v<span id="systemVersion">加载中...</span></h1>
+            <h1 class="system-title">流媒体管理系统 <span class="version-text">v加载中...</span></h1>
             <div class="d-flex align-items-center">
                 <!-- 刷新按钮 -->
                 <button onclick="refreshPage()" class="btn btn-light btn-sm me-3" title="刷新页面">
@@ -498,6 +498,36 @@
         // 在 <script> 标签开始处添加置获取
         let serverConfig = null;
 
+        // 修改 getServerConfig 函数
+        async function getServerConfig() {
+            try {
+                const response = await fetch('/api/config');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                serverConfig = await response.json();
+                
+                // 立即更新版本号显示
+                if (serverConfig.version) {
+                    document.title = `流媒体管理系统 v${serverConfig.version}`;
+                    const versionElement = document.querySelector('.version-text');
+                    if (versionElement) {
+                        versionElement.textContent = `v${serverConfig.version}`;
+                    }
+                }
+                
+                return serverConfig;
+            } catch (error) {
+                console.error('Error loading server config:', error);
+                // 显示错误版本号
+                const versionElement = document.querySelector('.version-text');
+                if (versionElement) {
+                    versionElement.textContent = 'v加载失败';
+                }
+                throw error;
+            }
+        }
+
         // 获取服务器配置
         async function getServerConfig() {
             try {
@@ -689,24 +719,40 @@
 
         // 修改初始化函数，调整更新间隔
         async function init() {
-            await getServerConfig();
-            await loadStreams();
-            await updateSystemStats();
-            
-            // 使用 requestAnimationFrame 进行更平滑的更新
-            let lastUpdate = 0;
-            const UPDATE_INTERVAL = 5000; // 5秒更新一次
-
-            function update(timestamp) {
-                if (timestamp - lastUpdate >= UPDATE_INTERVAL) {
-                    loadStreams();
-                    updateSystemStats();
-                    lastUpdate = timestamp;
+            try {
+                // 获取服务器配置
+                await getServerConfig();
+                
+                // 更新版本号
+                if (serverConfig && serverConfig.version) {
+                    document.title = `流媒体管理系统 v${serverConfig.version}`;
+                    // 如果页面上有显示版本号的元素，也更新它
+                    const versionElement = document.querySelector('.version-text');
+                    if (versionElement) {
+                        versionElement.textContent = `v${serverConfig.version}`;
+                    }
                 }
-                requestAnimationFrame(update);
-            }
 
-            requestAnimationFrame(update);
+                await loadStreams();
+                await updateSystemStats();
+                
+                // 使用 requestAnimationFrame 进行更平滑的更新
+                let lastUpdate = 0;
+                const UPDATE_INTERVAL = 5000; // 5秒更新一次
+
+                function update(timestamp) {
+                    if (timestamp - lastUpdate >= UPDATE_INTERVAL) {
+                        loadStreams();
+                        updateSystemStats();
+                        lastUpdate = timestamp;
+                    }
+                    requestAnimationFrame(update);
+                }
+
+                requestAnimationFrame(update);
+            } catch (error) {
+                console.error('Error in init:', error);
+            }
         }
 
         // 修改系统状态更新函数
