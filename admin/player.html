@@ -192,7 +192,7 @@
     </div>
 
     <script src="https://lib.baomitu.com/dplayer/1.27.1/DPlayer.min.js"></script>
-    <script src="https://lib.baomitu.com/hls.js/1.4.10/hls.min.js"></script>
+    <script src="https://lib.baomitu.com/flv.js/1.6.2/flv.min.js"></script>
     <script>
         let dp = null;
         const urlParams = new URLSearchParams(window.location.search);
@@ -234,49 +234,35 @@
                     live: true,
                     video: {
                         url: actualPlayUrl,
-                        type: 'flv',  // 修改为 flv 类型
+                        type: 'flv',  // 使用 flv 类型
                         autoplay: true,
-                        hlsjsConfig: {
-                            debug: false,
-                            // 基本配置
-                            enableWorker: true,
-                            lowLatencyMode: false,  // 关闭低延迟模式，提高稳定性
-                            
-                            // 缓冲区配置
-                            maxBufferLength: 30,             // 增加缓冲长度到30秒
-                            maxMaxBufferLength: 60,          // 最大允许缓冲60秒
-                            maxBufferSize: 200 * 1000 * 1000, // 增加缓冲大小到200MB
-                            
-                            // 加载超时配置
-                            manifestLoadingTimeOut: 20000,    // 增加超时时间到20秒
-                            manifestLoadingMaxRetry: 3,       // 最多重试3次
-                            levelLoadingTimeOut: 20000,       // 20秒
-                            levelLoadingMaxRetry: 3,          // 最多重试3次
-                            fragLoadingTimeOut: 20000,        // 20秒
-                            fragLoadingMaxRetry: 3,           // 最多重试3次
-                            
-                            // 直播流优化
-                            liveDurationInfinity: true,
-                            liveBackBufferLength: 30,         // 增加回退缓冲
-                            
-                            // 性能优化
-                            startLevel: 0,                    // 从最低质量开始
-                            abrEwmaDefaultEstimate: 1000000,  // 增加默认带宽估计
-                            abrBandWidthFactor: 0.9,         // 调整带宽因子
-                            abrBandWidthUpFactor: 0.7,       // 调整带宽上升因子
-                            abrMaxWithRealBitrate: true,     // 使用实际码率
+                        flvjs: {
+                            // flv.js 配置
+                            enableStashBuffer: false,  // 禁用缓存，降低延迟
+                            stashInitialSize: 128,    // 减小初始缓存大小
+                            enableWorker: true,       // 启用 web worker
+                            lazyLoad: false,          // 禁用延迟加载
+                            seekType: 'range',        // 使用 range 请求
+                            hasAudio: true,           // 包含音频
+                            hasVideo: true,           // 包含视频
                             
                             // 错误恢复配置
-                            fragLoadingRetryDelay: 1000,     // 片段加载重试延迟
-                            manifestLoadingRetryDelay: 1000,  // 清单加载重试延迟
-                            levelLoadingRetryDelay: 1000,    // 级别加载重试延迟
+                            autoCleanupSourceBuffer: true,  // 自动清理缓冲区
+                            autoCleanupMaxBackwardDuration: 5,  // 最大后退时长
+                            autoCleanupMinBackwardDuration: 1,  // 最小后退时长
                             
-                            // 新增配置
-                            backBufferLength: 30,             // 增加后退缓冲长度
-                            stretchShortVideoTrack: true,    // 拉伸短视频轨道
-                            maxAudioFramesDrift: 1,          // 减少音频帧漂移
-                            forceKeyFrameOnDiscontinuity: true, // 强制关键帧
-                            appendErrorMaxRetry: 5,           // 增加追加错误最大重试次数
+                            // 直播流优化
+                            isLive: true,             // 标记为直播流
+                            cors: true,               // 启用跨域
+                            withCredentials: false,    // 禁用认证
+                            
+                            // 性能优化
+                            enableWorker: true,       // 启用 web worker
+                            accurateSeek: false,      // 禁用精确跳转
+                            reuseRedirectedURL: true, // 重用重定向URL
+                            
+                            // 缓冲区配置
+                            fixAudioTimestampGap: true,  // 修复音频时间戳间隙
                         }
                     },
                     theme: '#3498db',
@@ -292,95 +278,20 @@
                     ]
                 });
 
-                // 添加更多事件监听
-                dp.on('waiting', () => {
-                    console.log('Player waiting for data...');
-                    // 如果等待时间过长，尝试自动恢复
-                    setTimeout(() => {
-                        if (dp && dp.video.paused) {
-                            console.log('Auto recovering from waiting state...');
-                            dp.play();
-                        }
-                    }, 5000);
-                });
-
-                // 监听卡顿事件
-                dp.on('stalled', () => {
-                    console.log('Playback stalled, attempting recovery...');
-                    if (dp.plugins.hls) {
-                        dp.plugins.hls.recoverMediaError();
-                    }
-                });
-
-                // 监听错误事件
+                // 添加播放器事件监听
                 dp.on('error', () => {
                     console.log('Player error, attempting recovery...');
-                    if (dp.plugins.hls) {
-                        // 先尝试恢复媒体错误
-                        dp.plugins.hls.recoverMediaError();
-                        // 如果还是失败，则重新加载
-                        setTimeout(() => {
-                            if (dp.video.paused) {
-                                reloadPlayer();
-                            }
-                        }, 3000);
+                    if (dp.plugins.flv) {
+                        // 尝试恢复播放
+                        dp.plugins.flv.unload();
+                        dp.plugins.flv.load();
+                        dp.play();
                     }
                 });
-
-                // 添加HLS特定事件监听
-                if (dp.plugins.hls) {
-                    dp.plugins.hls.on(Hls.Events.BUFFER_APPENDING, () => {
-                        console.log('Buffer appending...');
-                    });
-
-                    dp.plugins.hls.on(Hls.Events.BUFFER_APPENDED, () => {
-                        console.log('Buffer appended successfully');
-                    });
-
-                    dp.plugins.hls.on(Hls.Events.BUFFER_STALLED, () => {
-                        console.log('Buffer stalled, attempting recovery...');
-                        dp.plugins.hls.recoverMediaError();
-                    });
-
-                    // 监听片段加载失败
-                    dp.plugins.hls.on(Hls.Events.FRAG_LOAD_ERROR, (event, data) => {
-                        console.log('Fragment load error, retrying...');
-                        if (!data.fatal) {
-                            dp.plugins.hls.recoverMediaError();
-                        }
-                    });
-                }
 
                 // 隐藏加载动画
                 document.querySelector('.loading-overlay').style.display = 'none';
 
-                // 添加播放器事件监听
-                dp.on('loadeddata', () => {
-                    // 视频加载完成后强制播放
-                    dp.play().catch(error => {
-                        console.warn('Autoplay failed on load:', error);
-                    });
-                });
-
-                dp.on('canplay', () => {
-                    // 当视频可以播放时也尝试播放
-                    if (dp.video.paused) {
-                        dp.play().catch(error => {
-                            console.warn('Autoplay failed on canplay:', error);
-                        });
-                    }
-                });
-
-                // 添加错误恢复机制
-                dp.on('error', () => {
-                    setTimeout(() => {
-                        if (dp && dp.video.paused) {
-                            dp.play().catch(error => {
-                                console.warn('Autoplay failed after error:', error);
-                            });
-                        }
-                    }, 1000);
-                });
             } catch (error) {
                 console.error('Error initializing player:', error);
                 handleStreamError();
