@@ -493,52 +493,46 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 修改 startAutoStartStreams 方法，改进错误处理
+    // 修改 startAutoStartStreams 方法，避免重复启动
     async startAutoStartStreams() {
         logger.info(`Starting auto-start streams, count: ${this.autoStartStreams.size}`);
+        // 使用 Set 来跟踪正在启动的流，避免重复启动
+        const startingStreams = new Set();
+        
         for (const streamId of this.autoStartStreams) {
             try {
-                if (!this.streamProcesses.has(streamId)) {
-                    logger.info(`Auto-starting stream: ${streamId}`);
-                    const result = await this.startStreaming(streamId, true);
-                    if (!result.success) {
-                        // 如果启动失败，从自动启动列表中移除
-                        this.autoStartStreams.delete(streamId);
-                        await this.saveAutoConfig();
-                        logger.error(`Removed ${streamId} from auto-start list due to start failure`);
-                    }
+                // 检查流是否已经在启动或运行中
+                if (startingStreams.has(streamId) || this.streamProcesses.has(streamId)) {
+                    logger.debug(`[${streamId}] Stream already starting or running, skipping`);
+                    continue;
+                }
+                
+                startingStreams.add(streamId);
+                logger.info(`Auto-starting stream: ${streamId}`);
+                const result = await this.startStreaming(streamId, true);
+                
+                if (!result.success) {
+                    logger.error(`[${streamId}] Failed to start: ${result.error}`);
                 }
             } catch (error) {
-                // 如果出错，从自动启动列表中移除
-                this.autoStartStreams.delete(streamId);
-                await this.saveAutoConfig();
-                logger.error(`Error auto-starting stream ${streamId}, removed from auto-start list:`, error);
+                logger.error(`Error auto-starting stream ${streamId}:`, error);
+            } finally {
+                startingStreams.delete(streamId);
             }
         }
     }
 
-    // 修改 startStreamingWithFFmpeg 方法
+    // 修改 startStreamingWithFFmpeg 方法，改进错误处理
     async startStreamingWithFFmpeg(streamId, streamConfig) {
         try {
             logger.info(`[${streamId}] Starting stream with FFmpeg...`);
-            logger.debug(`[${streamId}] Stream config:`, streamConfig);
-
-            // 重置重试计数
-            this.retryAttempts.set(streamId, 0);
             
-            // 检查重试次数
-            const attempts = this.retryAttempts.get(streamId) || 0;
-            if (attempts >= this.MAX_RETRIES) {
-                logger.error(`[${streamId}] Stream failed after ${attempts} retries`);
-                this.retryAttempts.delete(streamId);
-                this.streamStatus.set(streamId, 'error');
-                throw new Error(`Stream failed after ${attempts} retries`);
+            // 检查流是否已经在运行
+            if (this.streamProcesses.has(streamId)) {
+                logger.warn(`[${streamId}] Stream process already exists, stopping old process`);
+                await this.stopStreaming(streamId);
             }
 
-            // 更新重试计数
-            this.retryAttempts.set(streamId, attempts + 1);
-
-            // 设置 FFmpeg 参数
             const args = [
                 '-i', streamConfig.url,
                 '-c:v', 'copy',
@@ -547,89 +541,67 @@ class StreamManager extends EventEmitter {
                 `${this.config.rtmp.pushServer}${streamId}`
             ];
 
-            logger.debug(`[${streamId}] FFmpeg command:`, args.join(' '));
-
             return new Promise((resolve, reject) => {
                 try {
                     const ffmpeg = spawn('ffmpeg', args);
                     let streamStarted = false;
                     let errorMessages = [];
-                    let isRealError = false;
-                    let lastFrameTime = 0;
+                    let lastFrameTime = Date.now();
                     let frameCount = 0;
+                    let ffmpegOutput = ''; // 存储完整的FFmpeg输出
 
                     ffmpeg.stderr.on('data', (data) => {
                         const message = data.toString();
-                        logger.debug(`[${streamId}] FFmpeg output: ${message}`);
+                        ffmpegOutput += message; // 累积输出
+                        logger.debug(`[${streamId}] FFmpeg output: ${message.trim()}`);
                         
-                        // 检测成功的标志
-                        if (message.includes('Opening') || 
-                            message.includes('Stream mapping') ||
-                            message.includes('frame=')) {
-                            
-                            // 更新帧计数
-                            const frameMatch = message.match(/frame=\s*(\d+)/);
-                            if (frameMatch) {
-                                frameCount = parseInt(frameMatch[1]);
-                                lastFrameTime = Date.now();
-                                logger.debug(`[${streamId}] Frame count: ${frameCount}, Last frame time: ${new Date(lastFrameTime).toISOString()}`);
-                            }
-
-                            if (!streamStarted && (message.includes('Opening') || frameCount > 0)) {
-                                streamStarted = true;
-                                logger.info(`[${streamId}] Stream started successfully`);
-                                // 更新进程信息
-                                this.streamProcesses.set(streamId, {
-                                    ffmpeg,
-                                    streamStarted: true,
-                                    frameCount,
-                                    lastFrameTime
-                                });
-                                this.streamStatus.set(streamId, 'running');
-                                // 重置重试计数
-                                this.retryAttempts.set(streamId, 0);
-                            }
+                        // 更新帧计数
+                        const frameMatch = message.match(/frame=\s*(\d+)/);
+                        if (frameMatch) {
+                            frameCount = parseInt(frameMatch[1]);
+                            lastFrameTime = Date.now();
+                            logger.debug(`[${streamId}] Frame count: ${frameCount}, Last frame time: ${new Date(lastFrameTime).toISOString()}`);
                         }
-                        
+
+                        // 检测流是否成功启动
+                        if (!streamStarted && (
+                            message.includes('Opening') || 
+                            message.includes('Stream mapping') ||
+                            frameCount > 0
+                        )) {
+                            streamStarted = true;
+                            this.streamProcesses.set(streamId, {
+                                ffmpeg,
+                                streamStarted: true,
+                                frameCount,
+                                lastFrameTime,
+                                startTime: Date.now()
+                            });
+                            logger.info(`[${streamId}] Stream started successfully`);
+                        }
+
                         // 检测错误
                         if (message.includes('Error') || message.includes('Invalid')) {
-                            logger.debug(`[${streamId}] Error detected: ${message}`);
-
-                            // 判断是否是致命错误
-                            const isFatalError = 
-                                message.includes('Invalid data found') ||
-                                message.includes('Error opening input') ||
-                                message.includes('Unable to open resource') ||
-                                message.includes('Connection refused') ||
-                                message.includes('No such file or directory');
-
-                            if (isFatalError) {
-                                isRealError = true;
-                                logger.error(`[${streamId}] Fatal error detected: ${message}`);
-                                errorMessages.push(message);
-                            } else if (message.includes('Broken pipe')) {
-                                if (!streamStarted) {
-                                    isRealError = true;
-                                    errorMessages.push(message);
-                                }
-                                logger.warn(`[${streamId}] Broken pipe detected, streamStarted: ${streamStarted}`);
-                            }
+                            errorMessages.push(message.trim());
                         }
                     });
 
                     ffmpeg.on('exit', (code, signal) => {
-                        logger.info(`[${streamId}] FFmpeg process exited with code ${code}, signal: ${signal}`);
-                        
-                        // 检查最后一帧的时间
                         const timeSinceLastFrame = Date.now() - lastFrameTime;
+                        logger.info(`[${streamId}] FFmpeg process exited with code ${code}, signal: ${signal}`);
                         logger.debug(`[${streamId}] Time since last frame: ${timeSinceLastFrame}ms`);
-
+                        
                         if (code !== 0 && !signal) {
-                            logger.error(`[${streamId}] Stream exited abnormally. Error messages: ${errorMessages.join('\n')}`);
+                            // 记录完整的错误信息
+                            const fullError = errorMessages.length > 0 ? 
+                                errorMessages.join('\n') : 
+                                `Complete FFmpeg output:\n${ffmpegOutput}`;
+                                
+                            logger.error(`[${streamId}] Stream exited abnormally:\n${fullError}`);
                             this.cleanupStream(streamId);
                             
-                            // 只有在遇到真正的错误时才重试
-                            if (isRealError && this.autoStartStreams.has(streamId)) {
+                            // 只在流未成功启动时重试
+                            if (!streamStarted && this.autoStartStreams.has(streamId)) {
                                 logger.info(`[${streamId}] Scheduling retry in ${this.RETRY_DELAY}ms`);
                                 setTimeout(() => {
                                     this.startStreaming(streamId, true)
@@ -637,50 +609,21 @@ class StreamManager extends EventEmitter {
                                 }, this.RETRY_DELAY);
                             }
                             
-                            reject(new Error(`FFmpeg exited with code ${code}: ${errorMessages.join('\n')}`));
-                        } else if (signal === 'SIGTERM') {
-                            logger.info(`[${streamId}] Stream manually stopped`);
-                            this.cleanupStream(streamId);
-                            resolve({ success: true });
+                            reject(new Error(fullError));
                         } else {
-                            logger.info(`[${streamId}] Stream completed normally`);
                             this.cleanupStream(streamId);
                             resolve({ success: true });
                         }
                     });
 
-                    // 初始化进程信息
-                    this.streamProcesses.set(streamId, {
-                        ffmpeg,
-                        streamStarted: false,
-                        frameCount: 0,
-                        lastFrameTime: Date.now()
-                    });
-
-                    // 等待流启动
+                    // 设置超时检查
                     setTimeout(() => {
-                        try {
-                            process.kill(ffmpeg.pid, 0);
-                            const processInfo = this.streamProcesses.get(streamId);
-                            logger.debug(`[${streamId}] Process check after 3s - PID: ${ffmpeg.pid}, Started: ${streamStarted}, Frame count: ${frameCount}`);
-                            
-                            if (streamStarted && processInfo) {
-                                processInfo.streamStarted = true;
-                                processInfo.frameCount = frameCount;
-                                processInfo.lastFrameTime = lastFrameTime;
-                                resolve({ success: true });
-                            } else {
-                                logger.warn(`[${streamId}] Stream failed to start properly`);
-                                this.cleanupStream(streamId);
-                                ffmpeg.kill('SIGTERM');
-                                reject(new Error('Stream failed to start properly'));
-                            }
-                        } catch (e) {
-                            logger.error(`[${streamId}] Process exited before initialization completed:`, e);
-                            this.cleanupStream(streamId);
-                            reject(new Error('Process exited before initialization completed'));
+                        if (!streamStarted) {
+                            logger.warn(`[${streamId}] Stream failed to start within timeout`);
+                            ffmpeg.kill('SIGTERM');
+                            reject(new Error('Stream failed to start within timeout'));
                         }
-                    }, 3000);
+                    }, 10000); // 10秒超时
 
                 } catch (error) {
                     logger.error(`[${streamId}] Error in FFmpeg process:`, error);
@@ -693,21 +636,23 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 添加清理流状态的辅助方法
+    // 修改 cleanupStream 方法
     cleanupStream(streamId) {
+        const processInfo = this.streamProcesses.get(streamId);
+        if (processInfo) {
+            try {
+                if (processInfo.ffmpeg && processInfo.ffmpeg.pid) {
+                    process.kill(processInfo.ffmpeg.pid, 'SIGKILL');
+                }
+            } catch (error) {
+                logger.debug(`[${streamId}] Error killing process: ${error.message}`);
+            }
+        }
+        
         this.streamProcesses.delete(streamId);
         this.manuallyStartedStreams.delete(streamId);
         this.streamStatus.set(streamId, 'stopped');
-        
-        // 移除这部分代码，不再自动删除自动启动状态
-        /*
-        if (this.autoStartStreams.has(streamId)) {
-            this.autoStartStreams.delete(streamId);
-            this.saveAutoConfig().catch(err => {
-                logger.error(`Error saving auto config after cleanup: ${err}`);
-            });
-        }
-        */
+        logger.debug(`[${streamId}] Stream cleaned up`);
     }
 
     // 添加停止流的方法
