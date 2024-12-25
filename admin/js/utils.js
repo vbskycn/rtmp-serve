@@ -96,4 +96,19 @@ function showToast(message) {
     toast.textContent = message;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 2000);
+}
+
+// 更新统计元素
+function updateStatElement(elementId, newValue) {
+    const element = document.getElementById(elementId);
+    if (!element) return;
+    
+    if (element.textContent !== String(newValue)) {
+        element.style.transition = 'opacity 0.3s';
+        element.style.opacity = '0';
+        setTimeout(() => {
+            element.textContent = newValue;
+            element.style.opacity = '1';
+        }, 300);
+    }
 } 

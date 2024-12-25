@@ -478,7 +478,7 @@
                         autoStartBtn.className = 'btn btn-warning btn-sm auto-start-btn';
                         autoStartBtn.style.backgroundColor = '#ffc107';
                         autoStartBtn.style.color = '#000';
-                        autoStartBtn.innerHTML = '<i class="fa fa-moon-o"></i> 自启已开';
+                        autoStartBtn.innerHTML = '<i class="fa fa-moon-o"></i> ��启已开';
                     } else {
                         autoStartBtn.className = 'btn btn-outline-success btn-sm auto-start-btn';
                         autoStartBtn.style.backgroundColor = 'transparent';
@@ -538,15 +538,324 @@
         // 事件监听器设置
         document.getElementById('addStreamForm').addEventListener('submit', async function(e) {
             e.preventDefault();
-            // 保留原有的添加流逻辑
+            
+            const streamData = {
+                name: document.getElementById('streamName').value,
+                url: document.getElementById('streamUrl').value,
+                customId: document.getElementById('streamCustomId').value,
+                category: document.getElementById('streamCategory').value
+            };
+
+            try {
+                const response = await fetch('/api/streams', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(streamData)
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    showToast('流添加成功');
+                    this.reset();
+                    loadStreams();
+                } else {
+                    alert('添加流失败: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error adding stream:', error);
+                alert('添加流失败');
+            }
         });
 
         document.getElementById('batchImportForm').addEventListener('submit', async function(e) {
             e.preventDefault();
-            // 保留原有的批量导入逻辑
+            
+            const batchText = document.getElementById('batchStreams').value;
+            const lines = batchText.split('\n').filter(line => line.trim());
+            
+            let currentCategory = '';
+            let successCount = 0;
+            let failCount = 0;
+            
+            const modal = showProgressModal('批量导入');
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                
+                // 检查是否是分类行
+                if (line.endsWith('#genre#')) {
+                    currentCategory = line.split(',')[0].trim();
+                    continue;
+                }
+                
+                // 处理常规流行
+                const [name, url] = line.split(',').map(s => s.trim());
+                
+                if (!name || !url) {
+                    failCount++;
+                    continue;
+                }
+
+                try {
+                    const response = await fetch('/api/streams', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            name,
+                            url,
+                            category: currentCategory
+                        })
+                    });
+
+                    const result = await response.json();
+                    if (result.success) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                } catch (error) {
+                    console.error('Error adding stream:', error);
+                    failCount++;
+                }
+                
+                updateProgressModal(modal, {
+                    success: successCount,
+                    failed: failCount,
+                    total: lines.length,
+                    current: i + 1
+                });
+            }
+
+            setTimeout(() => {
+                modal.remove();
+                alert(`批量导入完成\n成功: ${successCount}\n失败: ${failCount}`);
+                if (successCount > 0) {
+                    this.reset();
+                    loadStreams();
+                }
+            }, 1000);
         });
 
         // 其他事件监听器...
+
+        // 在 init() 函数之前添加 renderFullTable 函数
+        function renderFullTable(tbody, groupedStreams) {
+            tbody.innerHTML = '';
+            
+            // 遍历分类和流
+            for (const [category, categoryStreams] of Object.entries(groupedStreams)) {
+                // 添加分类标题行
+                const categoryRow = document.createElement('tr');
+                categoryRow.innerHTML = `
+                    <td colspan="7" class="bg-light">
+                        <strong>${category}</strong>
+                    </td>
+                `;
+                tbody.appendChild(categoryRow);
+
+                // 添加该分类下的所有流
+                categoryStreams.forEach(stream => {
+                    const tr = document.createElement('tr');
+                    tr.dataset.streamId = stream.id;
+                    
+                    // 确定状态样式和文本
+                    let statusClass = '';
+                    let statusText = '';
+                    let statusStyle = '';
+                    
+                    if (stream.status === 'invalid') {
+                        statusClass = 'error';
+                        statusText = '已失效';
+                        statusStyle = 'background-color: #dc3545;';
+                    } else if (stream.processRunning && stream.status === 'running') {
+                        statusClass = 'active';
+                        statusText = '运行中';
+                        statusStyle = 'background-color: #28a745;';
+                    } else {
+                        statusClass = 'inactive';
+                        statusText = '已停止';
+                        statusStyle = 'background-color: #6c757d;';
+                    }
+
+                    // 构建播放地址
+                    const playUrl = stream.processRunning ? 
+                        `${serverConfig.rtmp.pullServer}${stream.id}.flv` : 
+                        '未推流';
+
+                    tr.innerHTML = `
+                        <td>
+                            <input type="checkbox" class="stream-checkbox" value="${stream.id}" 
+                                   onchange="updateBatchButtons()" 
+                                   ${document.getElementById('selectAll')?.checked ? 'checked' : ''}>
+                        </td>
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <div class="input-group input-group-compact">
+                                    ${stream.tvg?.logo ? `<img src="${stream.tvg.logo}" alt="" style="height: 20px; margin-right: 4px;">` : ''}
+                                    <input type="text" class="form-control form-control-sm" 
+                                           value="${stream.name}" 
+                                           readonly 
+                                           style="font-family: monospace; background-color: #f8f9fa;">
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="status ${statusClass}" style="${statusStyle}">
+                                ${statusText}
+                            </span>
+                        </td>
+                        <td>
+                            <div class="d-flex justify-content-between gap-2">
+                                <span class="status flex-grow-1" style="background-color: ${stream.processRunning ? '#28a745' : '#6c757d'};">
+                                    ${stream.processRunning ? '已推流' : '未推流'}
+                                </span>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <div class="input-group input-group-compact">
+                                    <input type="text" class="form-control form-control-sm" value="${stream.url}" readonly 
+                                           style="font-family: monospace; background-color: #f8f9fa;">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="copyToClipboard('${stream.url}')">
+                                        <i class="fa fa-copy"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <div class="input-group input-group-compact">
+                                    <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly 
+                                           style="font-family: monospace; background-color: #f8f9fa;">
+                                    <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${playUrl}')" ${!stream.processRunning ? 'disabled' : ''}>
+                                        <i class="fa fa-copy"></i> 复制
+                                    </button>
+                                    <button class="btn btn-outline-success btn-sm" onclick="window.open('player.html?id=${stream.id}', '_blank')" ${!stream.processRunning ? 'disabled' : ''}>
+                                        <i class="fa fa-play"></i> 播放
+                                    </button>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="stream-actions">
+                            <div class="btn-group btn-group-sm">
+                                <button onclick="editStream('${stream.id}')" class="btn btn-info btn-sm">
+                                    <i class="fa fa-edit"></i> 编辑
+                                </button>
+                                <button onclick="startRtmpPush('${stream.id}')" class="btn btn-success btn-sm">
+                                    <i class="fa fa-upload"></i> 推流
+                                </button>
+                                <button onclick="stopStream('${stream.id}')" class="btn btn-secondary btn-sm">
+                                    <i class="fa fa-stop"></i> 停止
+                                </button>
+                                <button class="btn ${stream.autoStart ? 'btn-warning' : 'btn-outline-success'} btn-sm auto-start-btn" 
+                                        onclick="toggleAutoStart('${stream.id}', ${!stream.autoStart})"
+                                        style="${stream.autoStart ? 'background-color: #ffc107; color: #000; font-weight: bold;' : 'background-color: transparent; color: #28a745;'}">
+                                    <i class="fa ${stream.autoStart ? 'fa-moon-o' : 'fa-sun-o'}"></i> 
+                                    ${stream.autoStart ? '自启已开' : '自启开'}
+                                </button>
+                                <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
+                                    <i class="fa fa-trash"></i> 删除
+                                </button>
+                            </div>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+        }
+
+        // 添加更新批量按钮状态的函数
+        function updateBatchButtons() {
+            const selectedCount = getSelectedStreams().length;
+            const batchStopBtn = document.getElementById('batchStopBtn');
+            const batchDeleteBtn = document.getElementById('batchDeleteBtn');
+            const batchStartBtn = document.getElementById('batchStartBtn');
+            const batchAutoStartOnBtn = document.getElementById('batchAutoStartOnBtn');
+            const batchAutoStartOffBtn = document.getElementById('batchAutoStartOffBtn');
+
+            const disabled = selectedCount === 0;
+            
+            batchStopBtn.disabled = disabled;
+            batchDeleteBtn.disabled = disabled;
+            batchStartBtn.disabled = disabled;
+            batchAutoStartOnBtn.disabled = disabled;
+            batchAutoStartOffBtn.disabled = disabled;
+        }
+
+        // 添加获取选中流的函数
+        function getSelectedStreams() {
+            const checkboxes = document.getElementsByClassName('stream-checkbox');
+            return Array.from(checkboxes)
+                .filter(box => box.checked)
+                .map(box => box.value);
+        }
+
+        // 添加全选切换函数
+        function toggleSelectAll() {
+            const selectAllCheckbox = document.getElementById('selectAll');
+            const checkboxes = document.getElementsByClassName('stream-checkbox');
+            
+            Array.from(checkboxes).forEach(box => {
+                box.checked = selectAllCheckbox.checked;
+            });
+            
+            updateBatchButtons();
+        }
+
+        // 修改密码
+        async function changePassword() {
+            const oldPassword = document.getElementById('oldPassword').value;
+            const newPassword = document.getElementById('newPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+
+            if (!oldPassword || !newPassword || !confirmPassword) {
+                alert('所有密码字段都必须填写');
+                return;
+            }
+
+            if (newPassword !== confirmPassword) {
+                alert('两次输入的新密码不一致');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/change-password', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ oldPassword, newPassword })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    alert(result.message);
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('changePasswordModal'));
+                    modal.hide();
+                    document.getElementById('changePasswordForm').reset();
+                    logout();
+                } else {
+                    alert(result.message || '修改密码失败');
+                }
+            } catch (error) {
+                console.error('Change password error:', error);
+                alert('修改密码失败，请检查网络连接');
+            }
+        }
+
+        // 登出
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+                window.location.href = '/login.html';
+            } catch (error) {
+                console.error('Logout error:', error);
+            }
+        }
     </script>
 </body>
 </html> 

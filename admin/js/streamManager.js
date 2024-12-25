@@ -245,4 +245,68 @@ async function batchDelete() {
             }
         }, 1000);
     }
+}
+
+// 保存流编辑
+async function saveStreamEdit() {
+    const streamId = document.getElementById('editStreamId').value;
+    const streamData = {
+        category: document.getElementById('editStreamCategory').value,
+        name: document.getElementById('editStreamName').value,
+        url: document.getElementById('editStreamUrl').value
+    };
+
+    try {
+        // 先停止流
+        await stopStream(streamId);
+        
+        // 然后更新配置
+        const response = await fetch(`/api/streams/${streamId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(streamData)
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error);
+        }
+
+        // 关闭模态框
+        const modal = bootstrap.Modal.getInstance(document.getElementById('editStreamModal'));
+        modal.hide();
+        
+        // 刷新流列表
+        loadStreams();
+        showToast('更新成功');
+    } catch (error) {
+        console.error('Error updating stream:', error);
+        alert('更新失败: ' + error.message);
+    }
+}
+
+// 切换自动启动状态
+async function toggleAutoStart(streamId, enable) {
+    try {
+        const response = await fetch(`/api/streams/${streamId}/auto-start`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ autoStart: enable })
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || '设置自动启动失败');
+        }
+
+        loadStreams();
+        showToast(enable ? '已开启自动启动' : '已关闭自动启动');
+    } catch (error) {
+        console.error('Error toggling auto-start:', error);
+        alert('设置自动启动失败: ' + error.message);
+    }
 } 
