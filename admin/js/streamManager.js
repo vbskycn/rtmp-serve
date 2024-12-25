@@ -309,4 +309,107 @@ async function toggleAutoStart(streamId, enable) {
         console.error('Error toggling auto-start:', error);
         alert('设置自动启动失败: ' + error.message);
     }
+}
+
+// 更新流状态显示的函数
+function updateStreamStatus(statusElement, stream) {
+    let statusClass = '';
+    let statusText = '';
+    let statusStyle = '';
+    
+    switch (stream.status) {
+        case 'error':
+            statusClass = 'error';
+            statusText = '错误: ' + (stream.lastError?.message || '未知错误');
+            statusStyle = 'background-color: #dc3545;';
+            break;
+        case 'unhealthy':
+            statusClass = 'warning';
+            statusText = '异常';
+            statusStyle = 'background-color: #ffc107; color: #000;';
+            break;
+        case 'running':
+            if (stream.stats && stream.processRunning) {
+                statusClass = 'active';
+                statusText = '运行中';
+                statusStyle = 'background-color: #28a745;';
+            } else {
+                statusClass = 'warning';
+                statusText = '状态异常';
+                statusStyle = 'background-color: #ffc107; color: #000;';
+            }
+            break;
+        case 'stopped':
+            statusClass = 'inactive';
+            statusText = '已停止';
+            statusStyle = 'background-color: #6c757d;';
+            break;
+        default:
+            statusClass = 'error';
+            statusText = '未知状态';
+            statusStyle = 'background-color: #dc3545;';
+    }
+    
+    statusElement.className = `status ${statusClass}`;
+    statusElement.style = statusStyle;
+    statusElement.textContent = statusText;
+}
+
+// 更新推流状态显示的函数
+function updateRtmpStatus(rtmpElement, stream) {
+    const isActive = stream.processRunning && stream.status === 'running' && !stream.lastError;
+    
+    rtmpElement.style.backgroundColor = isActive ? '#28a745' : '#6c757d';
+    rtmpElement.textContent = isActive ? '已推流' : '未推流';
+}
+
+// 批量设置自动启动
+async function batchAutoStart(enable) {
+    const selectedStreams = getSelectedStreams();
+    if (!selectedStreams.length) {
+        alert('请先选择要操作的流');
+        return;
+    }
+
+    if (!confirm(`确定要${enable ? '开启' : '关闭'}选中的 ${selectedStreams.length} 个流的自动启动吗？`)) return;
+
+    const modal = showProgressModal(`批量${enable ? '开启' : '关闭'}自动启动`);
+    let success = 0;
+    let failed = 0;
+    const errors = [];
+
+    try {
+        const response = await fetch('/api/streams/batch-auto-start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                streamIds: selectedStreams,
+                enable: enable
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            success = result.stats.success;
+            failed = result.stats.total - result.stats.success;
+        } else {
+            throw new Error(result.error || '操作失败');
+        }
+    } catch (error) {
+        console.error('Batch auto-start error:', error);
+        failed = selectedStreams.length;
+        errors.push(error.message);
+    } finally {
+        setTimeout(() => {
+            modal.remove();
+            loadStreams();
+            if (errors.length > 0) {
+                alert(`批量${enable ? '开启' : '关闭'}自动启动完成\n成功: ${success}\n失败: ${failed}\n\n失败详情:\n${errors.join('\n')}`);
+            } else {
+                showToast(`批量${enable ? '开启' : '关闭'}自动启动完成: ${success}个成功`);
+            }
+        }, 1000);
+    }
 } 

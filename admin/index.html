@@ -406,47 +406,23 @@
             // 更新状态
             const statusSpan = row.querySelector('.status');
             if (statusSpan) {
-                let statusClass = '';
-                let statusText = '';
-                let statusStyle = '';
-                
-                if (stream.status === 'invalid') {
-                    statusClass = 'error';
-                    statusText = '已失效';
-                    statusStyle = 'background-color: #dc3545;';
-                } else if (stream.processRunning && stream.status === 'running') {
-                    statusClass = 'active';
-                    statusText = '运行中';
-                    statusStyle = 'background-color: #28a745;';
-                } else {
-                    statusClass = 'inactive';
-                    statusText = '已停止';
-                    statusStyle = 'background-color: #6c757d;';
-                }
-                
-                if (statusSpan.textContent !== statusText) {
-                    statusSpan.className = `status ${statusClass}`;
-                    statusSpan.style = statusStyle;
-                    statusSpan.textContent = statusText;
-                }
+                updateStreamStatus(statusSpan, stream);
             }
 
             // 更新推流状态
             const rtmpStatus = row.querySelector('.rtmp-status');
             if (rtmpStatus) {
-                const newStatus = stream.processRunning ? '已推流' : '未推流';
-                const newColor = stream.processRunning ? '#28a745' : '#6c757d';
-                
-                if (rtmpStatus.textContent !== newStatus) {
-                    rtmpStatus.style.backgroundColor = newColor;
-                    rtmpStatus.textContent = newStatus;
-                }
+                updateRtmpStatus(rtmpStatus, stream);
             }
 
             // 更新播放地址
             const playUrlInput = row.querySelector('td:nth-child(6) input.form-control');
             if (playUrlInput) {
-                const newPlayUrl = stream.processRunning ? 
+                const isPlayable = stream.processRunning && 
+                                  stream.status === 'running' && 
+                                  !stream.lastError;
+                                  
+                const newPlayUrl = isPlayable ? 
                     `${serverConfig.rtmp.pullServer}${stream.id}.flv` : 
                     '未推流';
                     
@@ -457,13 +433,8 @@
                     const copyBtn = playUrlInput.parentElement.querySelector('.btn-outline-primary');
                     const playBtn = playUrlInput.parentElement.querySelector('.btn-outline-success');
                     
-                    if (stream.processRunning) {
-                        copyBtn.disabled = false;
-                        playBtn.disabled = false;
-                    } else {
-                        copyBtn.disabled = true;
-                        playBtn.disabled = true;
-                    }
+                    copyBtn.disabled = !isPlayable;
+                    playBtn.disabled = !isPlayable;
                 }
             }
 
@@ -478,7 +449,7 @@
                         autoStartBtn.className = 'btn btn-warning btn-sm auto-start-btn';
                         autoStartBtn.style.backgroundColor = '#ffc107';
                         autoStartBtn.style.color = '#000';
-                        autoStartBtn.innerHTML = '<i class="fa fa-moon-o"></i> ��启已开';
+                        autoStartBtn.innerHTML = '<i class="fa fa-moon-o"></i> 自启已开';
                     } else {
                         autoStartBtn.className = 'btn btn-outline-success btn-sm auto-start-btn';
                         autoStartBtn.style.backgroundColor = 'transparent';
@@ -766,6 +737,10 @@
                     tbody.appendChild(tr);
                 });
             }
+
+            // 更新批量操作按钮的事件绑定
+            document.getElementById('batchAutoStartOnBtn').onclick = () => batchAutoStart(true);
+            document.getElementById('batchAutoStartOffBtn').onclick = () => batchAutoStart(false);
         }
 
         // 添加更新批量按钮状态的函数

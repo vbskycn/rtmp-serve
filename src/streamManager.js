@@ -848,11 +848,26 @@ class StreamManager extends EventEmitter {
     // 修改批量设置自启动的方法
     async batchUpdateAutoStart(streamIds, enable) {
         try {
+            let successCount = 0;
+            const errors = [];
+
             for (const streamId of streamIds) {
-                if (enable) {
-                    this.autoStartStreams.add(streamId);
-                } else {
-                    this.autoStartStreams.delete(streamId);
+                try {
+                    // 检查流是否存在
+                    if (!this.streams.has(streamId)) {
+                        errors.push(`流 ${streamId} 不存在`);
+                        continue;
+                    }
+
+                    // 更新自启动状态
+                    if (enable) {
+                        this.autoStartStreams.add(streamId);
+                    } else {
+                        this.autoStartStreams.delete(streamId);
+                    }
+                    successCount++;
+                } catch (error) {
+                    errors.push(`流 ${streamId}: ${error.message}`);
                 }
             }
             
@@ -863,7 +878,8 @@ class StreamManager extends EventEmitter {
                 success: true,
                 stats: {
                     total: streamIds.length,
-                    success: streamIds.length
+                    success: successCount,
+                    errors: errors
                 }
             };
         } catch (error) {
@@ -899,6 +915,108 @@ class StreamManager extends EventEmitter {
             this.logger.error('Error getting all streams:', error);
             return [];
         }
+    }
+
+    // 添加更详细的流状态检查方法
+    checkStreamStatus(streamId) {
+        const stream = this.streams.get(streamId);
+        if (!stream) return { status: 'invalid', message: '流不存在' };
+
+        // 检查进程状态
+        const processRunning = stream.process && !stream.process.killed;
+        
+        // 检查最近的错误记录
+        const hasRecentError = stream.lastError && 
+            (Date.now() - stream.lastError.timestamp < 5000); // 5秒内的错误
+
+        // 检查流的健康状态
+        const isHealthy = stream.stats && 
+            stream.stats.frames > 0 && 
+            Date.now() - stream.stats.lastFrameTime < 10000; // 10秒内有新帧
+
+        if (!processRunning) {
+            return { 
+                status: 'stopped',
+                message: '已停止',
+                processRunning: false
+            };
+        }
+
+        if (hasRecentError) {
+            return {
+                status: 'error',
+                message: stream.lastError.message,
+                processRunning: true,
+                error: stream.lastError
+            };
+        }
+
+        if (!isHealthy) {
+            return {
+                status: 'unhealthy',
+                message: '流可能已失效',
+                processRunning: true
+            };
+        }
+
+        return {
+            status: 'running',
+            message: '运行中',
+            processRunning: true,
+            stats: stream.stats
+        };
+    }
+
+    // 修改启动流的方法，添加错误处理
+    async startStream(streamId) {
+        const stream = this.streams.get(streamId);
+        if (!stream) throw new Error('Stream not found');
+
+        // 重置错误状态
+        stream.lastError = null;
+        
+        // 添加错误监听
+        stream.process.on('error', (error) => {
+            stream.lastError = {
+                message: error.message,
+                timestamp: Date.now()
+            };
+            logger.error(`Stream ${streamId} error: ${error.message}`);
+        });
+
+        stream.process.on('exit', (code) => {
+            if (code !== 0) {
+                stream.lastError = {
+                    message: `进程退出，代码: ${code}`,
+                    timestamp: Date.now()
+                };
+                logger.error(`Stream ${streamId} exited with code ${code}`);
+            }
+        });
+
+        // 添加流状态监控
+        this.monitorStream(stream);
+    }
+
+    // 添加流监控方法
+    monitorStream(stream) {
+        const statsInterval = setInterval(() => {
+            if (!stream.process || stream.process.killed) {
+                clearInterval(statsInterval);
+                return;
+            }
+
+            // 检查流的统计数据
+            if (stream.stats) {
+                const now = Date.now();
+                if (now - stream.stats.lastFrameTime > 30000) { // 30秒没有新帧
+                    stream.lastError = {
+                        message: '流已失效，长时间没有新帧',
+                        timestamp: now
+                    };
+                }
+            }
+        }, 5000); // 每5秒检查一次
     }
 }
 

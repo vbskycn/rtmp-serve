@@ -612,14 +612,21 @@ router.post('/api/streams/:streamId/auto-start', authMiddleware, async (req, res
 });
 
 // 修改批量设置自启动的路由
-router.post('/api/streams/batch-auto-start', authMiddleware, async (req, res) => {
+router.post('/api/streams/batch-auto-start', async (req, res) => {
     try {
-        const { streamIds, autoStart } = req.body;
-        const result = await streamManager.batchUpdateAutoStart(streamIds, autoStart);
+        const { streamIds, enable } = req.body;
+        if (!Array.isArray(streamIds)) {
+            return res.status(400).json({
+                success: false,
+                error: '无效的流ID列表'
+            });
+        }
+
+        const result = await streamManager.batchUpdateAutoStart(streamIds, enable);
         res.json(result);
     } catch (error) {
-        logger.error('Error in batch auto-start update:', error);
-        res.json({
+        logger.error('Error in batch auto-start:', error);
+        res.status(500).json({
             success: false,
             error: error.message
         });
