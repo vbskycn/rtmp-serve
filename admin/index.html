@@ -445,11 +445,12 @@
                         <button onclick="batchDelete()" class="btn btn-danger btn-sm" id="batchDeleteBtn" disabled>
                             <i class="fa fa-trash"></i> 批量删除
                         </button>
-                        <button onclick="batchAutoStart(true)" class="btn btn-success btn-sm" id="batchAutoStartOnBtn" disabled>
-                            <i class="fa fa-sun-o"></i> 自启开
+                        <button onclick="batchAutoStart(true)" class="btn btn-outline-success btn-sm" id="batchAutoStartOnBtn" disabled>
+                            <i class="fa fa-sun-o"></i> 批量自启开
                         </button>
-                        <button onclick="batchAutoStart(false)" class="btn btn-warning btn-sm" id="batchAutoStartOffBtn" disabled>
-                            <i class="fa fa-moon-o"></i> 自启关
+                        <button onclick="batchAutoStart(false)" class="btn btn-warning btn-sm" id="batchAutoStartOffBtn" disabled 
+                                style="background-color: #ffc107; color: #000; font-weight: bold;">
+                            <i class="fa fa-moon-o"></i> 批量自启关
                         </button>
                         <button onclick="exportM3U()" class="btn btn-light btn-sm">
                             <i class="fa fa-download"></i> 导出M3U
@@ -631,10 +632,21 @@
             // 更新自启动按钮状态
             const autoStartBtn = row.querySelector('.auto-start-btn');
             if (autoStartBtn) {
-                autoStartBtn.className = `btn ${stream.autoStart ? 'btn-warning' : 'btn-success'} btn-sm auto-start-btn`;
+                // 根据自启动状态设置不同的样式
+                if (stream.autoStart) {
+                    autoStartBtn.className = 'btn btn-warning btn-sm auto-start-btn';
+                    autoStartBtn.style.backgroundColor = '#ffc107';  // 黄色背景
+                    autoStartBtn.style.color = '#000';  // 黑色文字
+                    autoStartBtn.style.fontWeight = 'bold';
+                } else {
+                    autoStartBtn.className = 'btn btn-outline-success btn-sm auto-start-btn';
+                    autoStartBtn.style.backgroundColor = 'transparent';
+                    autoStartBtn.style.color = '#28a745';  // 绿色文字
+                }
+                
                 autoStartBtn.innerHTML = `
                     <i class="fa ${stream.autoStart ? 'fa-moon-o' : 'fa-sun-o'}"></i> 
-                    ${stream.autoStart ? '自启关' : '自启开'}
+                    ${stream.autoStart ? '自启已开' : '自启开'}
                 `;
                 autoStartBtn.onclick = () => toggleAutoStart(stream.id, !stream.autoStart);
             }
@@ -746,10 +758,11 @@
                                     <button onclick="stopStream('${stream.id}')" class="btn btn-secondary btn-sm">
                                         <i class="fa fa-stop"></i> 停止
                                     </button>
-                                    <button class="btn ${stream.autoStart ? 'btn-warning' : 'btn-success'} btn-sm auto-start-btn" 
-                                            onclick="toggleAutoStart('${stream.id}', ${!stream.autoStart})">
+                                    <button class="btn ${stream.autoStart ? 'btn-warning' : 'btn-outline-success'} btn-sm auto-start-btn" 
+                                            onclick="toggleAutoStart('${stream.id}', ${!stream.autoStart})"
+                                            style="${stream.autoStart ? 'background-color: #ffc107; color: #000; font-weight: bold;' : 'background-color: transparent; color: #28a745;'}">
                                         <i class="fa ${stream.autoStart ? 'fa-moon-o' : 'fa-sun-o'}"></i> 
-                                        ${stream.autoStart ? '自启关' : '自启开'}
+                                        ${stream.autoStart ? '自启已开' : '自启开'}
                                     </button>
                                     <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
                                         <i class="fa fa-trash"></i> 删除
@@ -1061,13 +1074,26 @@
             const batchAutoStartOnBtn = document.getElementById('batchAutoStartOnBtn');
             const batchAutoStartOffBtn = document.getElementById('batchAutoStartOffBtn');
 
-            batchStopBtn.disabled = selectedCount === 0;
-            batchDeleteBtn.disabled = selectedCount === 0;
-            batchAutoStartOnBtn.disabled = selectedCount === 0;
-            batchAutoStartOffBtn.disabled = selectedCount === 0;
+            const disabled = selectedCount === 0;
+            
+            batchStopBtn.disabled = disabled;
+            batchDeleteBtn.disabled = disabled;
+            batchAutoStartOnBtn.disabled = disabled;
+            batchAutoStartOffBtn.disabled = disabled;
+
+            // 更新自启动按钮样式
+            if (!disabled) {
+                batchAutoStartOnBtn.className = 'btn btn-outline-success btn-sm';
+                batchAutoStartOnBtn.style = '';
+                
+                batchAutoStartOffBtn.className = 'btn btn-warning btn-sm';
+                batchAutoStartOffBtn.style.backgroundColor = '#ffc107';
+                batchAutoStartOffBtn.style.color = '#000';
+                batchAutoStartOffBtn.style.fontWeight = 'bold';
+            }
         }
 
-        // ��取选中的流
+        // 取选中的流
         function getSelectedStreams() {
             const checkboxes = document.getElementsByClassName('stream-checkbox');
             return Array.from(checkboxes)
@@ -1802,7 +1828,7 @@
                 return;
             }
             
-            // 显示进度模态框
+            // 显示进���模态框
             const modal = showProgressModal('批量设置自动配置');
             
             try {
@@ -1996,6 +2022,17 @@
             const modal = showProgressModal(`批量${enable ? '开启' : '关闭'}自动启动`);
             
             try {
+                // 更新按钮状态
+                const onBtn = document.getElementById('batchAutoStartOnBtn');
+                const offBtn = document.getElementById('batchAutoStartOffBtn');
+                if (enable) {
+                    onBtn.disabled = true;
+                    onBtn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 处理中...';
+                } else {
+                    offBtn.disabled = true;
+                    offBtn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 处理中...';
+                }
+
                 const response = await fetch('/api/streams/batch-auto-start', {
                     method: 'POST',
                     headers: {
@@ -2019,6 +2056,14 @@
                     current: result.stats.total
                 });
 
+                // 显示成功提示
+                const toast = document.createElement('div');
+                toast.className = 'alert alert-success position-fixed bottom-0 end-0 m-3';
+                toast.style.zIndex = '9999';
+                toast.textContent = enable ? '批量开启自启动成功' : '批量关闭自启动成功';
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 2000);
+
                 // 3秒后关闭进度模态框
                 setTimeout(() => {
                     modal.remove();
@@ -2029,6 +2074,14 @@
                 console.error('Error in batch auto-start:', error);
                 alert('批量设置失败: ' + error.message);
                 modal.remove();
+            } finally {
+                // 恢复按钮状态
+                const onBtn = document.getElementById('batchAutoStartOnBtn');
+                const offBtn = document.getElementById('batchAutoStartOffBtn');
+                onBtn.disabled = selectedStreams.length === 0;
+                offBtn.disabled = selectedStreams.length === 0;
+                onBtn.innerHTML = '<i class="fa fa-sun-o"></i> 批量自启开';
+                offBtn.innerHTML = '<i class="fa fa-moon-o"></i> 批量自启关';
             }
         }
 
