@@ -478,7 +478,7 @@
                         autoStartBtn.className = 'btn btn-warning btn-sm auto-start-btn';
                         autoStartBtn.style.backgroundColor = '#ffc107';
                         autoStartBtn.style.color = '#000';
-                        autoStartBtn.innerHTML = '<i class="fa fa-moon-o"></i> 自启已开';
+                        autoStartBtn.innerHTML = '<i class="fa fa-moon-o"></i> ��启已开';
                     } else {
                         autoStartBtn.className = 'btn btn-outline-success btn-sm auto-start-btn';
                         autoStartBtn.style.backgroundColor = 'transparent';
@@ -900,7 +900,7 @@
             content.style.overflow = 'hidden';
         });
 
-        // 在 script 标签中添加刷新页面函数
+        // 修改刷新页面函数
         function refreshPage() {
             // 显示加载提示
             const button = document.querySelector('button[onclick="refreshPage()"]');
@@ -908,21 +908,8 @@
             button.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 刷新中...';
             button.disabled = true;
 
-            // 刷新数据
-            Promise.all([
-                getServerConfig(),
-                loadStreams(),
-                updateSystemStats()
-            ]).then(() => {
-                showToast('刷新成功');
-            }).catch(error => {
-                console.error('Error refreshing page:', error);
-                alert('刷新失败');
-            }).finally(() => {
-                // 恢复按钮状态
-                button.innerHTML = originalHtml;
-                button.disabled = false;
-            });
+            // 直接刷新整个页面
+            window.location.reload();
         }
     </script>
 </body>

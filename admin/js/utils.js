@@ -111,4 +111,121 @@ function updateStatElement(elementId, newValue) {
             element.style.opacity = '1';
         }, 300);
     }
+}
+
+// 加载流列表
+async function loadStreams() {
+    try {
+        const response = await fetch('/api/streams');
+        const streams = await response.json();
+        
+        // 验证流数据的完整性
+        const validStreams = streams.filter(stream => {
+            if (!stream.name) {
+                console.warn(`Stream ${stream.id} has no name`);
+                stream.name = '未命名流';
+            }
+            return true;
+        });
+
+        // 更新统计数据
+        updateStatElement('totalStreams', validStreams.length);
+        updateStatElement('activeStreams', validStreams.filter(s => 
+            s.processRunning || s.stats?.startTime
+        ).length);
+
+        // 按分类分组
+        const groupedStreams = {};
+        validStreams.forEach(stream => {
+            const category = stream.category || '未分类';
+            if (!groupedStreams[category]) {
+                groupedStreams[category] = [];
+            }
+            groupedStreams[category].push(stream);
+        });
+
+        const tbody = document.querySelector('#streamTable');
+        
+        // 检查是否需要完全重新渲染
+        const needsFullRerender = checkIfNeedsFullRerender(tbody, groupedStreams);
+        
+        if (needsFullRerender) {
+            const newTbody = document.createElement('tbody');
+            newTbody.id = 'streamTable';
+            renderFullTable(newTbody, groupedStreams);
+            
+            tbody.style.transition = 'opacity 0.3s';
+            tbody.style.opacity = '0';
+            
+            setTimeout(() => {
+                tbody.parentNode.replaceChild(newTbody, tbody);
+                requestAnimationFrame(() => {
+                    newTbody.style.opacity = '1';
+                });
+            }, 300);
+        } else {
+            updateExistingRows(tbody, groupedStreams);
+        }
+    } catch (error) {
+        console.error('Error loading streams:', error);
+    }
+}
+
+// 检查是否需要完全重新渲染
+function checkIfNeedsFullRerender(tbody, groupedStreams) {
+    const currentIds = Array.from(tbody.querySelectorAll('tr[data-stream-id]'))
+        .map(row => row.dataset.streamId);
+    
+    const newIds = Object.values(groupedStreams)
+        .flat()
+        .map(stream => stream.id);
+    
+    if (currentIds.length !== newIds.length) return true;
+    return !currentIds.every((id, index) => id === newIds[index]);
+}
+
+// 更新现有行
+function updateExistingRows(tbody, groupedStreams) {
+    Object.values(groupedStreams)
+        .flat()
+        .forEach(stream => {
+            const row = tbody.querySelector(`tr[data-stream-id="${stream.id}"]`);
+            if (row) {
+                updateRowElements(row, stream);
+            }
+        });
+}
+
+// 更新行元素
+function updateRowElements(row, stream) {
+    // 更新状态
+    const statusSpan = row.querySelector('.status');
+    if (statusSpan) {
+        let statusClass = '';
+        let statusText = '';
+        let statusStyle = '';
+        
+        if (stream.status === 'invalid') {
+            statusClass = 'error';
+            statusText = '已失效';
+            statusStyle = 'background-color: #dc3545;';
+        } else if (stream.processRunning && stream.status === 'running') {
+            statusClass = 'active';
+            statusText = '运行中';
+            statusStyle = 'background-color: #28a745;';
+        } else {
+            statusClass = 'inactive';
+            statusText = '已停止';
+            statusStyle = 'background-color: #6c757d;';
+        }
+        
+        if (statusSpan.textContent !== statusText) {
+            statusSpan.className = `status ${statusClass}`;
+            statusSpan.style = statusStyle;
+            statusSpan.textContent = statusText;
+        }
+    }
+
+    // 更新其他元素...
+    // (保留原有的更新逻辑)
 } 
