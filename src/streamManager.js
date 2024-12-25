@@ -657,27 +657,19 @@ class StreamManager extends EventEmitter {
     // 修改获取系统统计信息的方法
     async getSystemStats() {
         try {
-            // 获取活跃流数量（包括HLS推流的流）
-            const activeStreams = Array.from(this.streams.keys()).filter(async streamId => {
-                const hlsActive = await this.checkHlsStatus(streamId);
-                return hlsActive;
-            });
-
-            // 计算运行时间
+            // 计算运行时间（毫秒）
             const uptime = Date.now() - this.startTime;
-            const formattedUptime = this.formatUptime(uptime);
 
-            // 获取当前流量统计
-            const traffic = await this.getTrafficStats();
+            // 获取活跃流数量
+            const activeStreams = Array.from(this.streamProcesses.entries())
+                .filter(([_, info]) => info && info.streamStarted)
+                .length;
 
             return {
                 totalStreams: this.streams.size,
-                activeStreams: activeStreams.length,
-                uptime: formattedUptime,
-                traffic: {
-                    received: traffic.received,
-                    sent: traffic.sent
-                }
+                activeStreams,
+                uptime,  // 返回原始毫秒值，让前端处理格式化
+                traffic: this.getTrafficStats()
             };
         } catch (error) {
             logger.error('Error getting system stats:', error);

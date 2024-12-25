@@ -503,76 +503,139 @@
             }
         }
 
-        // 加载流列表
+        // 修改 loadStreams 函数中的更新逻辑
         async function loadStreams() {
-            let retryCount = 0;
-            const maxRetries = 3;
-
-            while (retryCount < maxRetries) {
-                try {
-                    const response = await fetch('/api/streams');
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
+            try {
+                const response = await fetch('/api/streams');
+                const streams = await response.json();
+                
+                // 验证流数据的完整性
+                const validStreams = streams.filter(stream => {
+                    if (!stream.name) {
+                        console.warn(`Stream ${stream.id} has no name`);
+                        stream.name = '未命名流';  // 设置默认名称
                     }
-                    const streams = await response.json();
-                    
-                    // 验证流数据的完整性
-                    const validStreams = streams.filter(stream => {
-                        if (!stream.name) {
-                            console.warn(`Stream ${stream.id} has no name`);
-                            stream.name = '未命名流';  // 设置默认名称
-                        }
-                        return true;  // 保留所有流，但确保它们有名称
-                    });
+                    return true;
+                });
 
-                    // 更新统计数据
-                    document.getElementById('totalStreams').textContent = validStreams.length;
-                    
-                    // 获取活跃流的数量
-                    const activeStreams = validStreams.filter(stream => {
-                        return stream.processRunning || stream.stats?.startTime;
-                    });
-                    document.getElementById('activeStreams').textContent = activeStreams.length;
+                // 更新统计数据
+                document.getElementById('totalStreams').textContent = validStreams.length;
+                
+                // 获取活跃流的数量
+                const activeStreams = validStreams.filter(stream => {
+                    return stream.processRunning || stream.stats?.startTime;
+                });
+                document.getElementById('activeStreams').textContent = activeStreams.length;
 
-                    // 按分类分组并更新表格
-                    const groupedStreams = {};
-                    validStreams.forEach(stream => {
-                        const category = stream.category || '未分类';
-                        if (!groupedStreams[category]) {
-                            groupedStreams[category] = [];
-                        }
-                        groupedStreams[category].push(stream);
-                    });
-
-                    const tbody = document.querySelector('#streamTable');
-                    
-                    // 检查是否需要完全重新渲染
-                    const currentStreamIds = Array.from(tbody.querySelectorAll('tr[data-stream-id]'))
-                        .map(row => row.dataset.streamId);
-                    const newStreamIds = validStreams.map(stream => stream.id);
-
-                    if (JSON.stringify(currentStreamIds) !== JSON.stringify(newStreamIds)) {
-                        renderFullTable(tbody, groupedStreams);
-                    } else {
-                        // 只更新现有行
-                        validStreams.forEach(stream => {
-                            const existingRow = tbody.querySelector(`tr[data-stream-id="${stream.id}"]`);
-                            if (existingRow) {
-                                updateStreamRow(existingRow, stream);
-                            }
-                        });
+                // 按分类分组
+                const groupedStreams = {};
+                validStreams.forEach(stream => {
+                    const category = stream.category || '未分类';
+                    if (!groupedStreams[category]) {
+                        groupedStreams[category] = [];
                     }
+                    groupedStreams[category].push(stream);
+                });
 
-                    break;  // 成功后跳出重试循环
-                } catch (error) {
-                    console.error(`Error loading streams (attempt ${retryCount + 1}):`, error);
-                    retryCount++;
-                    if (retryCount === maxRetries) {
-                        console.error('Failed to load streams after maximum retries');
-                    } else {
-                        await new Promise(resolve => setTimeout(resolve, 1000));  // 等待1秒后重试
-                    }
-                }
+                // 始终完全重新渲染表格，确保名称显示正确
+                const tbody = document.querySelector('#streamTable');
+                renderFullTable(tbody, groupedStreams);
+
+            } catch (error) {
+                console.error('Error loading streams:', error);
+            }
+        }
+
+        // 修改系统状态更新函数
+        async function updateSystemStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const stats = await response.json();
+                
+                // 格式化运行时间
+                const uptime = formatUptime(stats.uptime);
+                
+                // 平滑更新显示
+                updateStatElement('totalStreams', stats.totalStreams);
+                updateStatElement('activeStreams', stats.activeStreams);
+                updateStatElement('systemUptime', uptime);
+                updateStatElement('trafficReceived', stats.traffic.received);
+                updateStatElement('trafficSent', stats.traffic.sent);
+            } catch (error) {
+                console.error('Error updating system stats:', error);
+            }
+        }
+
+        // 添加格式化运行时间的函数
+        function formatUptime(ms) {
+            const seconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            const days = Math.floor(hours / 24);
+
+            const parts = [];
+            
+            if (days > 0) {
+                parts.push(`${days}天`);
+            }
+            if (hours > 0 || days > 0) {
+                parts.push(`${hours % 24}时`);
+            }
+            if (minutes > 0 || hours > 0 || days > 0) {
+                parts.push(`${minutes % 60}分`);
+            }
+            if (seconds > 0 && days === 0) {  // 只在不满一天时显示秒数
+                parts.push(`${seconds % 60}秒`);
+            }
+
+            return parts.join('') || '刚刚启动';
+        }
+
+        // 修改初始化函数
+        async function init() {
+            await getServerConfig();
+            await loadStreams();
+            
+            // 立即更新一次系统状态
+            await updateSystemStats();
+            
+            // 设置定时更新
+            setInterval(async () => {
+                await loadStreams();
+                await updateSystemStats();
+            }, 5000);
+        }
+
+        // 修改更新统计元素的函数
+        function updateStatElement(elementId, newValue) {
+            const element = document.getElementById(elementId);
+            if (!element) return;
+            
+            if (element.textContent !== String(newValue)) {
+                // 保存当前位置
+                const rect = element.getBoundingClientRect();
+                
+                // 创建新元素
+                const newElement = document.createElement('span');
+                newElement.textContent = newValue;
+                newElement.style.position = 'absolute';
+                newElement.style.left = `${rect.left}px`;
+                newElement.style.top = `${rect.top}px`;
+                newElement.style.opacity = '0';
+                
+                // 添加新元素
+                element.parentNode.appendChild(newElement);
+                
+                // 淡出旧值
+                element.style.transition = 'opacity 0.3s';
+                element.style.opacity = '0';
+                
+                // 淡入新值
+                setTimeout(() => {
+                    element.textContent = newValue;
+                    element.style.opacity = '1';
+                    newElement.remove();
+                }, 300);
             }
         }
 
@@ -589,7 +652,7 @@
             }
         }
 
-        // 添�����新单个流行的函数
+        // 添新单个流行的函数
         function updateStreamRow(row, stream) {
             // 更新状态
             const statusCell = row.querySelector('.status');
