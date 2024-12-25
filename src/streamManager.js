@@ -968,7 +968,7 @@ class StreamManager extends EventEmitter {
         const hasRecentStats = stats?.startTime && 
             (Date.now() - new Date(stats.startTime).getTime()) < 30000;  // 30秒内有活动
         
-        // 检查是否有放列表文��
+        // 检查是否有放列表文件
         const playlistPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
         const hasPlaylist = fs.existsSync(playlistPath);
         
@@ -1158,46 +1158,60 @@ class StreamManager extends EventEmitter {
 
     // 修改获取流量统计的方法
     getTrafficStats() {
-        const uptime = Date.now() - this.startTime;  // 使用实际的启动时间计算运行时间
-        return {
-            sent: this.formatBytes(this.totalTraffic.sent),
-            received: this.formatBytes(this.totalTraffic.received),
-            uptime: uptime,
-            activeStreams: this.streamProcesses.size
-        };
+        try {
+            // 确保将 BigInt 转换为 Number
+            const received = Number(this.stats.trafficReceived || 0);
+            const sent = Number(this.stats.trafficSent || 0);
+            
+            return {
+                received: this.formatBytes(received),
+                sent: this.formatBytes(sent)
+            };
+        } catch (error) {
+            this.logger.error('Error getting traffic stats:', error);
+            return {
+                received: '0 B',
+                sent: '0 B'
+            };
+        }
     }
 
     // 改进格式化字节数的方法
     formatBytes(bytes) {
-        if (typeof bytes === 'bigint') {
-            bytes = Number(bytes);
-        }
+        if (!bytes) return '0 B';
         
-        if (bytes === 0) return '0 B';
+        // 将 BigInt 转换为 Number
+        const bytesNum = Number(bytes);
+        
+        // 如果转换后的数字太大，返回 TB 或更大的单位
+        if (bytesNum > Number.MAX_SAFE_INTEGER) {
+            return '> 8192 TB';
+        }
         
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        const i = Math.floor(Math.log(bytesNum) / Math.log(k));
         
-        // 保留两位小数
-        const value = bytes / Math.pow(k, i);
-        return value.toFixed(2) + ' ' + sizes[i];
+        return parseFloat((bytesNum / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
     // 修改保存统计数据的方法
     async saveStats() {
         try {
             const statsPath = path.join(__dirname, '../config/stats.json');
-            const stats = {
-                startTime: this.startTime,
-                traffic: {
-                    sent: this.totalTraffic.sent.toString(),
-                    received: this.totalTraffic.received.toString()
-                }
-            };
+            const stats = {};
             
+            for (const [streamId, streamStats] of this.trafficStats) {
+                stats[streamId] = {
+                    startTime: streamStats.startTime,
+                    bytesReceived: streamStats.bytesReceived,
+                    bytesSent: streamStats.bytesSent,
+                    lastUpdate: streamStats.lastUpdate
+                };
+            }
+
             await fs.promises.writeFile(statsPath, JSON.stringify(stats, null, 2));
-            logger.debug('Stats saved successfully');
+            logger.info('Stats saved successfully');
         } catch (error) {
             logger.error('Error saving stats:', error);
         }
