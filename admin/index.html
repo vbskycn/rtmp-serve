@@ -622,10 +622,7 @@
                 rtmpStatusCell.innerHTML = `
                     <div class="d-flex justify-content-between gap-2">
                         <span class="status flex-grow-1" style="background-color: ${stream.processRunning ? '#28a745' : '#6c757d'};">
-                            HLS: ${stream.processRunning ? '推流中' : '未推流'}
-                        </span>
-                        <span class="status flex-grow-1" style="background-color: ${stream.isRtmpActive ? '#28a745' : '#6c757d'};">
-                            RTMP: ${stream.isRtmpActive ? '推流中' : '未推流'}
+                            ${stream.processRunning ? '已推流' : '未推流'}
                         </span>
                     </div>
                 `;
@@ -678,7 +675,7 @@
                             statusStyle = 'background-color: #dc3545;';  // 红色
                         } else if (stream.status === 'running') {
                             statusClass = 'active';
-                            statusText = '运行中';
+                            statusText = '已运行';
                             statusStyle = 'background-color: #28a745;';  // 绿色
                         } else {
                             statusClass = 'inactive';
@@ -709,10 +706,7 @@
                             <td>
                                 <div class="d-flex justify-content-between gap-2">
                                     <span class="status flex-grow-1" style="background-color: ${stream.processRunning ? '#28a745' : '#6c757d'};">
-                                        HLS: ${stream.processRunning ? '推流中' : '未推流'}
-                                    </span>
-                                    <span class="status flex-grow-1" style="background-color: ${stream.isRtmpActive ? '#28a745' : '#6c757d'};">
-                                        RTMP: ${stream.isRtmpActive ? '推流中' : '未推流'}
+                                        ${stream.processRunning ? '已推流' : '未推流'}
                                     </span>
                                 </div>
                             </td>
@@ -1086,7 +1080,7 @@
             const selectedStreams = getSelectedStreams();
             if (!selectedStreams.length) return;
             
-            if (!confirm(`确定要手动启动选中的 ${selectedStreams.length} 个流吗？这些流将会推流到远程服务器。`)) return;
+            if (!confirm(`确定要手动启动选中的 ${selectedStreams.length} 个流吗？这些流��会推流到远程服务器。`)) return;
 
             // 显示进度提示
             const progressModal = document.createElement('div');
@@ -1366,7 +1360,7 @@
                         progressDetail.textContent = `正在处理: ${streamId}`;
                         progressStats.innerHTML = `
                             处理中: ${success + failed}/${selectedStreams.length}<br>
-                            成功: <span class="text-success">${success}</span>
+                            ��功: <span class="text-success">${success}</span>
                             失败: <span class="text-danger">${failed}</span>
                         `;
 
@@ -1415,7 +1409,7 @@
                 <div class="modal-dialog modal-dialog-centered">
                     <div class="modal-content">
                         <div class="modal-header">
-                            <h5 class="modal-title">批量停止结果</h5>
+                            <h5 class="modal-title">批量停止结��</h5>
                             <button type="button" class="btn-close" onclick="this.closest('.modal').remove()"></button>
                         </div>
                         <div class="modal-body">
@@ -1934,7 +1928,7 @@
             }
         }
 
-        // 修改批量自启动处理函数
+        // 修改自启动切换函数
         async function toggleAutoStart(streamId, enable) {
             try {
                 // 显示加载提示
@@ -1945,8 +1939,8 @@
                     button.disabled = true;
                 }
 
-                // 1. 设置自动启动状态
-                const autoStartResponse = await fetch(`/api/streams/${streamId}/auto-start`, {
+                // 设置自动启动状态
+                const response = await fetch(`/api/streams/${streamId}/auto-start`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -1954,36 +1948,16 @@
                     body: JSON.stringify({ autoStart: enable })
                 });
 
-                if (!autoStartResponse.ok) {
-                    throw new Error('请求失败: ' + autoStartResponse.status);
+                if (!response.ok) {
+                    throw new Error('请求失败: ' + response.status);
                 }
 
-                const autoStartResult = await autoStartResponse.json();
-                if (!autoStartResult.success) {
-                    throw new Error(autoStartResult.error || '设置自动启动失败');
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error || '设置自动启动失败');
                 }
 
-                // 2. 如果是开启自启动，还需要立即启动流
-                if (enable) {
-                    const startResponse = await fetch(`/api/streams/${streamId}/start`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ rtmpPush: true })
-                    });
-
-                    if (!startResponse.ok) {
-                        throw new Error('启动流失败: ' + startResponse.status);
-                    }
-
-                    const startResult = await startResponse.json();
-                    if (!startResult.success) {
-                        throw new Error(startResult.error || '启动流失败');
-                    }
-                }
-
-                // 3. 刷新列表以更新状态
+                // 刷新列表以更新状态
                 await loadStreams();
 
                 // 显示成功提示
@@ -1996,10 +1970,9 @@
 
             } catch (error) {
                 console.error('Error toggling auto-start:', error);
-                // 显示错误提示
                 alert('设置自动启动失败: ' + error.message);
             } finally {
-                // 恢复按���状态
+                // 恢复按钮状态
                 const button = document.querySelector(`button[onclick="toggleAutoStart('${streamId}', ${!enable})"]`);
                 if (button) {
                     button.innerHTML = `
@@ -2011,7 +1984,7 @@
             }
         }
 
-        // 修改批量自启动处理函数
+        // 修改批量设置自启动函数
         async function batchAutoStart(enable) {
             const selectedStreams = getSelectedStreams();
             if (!selectedStreams.length) {
@@ -2023,58 +1996,28 @@
             const modal = showProgressModal(`批量${enable ? '开启' : '关闭'}自动启动`);
             
             try {
-                let success = 0;
-                let failed = 0;
-                let current = 0;
-                
-                for (const streamId of selectedStreams) {
-                    try {
-                        // 1. 设置自动启动状态
-                        const autoStartResponse = await fetch(`/api/streams/${streamId}/auto-start`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({ autoStart: enable })
-                        });
+                const response = await fetch('/api/streams/batch-auto-start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        streamIds: selectedStreams,
+                        autoStart: enable
+                    })
+                });
 
-                        const autoStartResult = await autoStartResponse.json();
-                        if (!autoStartResult.success) {
-                            throw new Error(autoStartResult.error);
-                        }
-
-                        // 2. 如果是开启自启动，还需要立即启动流
-                        if (enable) {
-                            const startResponse = await fetch(`/api/streams/${streamId}/start`, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                },
-                                body: JSON.stringify({ rtmpPush: true })
-                            });
-
-                            const startResult = await startResponse.json();
-                            if (!startResult.success) {
-                                throw new Error(startResult.error);
-                            }
-                        }
-
-                        success++;
-                        
-                    } catch (error) {
-                        console.error(`Error setting auto-start for stream ${streamId}:`, error);
-                        failed++;
-                    }
-                    
-                    current = success + failed;
-                    // 更新进度显示
-                    updateProgressModal(modal, {
-                        success,
-                        failed,
-                        total: selectedStreams.length,
-                        current
-                    });
+                const result = await response.json();
+                if (!result.success) {
+                    throw new Error(result.error);
                 }
+
+                // 更新进度显示
+                updateProgressModal(modal, {
+                    success: result.stats.success,
+                    total: result.stats.total,
+                    current: result.stats.total
+                });
 
                 // 3秒后关闭进度模态框
                 setTimeout(() => {

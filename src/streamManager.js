@@ -330,7 +330,7 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 修改 getStreamInfo 方法，简化状态检测逻辑
+    // 修改 getStreamInfo 方法
     async getStreamInfo(streamId) {
         try {
             const stream = this.streams.get(streamId);
@@ -345,39 +345,28 @@ class StreamManager extends EventEmitter {
             if (processInfo && processInfo.ffmpeg) {
                 try {
                     process.kill(processInfo.ffmpeg.pid, 0);
-                    // 检查进程是否真正启动了流
                     isProcessRunning = processInfo.streamStarted === true;
                 } catch (e) {
                     isProcessRunning = false;
-                    // 清理无效的进程信息
                     this.streamProcesses.delete(streamId);
-                    this.manuallyStartedStreams.delete(streamId);
                 }
             }
-
-            // 检查 HLS 文件是否存在且最近有更新
-            const hlsActive = await this.checkHlsStatus(streamId);
 
             // 确定流状态
             let finalStatus;
             if (retries >= this.MAX_RETRIES) {
                 finalStatus = 'invalid';  // 已失效
-            } else if ((isProcessRunning || hlsActive) && status === 'running') {
-                finalStatus = 'running';  // 已运行
+            } else if (isProcessRunning && status === 'running') {
+                finalStatus = 'running';  // 运行中
             } else {
                 finalStatus = 'stopped';  // 已停止
             }
 
-            // 确定推流状态
-            const isRtmpActive = isProcessRunning && 
-                               (this.autoStartStreams.has(streamId) || 
-                                this.manuallyStartedStreams.has(streamId));
-
             return {
                 ...stream,
-                processRunning: isProcessRunning || hlsActive,  // 如果HLS活跃也认为是运行中
+                processRunning: isProcessRunning,
                 status: finalStatus,
-                isRtmpActive,
+                isRtmpActive: isProcessRunning,  // 如果进程在运行就表示在推流
                 stats: this.streamStats.get(streamId) || {},
                 retryCount: retries
             };
@@ -483,8 +472,8 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 修改 startStreamingWithFFmpeg 方法中的错误处理
-    async startStreamingWithFFmpeg(streamId, streamConfig, isRtmpPush = false) {
+    // 修改 startStreamingWithFFmpeg 方法
+    async startStreamingWithFFmpeg(streamId, streamConfig) {
         try {
             // 重置重试计数
             this.retryAttempts.set(streamId, 0);
@@ -494,48 +483,27 @@ class StreamManager extends EventEmitter {
             if (attempts >= this.MAX_RETRIES) {
                 logger.error(`Stream ${streamId} marked as invalid after ${attempts} retries`);
                 this.retryAttempts.delete(streamId);
+                this.streamStatus.set(streamId, 'invalid');
                 throw new Error(`Stream failed after ${attempts} retries`);
             }
 
             // 更新重试计数
             this.retryAttempts.set(streamId, attempts + 1);
 
-            // 确保输出目录存在
-            const outputPath = path.join(__dirname, '../streams', streamId);
-            if (!fs.existsSync(outputPath)) {
-                fs.mkdirSync(outputPath, { recursive: true, mode: 0o777 });
-            }
-
-            // 设置 FFmpeg 参数
+            // 设置 FFmpeg 参数 - 只做 RTMP 推流
             const args = [
                 '-i', streamConfig.url,
-                // HLS 输出
                 '-c:v', 'copy',
                 '-c:a', 'aac',
-                '-ar', '44100',
-                '-hls_time', '10',
-                '-hls_list_size', '6',
-                '-hls_flags', 'delete_segments',
-                '-hls_segment_filename', path.join(outputPath, 'segment_%d.ts'),
-                path.join(outputPath, 'playlist.m3u8')
+                '-f', 'flv',
+                `${this.config.rtmp.pushServer}${streamId}`
             ];
-
-            // 如果是推流模式，添加RTMP输出
-            if (isRtmpPush) {
-                args.push(
-                    '-c:v', 'copy',
-                    '-c:a', 'aac',
-                    '-f', 'flv',
-                    `${this.config.rtmp.pushServer}${streamId}`
-                );
-            }
 
             return new Promise((resolve, reject) => {
                 try {
                     const ffmpeg = spawn('ffmpeg', args);
                     let streamStarted = false;
-                    let consecutiveErrors = 0;
-                    let errorMessages = [];  // 用于收集错误信息
+                    let errorMessages = [];
 
                     ffmpeg.stderr.on('data', (data) => {
                         const message = data.toString();
@@ -543,7 +511,6 @@ class StreamManager extends EventEmitter {
                         // 检测成功的标志
                         if (message.includes('Opening') || 
                             message.includes('Stream mapping')) {
-                            consecutiveErrors = 0;
                             if (!streamStarted) {
                                 streamStarted = true;
                                 // 更新进程信息
@@ -555,32 +522,9 @@ class StreamManager extends EventEmitter {
                             }
                         }
                         
-                        // 检测分片错误
-                        if (message.includes('Failed to open segment')) {
-                            consecutiveErrors++;
-                            logger.error(`FFmpeg stderr: ${message}`);
-                            errorMessages.push(message);
-                            
-                            if (consecutiveErrors >= 3) {  // MAX_SEGMENT_ERRORS
-                                logger.error(`Stream ${streamId} failed to get segments after ${consecutiveErrors} attempts, stopping...`);
-                                // 清理所有状态
-                                this.cleanupStream(streamId);
-                                ffmpeg.kill('SIGTERM');
-                                reject(new Error('Failed to get stream segments'));
-                                return;
-                            }
-                        } 
-                        // 检测 HTTP 404 错误
-                        else if (message.includes('HTTP error 404')) {
-                            logger.error(`Stream ${streamId} received HTTP 404 error, stopping...`);
-                            this.cleanupStream(streamId);
-                            ffmpeg.kill('SIGTERM');
-                            reject(new Error('Stream source returned 404'));
-                            return;
-                        }
-                        // 检测其他严重错误
-                        else if (message.includes('Error') || 
-                                message.includes('Invalid')) {
+                        // 检测错误
+                        if (message.includes('Error') || 
+                            message.includes('Invalid')) {
                             logger.error(`FFmpeg stderr: ${message}`);
                             errorMessages.push(message);
                             
@@ -787,6 +731,58 @@ class StreamManager extends EventEmitter {
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // 修改自启动配置的方法
+    async updateAutoStart(streamId, enable) {
+        try {
+            if (enable) {
+                this.autoStartStreams.add(streamId);
+            } else {
+                this.autoStartStreams.delete(streamId);
+            }
+            
+            // 保存配置
+            await this.saveAutoConfig();
+            
+            return { success: true };
+        } catch (error) {
+            logger.error(`Error updating auto-start config for stream: ${streamId}`, error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    // 修改批量设置自启动的方法
+    async batchUpdateAutoStart(streamIds, enable) {
+        try {
+            for (const streamId of streamIds) {
+                if (enable) {
+                    this.autoStartStreams.add(streamId);
+                } else {
+                    this.autoStartStreams.delete(streamId);
+                }
+            }
+            
+            // 保存配置
+            await this.saveAutoConfig();
+            
+            return { 
+                success: true,
+                stats: {
+                    total: streamIds.length,
+                    success: streamIds.length
+                }
+            };
+        } catch (error) {
+            logger.error('Error in batch auto-start update:', error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
     }
 }
 

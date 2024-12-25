@@ -595,30 +595,30 @@ router.post('/api/streams/:streamId/start', authMiddleware, async (req, res) => 
     }
 });
 
-// 修改自动启动配置的路由
+// 修改自启动配置的路由
 router.post('/api/streams/:streamId/auto-start', authMiddleware, async (req, res) => {
     const { streamId } = req.params;
     try {
         const { autoStart } = req.body;
-        
-        if (autoStart) {
-            // 添加到自动启动集合
-            streamManager.autoStartStreams.add(streamId);
-            // 立即启动流并推送到远程服务器
-            await streamManager.startStreaming(streamId, true);
-        } else {
-            // 从自动启动集合中移除
-            streamManager.autoStartStreams.delete(streamId);
-            // 停止流
-            await streamManager.stopStreaming(streamId);
-        }
-        
-        // 保存配置
-        await streamManager.saveAutoConfig();
-        
-        res.json({ success: true });
+        const result = await streamManager.updateAutoStart(streamId, autoStart);
+        res.json(result);
     } catch (error) {
         logger.error(`Error updating auto-start config for stream: ${streamId}`, error);
+        res.json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// 修改批量设置自启动的路由
+router.post('/api/streams/batch-auto-start', authMiddleware, async (req, res) => {
+    try {
+        const { streamIds, autoStart } = req.body;
+        const result = await streamManager.batchUpdateAutoStart(streamIds, autoStart);
+        res.json(result);
+    } catch (error) {
+        logger.error('Error in batch auto-start update:', error);
         res.json({
             success: false,
             error: error.message
