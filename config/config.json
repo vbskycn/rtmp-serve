@@ -1,5 +1,5 @@
 {
-    "version": "1.5.11",
+    "version": "1.7.1",
     "server": {
         "host": "auto",
         "port": 3000

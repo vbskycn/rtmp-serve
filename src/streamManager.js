@@ -118,6 +118,12 @@ class StreamManager extends EventEmitter {
         
         // 启动时自动启动已配置的流
         this.startAutoStartStreams();
+
+        // 添加流量统计
+        this.trafficStats = new Map();
+        
+        // 定期保存统计信息
+        setInterval(() => this.saveStats(), 60000);
     }
 
     // 加载保存的流配置
@@ -962,7 +968,7 @@ class StreamManager extends EventEmitter {
         const hasRecentStats = stats?.startTime && 
             (Date.now() - new Date(stats.startTime).getTime()) < 30000;  // 30秒内有活动
         
-        // 检查是否有放列表文件
+        // 检查是否有放列表文��
         const playlistPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
         const hasPlaylist = fs.existsSync(playlistPath);
         
@@ -1419,6 +1425,114 @@ class StreamManager extends EventEmitter {
     // 添加获取自启动状态的方法
     isAutoStart(streamId) {
         return this.autoStartStreams.has(streamId);
+    }
+
+    // 添加流量统计方法
+    initTrafficStats(streamId) {
+        this.trafficStats.set(streamId, {
+            startTime: new Date(),
+            bytesReceived: 0,
+            bytesSent: 0,
+            lastUpdate: new Date()
+        });
+    }
+
+    // 更新流量统计
+    updateTrafficStats(streamId, receivedBytes, sentBytes) {
+        const stats = this.trafficStats.get(streamId);
+        if (stats) {
+            stats.bytesReceived += receivedBytes;
+            stats.bytesSent += sentBytes;
+            stats.lastUpdate = new Date();
+        }
+    }
+
+    // 获取流的运行时间和流量统计
+    getStreamStats(streamId) {
+        const stats = this.trafficStats.get(streamId);
+        if (!stats) return null;
+
+        const now = new Date();
+        const uptime = now - stats.startTime;
+        
+        return {
+            uptime: this.formatUptime(uptime),
+            bytesReceived: this.formatBytes(stats.bytesReceived),
+            bytesSent: this.formatBytes(stats.bytesSent),
+            startTime: stats.startTime.toISOString()
+        };
+    }
+
+    // 格式化运行时间
+    formatUptime(ms) {
+        const seconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const hours = Math.floor(minutes / 60);
+        const days = Math.floor(hours / 24);
+
+        return {
+            days,
+            hours: hours % 24,
+            minutes: minutes % 60,
+            seconds: seconds % 60
+        };
+    }
+
+    // 格式化字节数
+    formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // 修改停止流方法
+    async stopStreaming(streamId) {
+        try {
+            // ... 现有的停止流代码 ...
+
+            // 保存最终的流量统计
+            const stats = this.trafficStats.get(streamId);
+            if (stats) {
+                const stream = this.streams.get(streamId);
+                if (stream && stream.stats) {
+                    stream.stats.lastTraffic = {
+                        bytesReceived: stats.bytesReceived,
+                        bytesSent: stats.bytesSent,
+                        endTime: new Date()
+                    };
+                }
+                this.trafficStats.delete(streamId);
+            }
+
+            // ... 其他清理代码 ...
+        } catch (error) {
+            logger.error(`Error stopping stream ${streamId}:`, error);
+            throw error;
+        }
+    }
+
+    // 保存统计信息到文件
+    async saveStats() {
+        try {
+            const statsPath = path.join(__dirname, '../config/stats.json');
+            const stats = {};
+            
+            for (const [streamId, streamStats] of this.trafficStats) {
+                stats[streamId] = {
+                    startTime: streamStats.startTime,
+                    bytesReceived: streamStats.bytesReceived,
+                    bytesSent: streamStats.bytesSent,
+                    lastUpdate: streamStats.lastUpdate
+                };
+            }
+
+            await fs.promises.writeFile(statsPath, JSON.stringify(stats, null, 2));
+            logger.info('Stats saved successfully');
+        } catch (error) {
+            logger.error('Error saving stats:', error);
+        }
     }
 }
 
