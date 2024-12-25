@@ -368,7 +368,8 @@ class StreamManager extends EventEmitter {
                 status: finalStatus,
                 isRtmpActive: isProcessRunning,  // 如果进程在运行就表示在推流
                 stats: this.streamStats.get(streamId) || {},
-                retryCount: retries
+                retryCount: retries,
+                autoStart: this.autoStartStreams.has(streamId)  // 添加自启动状态
             };
         } catch (error) {
             logger.error(`Error getting stream info for ${streamId}:`, error);
