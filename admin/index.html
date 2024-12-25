@@ -237,11 +237,32 @@
         // 加载流列表
         async function loadStreams() {
             try {
-                console.log('Fetching streams...');
+                console.log('开始加载流列表...');
                 const response = await fetch('/api/streams');
-                console.log('Response status:', response.status);
-                const streams = await response.json();
-                console.log('Received streams:', streams);
+                console.log('API响应状态:', response.status);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const responseText = await response.text();
+                console.log('API原始响应:', responseText);
+                
+                let streams;
+                try {
+                    streams = JSON.parse(responseText);
+                } catch (e) {
+                    console.error('解析JSON失败:', e);
+                    console.log('响应内容:', responseText);
+                    return;
+                }
+                
+                console.log('解析后的流数据:', streams);
+                
+                if (!Array.isArray(streams)) {
+                    console.error('返回的数据不是数组:', streams);
+                    return;
+                }
                 
                 // 更新统计数据
                 document.getElementById('totalStreams').textContent = streams.length;
@@ -250,6 +271,7 @@
                 const activeStreams = streams.filter(stream => {
                     return stream.processRunning || stream.stats?.startTime;
                 });
+                console.log('活跃流数量:', activeStreams.length);
                 document.getElementById('activeStreams').textContent = activeStreams.length;
 
                 // 按分类分组
@@ -261,13 +283,19 @@
                     }
                     groupedStreams[category].push(stream);
                 });
+                
+                console.log('分组后的流:', groupedStreams);
 
                 const tbody = document.querySelector('#streamTable');
+                if (!tbody) {
+                    console.error('找不到streamTable元素');
+                    return;
+                }
                 
                 // 完全重新渲染表格
                 renderFullTable(tbody, groupedStreams);
             } catch (error) {
-                console.error('Error loading streams:', error);
+                console.error('加载流列表失败:', error);
             }
         }
 

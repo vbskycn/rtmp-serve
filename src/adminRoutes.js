@@ -77,29 +77,44 @@ router.post('/api/streams', async (req, res) => {
 // 获取所有流列表
 router.get('/api/streams', async (req, res) => {
     try {
-        logger.debug('Getting streams list...');
+        logger.info('Handling GET /api/streams request');
         const streams = [];
-        logger.debug(`Total streams in manager: ${streamManager.streams.size}`);
+        logger.info(`Current streams in manager: ${streamManager.streams.size}`);
+        
+        // 打印所有流的ID
+        const streamIds = Array.from(streamManager.streams.keys());
+        logger.info('Available stream IDs:', streamIds);
         
         for (const [id, streamConfig] of streamManager.streams.entries()) {
-            logger.debug(`Processing stream: ${id}`);
+            logger.debug(`Processing stream ${id}:`, streamConfig);
             const playUrl = `${streamManager.getServerUrl()}/play/${id}`;
-            streams.push({
-                id,
-                ...streamConfig,
-                playUrl,
-                stats: streamManager.streamStats.get(id),
-                processRunning: await checkStreamStatus(id),
-                manuallyStarted: streamManager.manuallyStartedStreams.has(id),
-                autoStart: streamManager.isAutoStart(id)
-            });
+            
+            try {
+                const processRunning = await checkStreamStatus(id);
+                const streamData = {
+                    id,
+                    ...streamConfig,
+                    playUrl,
+                    stats: streamManager.streamStats.get(id),
+                    processRunning,
+                    manuallyStarted: streamManager.manuallyStartedStreams.has(id),
+                    autoStart: streamManager.isAutoStart(id)
+                };
+                streams.push(streamData);
+                logger.debug(`Successfully processed stream ${id}`);
+            } catch (error) {
+                logger.error(`Error processing stream ${id}:`, error);
+            }
         }
         
-        logger.debug(`Sending ${streams.length} streams to client`);
+        logger.info(`Sending response with ${streams.length} streams`);
         res.json(streams);
     } catch (error) {
-        logger.error('Error getting streams:', error);
-        res.status(500).json({ error: 'Failed to get streams' });
+        logger.error('Error in GET /api/streams:', error);
+        res.status(500).json({ 
+            error: 'Failed to get streams',
+            details: error.message 
+        });
     }
 });
 

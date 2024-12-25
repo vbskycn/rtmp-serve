@@ -123,71 +123,77 @@ class StreamManager extends EventEmitter {
     // 加载保存的流配置
     loadStreams() {
         try {
+            logger.info('Starting to load streams...');
             if (fs.existsSync(this.configPath)) {
-                logger.debug(`Loading streams from: ${this.configPath}`);
+                logger.info(`Config file exists at: ${this.configPath}`);
                 const data = fs.readFileSync(this.configPath, 'utf8');
                 
-                // 添加数据内容日志
-                logger.debug(`Raw config data: ${data}`);
-                
-                if (!data.trim()) {
-                    logger.warn('Streams config file is empty');
+                // 检查文件内容
+                if (!data || !data.trim()) {
+                    logger.warn('Config file is empty');
                     return;
                 }
                 
-                const configs = JSON.parse(data);
-                logger.debug(`Parsed configs: ${JSON.stringify(configs)}`);
-                
-                // 清空现有的流
-                this.streams.clear();
-                this.streamStats.clear();
-                
-                for (const [id, config] of Object.entries(configs)) {
-                    logger.debug(`Loading stream: ${id}`);
-                    this.streams.set(id, {
-                        ...config,
-                        stats: {
-                            startTime: null,
-                            uptime: 0,
-                            errors: 0
-                        }
-                    });
-                    this.streamStats.set(id, {
-                        totalRequests: 0,
-                        lastAccessed: null,
-                        errors: 0,
-                        uptime: 0,
-                        startTime: null
-                    });
-                }
-                logger.info(`Loaded ${this.streams.size} streams from config`);
-            } else {
-                logger.warn(`Streams config file not found at: ${this.configPath}`);
-                // 如果配置文件不存在，创建一个空的配置文件
                 try {
-                    const configDir = path.dirname(this.configPath);
-                    if (!fs.existsSync(configDir)) {
-                        fs.mkdirSync(configDir, { recursive: true });
+                    const configs = JSON.parse(data);
+                    logger.info(`Successfully parsed config with ${Object.keys(configs).length} streams`);
+                    
+                    // 清空现有的流
+                    this.streams.clear();
+                    this.streamStats.clear();
+                    
+                    // 遍历并加载每个流
+                    for (const [id, config] of Object.entries(configs)) {
+                        logger.info(`Loading stream: ${id} - ${config.name}`);
+                        this.streams.set(id, {
+                            ...config,
+                            stats: {
+                                startTime: null,
+                                uptime: 0,
+                                errors: 0
+                            }
+                        });
+                        this.streamStats.set(id, {
+                            totalRequests: 0,
+                            lastAccessed: null,
+                            errors: 0,
+                            uptime: 0,
+                            startTime: null
+                        });
                     }
-                    fs.writeFileSync(this.configPath, '{}');
-                    logger.info('Created new empty streams config file');
-                } catch (e) {
-                    logger.error('Error creating empty config file:', e);
+                    logger.info(`Successfully loaded ${this.streams.size} streams`);
+                    
+                    // 打印加载的流的ID列表
+                    const streamIds = Array.from(this.streams.keys());
+                    logger.info('Loaded stream IDs:', streamIds);
+                } catch (parseError) {
+                    logger.error('Error parsing config JSON:', parseError);
+                    logger.error('Raw config data:', data);
+                    throw parseError;
                 }
+            } else {
+                logger.warn(`Config file not found at: ${this.configPath}`);
+                // 创建空配置文件
+                const configDir = path.dirname(this.configPath);
+                if (!fs.existsSync(configDir)) {
+                    fs.mkdirSync(configDir, { recursive: true });
+                }
+                fs.writeFileSync(this.configPath, '{}');
+                logger.info('Created new empty config file');
             }
         } catch (error) {
-            logger.error('Error loading streams config:', error);
-            // 如果文件损坏，尝试备份并创建新的
+            logger.error('Error in loadStreams:', error);
+            // 如果文件损坏，创建备份
             try {
                 if (fs.existsSync(this.configPath)) {
                     const backupPath = `${this.configPath}.backup.${Date.now()}`;
                     fs.copyFileSync(this.configPath, backupPath);
-                    logger.info(`Created backup of corrupted config at ${backupPath}`);
+                    logger.info(`Created backup at: ${backupPath}`);
                     fs.writeFileSync(this.configPath, '{}');
-                    logger.info('Created new empty streams config');
+                    logger.info('Reset config file to empty object');
                 }
-            } catch (e) {
-                logger.error('Error handling corrupted config:', e);
+            } catch (backupError) {
+                logger.error('Error creating backup:', backupError);
             }
         }
     }
