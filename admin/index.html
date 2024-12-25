@@ -237,42 +237,21 @@
         // 加载流列表
         async function loadStreams() {
             try {
-                console.log('开始加载流列表...');
                 const response = await fetch('/api/streams');
-                console.log('API响应状态:', response.status);
-                
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
-                const responseText = await response.text();
-                console.log('API原始响应:', responseText);
-                
-                let streams;
-                try {
-                    streams = JSON.parse(responseText);
-                } catch (e) {
-                    console.error('解析JSON失败:', e);
-                    console.log('响应内容:', responseText);
-                    return;
-                }
-                
-                console.log('解析后的流数据:', streams);
-                
-                if (!Array.isArray(streams)) {
-                    console.error('返回的数据不是数组:', streams);
-                    return;
-                }
+                const streams = await response.json();
                 
                 // 更新统计数据
-                document.getElementById('totalStreams').textContent = streams.length;
+                updateStatElement('totalStreams', streams.length);
                 
                 // 获取活跃流的数量
                 const activeStreams = streams.filter(stream => {
                     return stream.processRunning || stream.stats?.startTime;
                 });
-                console.log('活跃流数量:', activeStreams.length);
-                document.getElementById('activeStreams').textContent = activeStreams.length;
+                updateStatElement('activeStreams', activeStreams.length);
 
                 // 按分类分组
                 const groupedStreams = {};
@@ -283,20 +262,183 @@
                     }
                     groupedStreams[category].push(stream);
                 });
-                
-                console.log('分组后的流:', groupedStreams);
 
                 const tbody = document.querySelector('#streamTable');
                 if (!tbody) {
                     console.error('找不到streamTable元素');
                     return;
                 }
-                
-                // 完全重新渲染表格
-                renderFullTable(tbody, groupedStreams);
+
+                // 智能更新表格
+                updateTableSmartly(tbody, groupedStreams);
             } catch (error) {
                 console.error('加载流列表失败:', error);
             }
+        }
+
+        // 添加智能更新表格的函数
+        function updateTableSmartly(tbody, groupedStreams) {
+            // 获取现有行的映射
+            const existingRows = new Map();
+            tbody.querySelectorAll('tr[data-stream-id]').forEach(row => {
+                existingRows.set(row.dataset.streamId, row);
+            });
+            
+            // 获取现有分类行的映射
+            const existingCategories = new Map();
+            tbody.querySelectorAll('tr[data-category]').forEach(row => {
+                existingCategories.set(row.dataset.category, row);
+            });
+
+            // 创建新的文档片段
+            const fragment = document.createDocumentFragment();
+            
+            // 遍历分组的流数据
+            for (const [category, categoryStreams] of Object.entries(groupedStreams)) {
+                // 检查分类行是否存在
+                let categoryRow = existingCategories.get(category);
+                if (!categoryRow) {
+                    // 创建新的分类行
+                    categoryRow = document.createElement('tr');
+                    categoryRow.dataset.category = category;
+                    categoryRow.innerHTML = `
+                        <td colspan="8" class="bg-light">
+                            <strong>${category}</strong>
+                        </td>
+                    `;
+                }
+                fragment.appendChild(categoryRow);
+                existingCategories.delete(category);
+
+                // 处理该分类下的每个流
+                categoryStreams.forEach(stream => {
+                    const existingRow = existingRows.get(stream.id);
+                    if (existingRow) {
+                        // 更新现有行
+                        updateStreamRow(existingRow, stream);
+                        fragment.appendChild(existingRow);
+                        existingRows.delete(stream.id);
+                    } else {
+                        // 创建新行
+                        const newRow = createStreamRow(stream);
+                        fragment.appendChild(newRow);
+                    }
+                });
+            }
+
+            // 删除不再存在的行
+            existingRows.forEach(row => row.remove());
+            existingCategories.forEach(row => row.remove());
+
+            // 使用 requestAnimationFrame 优化更新
+            requestAnimationFrame(() => {
+                // 清空表格并添加新内容
+                tbody.innerHTML = '';
+                tbody.appendChild(fragment);
+            });
+        }
+
+        // 添加创建流行的函数
+        function createStreamRow(stream) {
+            const tr = document.createElement('tr');
+            tr.dataset.streamId = stream.id;
+            
+            const playUrl = `http://${serverConfig.server.host}:${serverConfig.server.port}/play/${stream.id}`;
+            const isManuallyStarted = stream.manuallyStarted;
+            
+            let statusClass = stream.invalid ? 'error' : 
+                             (stream.processRunning || stream.stats?.startTime) ? 'active' : 'inactive';
+            
+            let statusText = stream.invalid ? '已失效' : 
+                            (statusClass === 'active' ? '运行中' : '已停止');
+            
+            const statusStyle = stream.invalid ? 'background-color: #dc3545;' :
+                               (statusClass === 'active' ? 'background-color: #28a745;' : 'background-color: #6c757d;');
+            
+            const rtmpStatusStyle = isManuallyStarted ? 'background-color: #28a745;' : 'background-color: #6c757d;';
+            const rtmpStatusText = isManuallyStarted ? '推流中' : '未推流';
+            
+            const autoStartStyle = stream.autoStart ? 'background-color: #28a745;' : 'background-color: #6c757d;';
+            const autoStartText = stream.autoStart ? '已启用' : '未启用';
+
+            // 设置行的HTML内容
+            tr.innerHTML = `
+                <td>
+                    <input type="checkbox" class="stream-checkbox" value="${stream.id}" onchange="updateBatchButtons()">
+                </td>
+                <td>
+                    <div class="d-flex align-items-center">
+                        <div class="input-group input-group-compact">
+                            <img src="${stream.tvg?.logo || ''}" alt="" style="height: 20px; margin-right: 4px;">
+                            <input type="text" class="form-control form-control-sm" value="${stream.name}" readonly 
+                                   style="font-family: monospace; background-color: #f8f9fa;">
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <span class="status ${statusClass}" style="${statusStyle}">
+                        ${statusText}
+                    </span>
+                </td>
+                <td>
+                    <span class="status" style="${rtmpStatusStyle}">
+                        ${rtmpStatusText}
+                    </span>
+                </td>
+                <td>
+                    <div class="d-flex align-items-center">
+                        <div class="input-group input-group-compact">
+                            <input type="text" class="form-control form-control-sm" value="${stream.url}" readonly 
+                                   style="font-family: monospace; background-color: #f8f9fa;">
+                            <button class="btn btn-outline-secondary btn-sm" onclick="copyToClipboard('${stream.url}')">
+                                <i class="fa fa-copy"></i>
+                            </button>
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <div class="d-flex align-items-center">
+                        <div class="input-group input-group-compact">
+                            <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly 
+                                   style="font-family: monospace; background-color: #f8f9fa;">
+                            <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${playUrl}')">
+                                <i class="fa fa-copy"></i> 复制
+                            </button>
+                            <button class="btn btn-outline-success btn-sm" onclick="window.open('player.html?id=${stream.id}', '_blank')">
+                                <i class="fa fa-play"></i> 播放
+                            </button>
+                            ${isManuallyStarted ? `
+                                <button class="btn btn-outline-info btn-sm" onclick="copyRtmpInfo('${stream.id}')">
+                                    <i class="fa fa-external-link"></i> 推流
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <span class="auto-start-status" style="${autoStartStyle}">
+                        ${autoStartText}
+                    </span>
+                </td>
+                <td class="stream-actions">
+                    <div class="btn-group btn-group-sm">
+                        <button onclick="editStream('${stream.id}')" class="btn btn-info btn-sm">
+                            <i class="fa fa-edit"></i> 编辑
+                        </button>
+                        <button onclick="restartStream('${stream.id}', true)" class="btn btn-warning btn-sm">
+                            <i class="fa fa-refresh"></i> ${isManuallyStarted ? '重启' : '手动启动'}
+                        </button>
+                        <button onclick="stopStream('${stream.id}')" class="btn btn-secondary btn-sm">
+                            <i class="fa fa-stop"></i> 停止
+                        </button>
+                        <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
+                            <i class="fa fa-trash"></i> 删除
+                        </button>
+                    </div>
+                </td>
+            `;
+            
+            return tr;
         }
 
         // 添加平滑更新统计元素的函数
@@ -340,139 +482,6 @@
                     rtmpStatusCell.textContent = rtmpStatusText;
                 }
             }
-        }
-
-        // 修改 renderFullTable 函数
-        function renderFullTable(tbody, groupedStreams) {
-            tbody.style.opacity = '0';
-            setTimeout(() => {
-                tbody.innerHTML = '';
-                for (const [category, categoryStreams] of Object.entries(groupedStreams)) {
-                    // 添加分类标题行
-                    const categoryRow = document.createElement('tr');
-                    categoryRow.innerHTML = `
-                        <td colspan="8" class="bg-light">
-                            <strong>${category}</strong>
-                        </td>
-                    `;
-                    tbody.appendChild(categoryRow);
-
-                    // 添加流行
-                    categoryStreams.forEach(stream => {
-                        const tr = document.createElement('tr');
-                        tr.dataset.streamId = stream.id;
-                        const playUrl = `http://${serverConfig.server.host}:${serverConfig.server.port}/play/${stream.id}`;
-                        
-                        // 检查是否是手动启动的流
-                        const isManuallyStarted = stream.manuallyStarted;
-                        
-                        // 修改状态判断逻辑
-                        let statusClass = 'inactive';
-                        let statusText = '已停止';
-                        
-                        // 检查流是否失效
-                        if (stream.invalid) {
-                            statusClass = 'error';
-                            statusText = '已失效';
-                        } 
-                        // 检查流是否在运行（包括通过播放链接启动的）
-                        else if (stream.processRunning || stream.stats?.startTime) {
-                            statusClass = 'active';
-                            statusText = '运行中';
-                        }
-
-                        // 添加状态样式
-                        const statusStyle = stream.invalid ? 'background-color: #dc3545;' :
-                                          (statusClass === 'active' ? 'background-color: #28a745;' : 'background-color: #6c757d;');
-
-                        // 添加推流状态样式
-                        const rtmpStatusStyle = isManuallyStarted ? 'background-color: #28a745;' : 'background-color: #6c757d;';
-                        const rtmpStatusText = isManuallyStarted ? '推流中' : '未推流';
-
-                        // 添加自启动状态样式
-                        const autoStartStyle = stream.autoStart ? 'background-color: #28a745;' : 'background-color: #6c757d;';
-                        const autoStartText = stream.autoStart ? '已启用' : '未启用';
-
-                        tr.innerHTML = `
-                            <td>
-                                <input type="checkbox" class="stream-checkbox" value="${stream.id}" onchange="updateBatchButtons()">
-                            </td>
-                            <td>
-                                <div class="d-flex align-items-center">
-                                    <div class="input-group input-group-compact">
-                                        <img src="${stream.tvg?.logo || ''}" alt="" style="height: 20px; margin-right: 4px;">
-                                        <input type="text" class="form-control form-control-sm" value="${stream.name}" readonly 
-                                               style="font-family: monospace; background-color: #f8f9fa;">
-                                    </div>
-                                </div>
-                            </td>
-                            <td>
-                                <span class="status ${statusClass}" style="${statusStyle}">
-                                    ${statusText}
-                                </span>
-                            </td>
-                            <td>
-                                <span class="status" style="${rtmpStatusStyle}">
-                                    ${rtmpStatusText}
-                                </span>
-                            </td>
-                            <td>
-                                <div class="d-flex align-items-center">
-                                    <div class="input-group input-group-compact">
-                                        <input type="text" class="form-control form-control-sm" value="${stream.url}" readonly 
-                                               style="font-family: monospace; background-color: #f8f9fa;">
-                                        <button class="btn btn-outline-secondary btn-sm" onclick="copyToClipboard('${stream.url}')">
-                                            <i class="fa fa-copy"></i>
-                                        </button>
-                                    </div>
-                                </div>
-                            </td>
-                            <td>
-                                <div class="d-flex align-items-center">
-                                    <div class="input-group input-group-compact">
-                                        <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly 
-                                               style="font-family: monospace; background-color: #f8f9fa;">
-                                        <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${playUrl}')">
-                                            <i class="fa fa-copy"></i> 复制
-                                        </button>
-                                        <button class="btn btn-outline-success btn-sm" onclick="window.open('player.html?id=${stream.id}', '_blank')">
-                                            <i class="fa fa-play"></i> 播放
-                                        </button>
-                                        ${isManuallyStarted ? `
-                                            <button class="btn btn-outline-info btn-sm" onclick="copyRtmpInfo('${stream.id}')">
-                                                <i class="fa fa-external-link"></i> 推流
-                                            </button>
-                                        ` : ''}
-                                    </div>
-                                </div>
-                            </td>
-                            <td>
-                                <span class="auto-start-status" style="${autoStartStyle}">
-                                    ${autoStartText}
-                                </span>
-                            </td>
-                            <td class="stream-actions">
-                                <div class="btn-group btn-group-sm">
-                                    <button onclick="editStream('${stream.id}')" class="btn btn-info btn-sm">
-                                        <i class="fa fa-edit"></i> 编辑
-                                    </button>
-                                    <button onclick="restartStream('${stream.id}', true)" class="btn btn-warning btn-sm">
-                                        <i class="fa fa-refresh"></i> ${isManuallyStarted ? '重启' : '手动启动'}
-                                    </button>
-                                    <button onclick="stopStream('${stream.id}')" class="btn btn-secondary btn-sm">
-                                        <i class="fa fa-stop"></i> 停止
-                                    </button>
-                                    <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
-                                        <i class="fa fa-trash"></i> 删除
-                                    </button>
-                                </div>
-                            </td>
-                        `;
-                        tbody.appendChild(tr);
-                    });
-                }
-                tbody.style.opacity = '1';
-            }, 300);
         }
 
         // 添加流

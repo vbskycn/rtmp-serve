@@ -58,6 +58,7 @@ textarea {
     padding: 4px 8px;
     border-radius: 4px;
     font-size: 0.9em;
+    transition: background-color 0.3s ease;
 }
 
 .status.active {
@@ -311,4 +312,8 @@ textarea {
 
 .auto-start-column {
     width: 80px;
+}
+
+#streamTable tr {
+    transition: opacity 0.3s ease;
 } 
