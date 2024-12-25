@@ -59,13 +59,35 @@ docker run -d \
   zhoujie218/rtmp-serve:latest
   
 # 自己用端
+docker stop rtmp-serve
+docker rm rtmp-serve
+docker pull zhoujie218/rtmp-serve:latest
 docker run -d \
   --name rtmp-serve \
   --restart unless-stopped \
+  -v /root/docker/rtmp-serve/config:/app/config \
+  -v /root/docker/rtmp-serve/streams:/app/streams \
+  -v /root/docker/rtmp-serve/logs:/app/logs \
   -p 3009:3000 \
   -e NODE_ENV=production \
   -e TZ=Asia/Shanghai \
   zhoujie218/rtmp-serve:latest
+  
+  
+# 自己158部署
+docker stop rtmp-serve
+docker rm rtmp-serve
+docker pull zhoujie218/rtmp-serve:latest
+docker run -d \
+  --name rtmp-serve \
+  --restart unless-stopped \
+  -v /root/docker/rtmp-serve/config:/app/config \
+  -v /root/docker/rtmp-serve/streams:/app/streams \
+  -v /root/docker/rtmp-serve/logs:/app/logs \
+  -p 3009:3000 \
+  -e NODE_ENV=production \
+  -e TZ=Asia/Shanghai \
+  zhoujie218/rtmp-serve:latest  
   
 ```
 

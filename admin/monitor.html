@@ -42,6 +42,30 @@
             border-radius: 4px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
+        .sortable {
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .sortable:hover {
+            background-color: rgba(0,0,0,0.05);
+        }
+        
+        .sortable::after {
+            content: '↕';
+            margin-left: 5px;
+            opacity: 0.3;
+        }
+        
+        .sortable.asc::after {
+            content: '↑';
+            opacity: 1;
+        }
+        
+        .sortable.desc::after {
+            content: '↓';
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -73,16 +97,16 @@
             <table class="table table-hover server-table">
                 <thead>
                     <tr>
-                        <th>服务器名称</th>
-                        <th>IP地址</th>
-                        <th>状态</th>
-                        <th>版本</th>
-                        <th>运行时间</th>
-                        <th>总流数</th>
-                        <th>活跃流</th>
-                        <th>接收流量</th>
-                        <th>发送流量</th>
-                        <th>系统信息</th>
+                        <th class="sortable" data-sort="serverName">服务器名称</th>
+                        <th class="sortable" data-sort="serverIp">IP地址</th>
+                        <th class="sortable" data-sort="isOnline">状态</th>
+                        <th class="sortable" data-sort="version">版本</th>
+                        <th class="sortable" data-sort="uptime">运行时间</th>
+                        <th class="sortable" data-sort="totalStreams">总流数</th>
+                        <th class="sortable" data-sort="activeStreams">活跃流</th>
+                        <th class="sortable" data-sort="received">接收流量</th>
+                        <th class="sortable" data-sort="sent">发送流量</th>
+                        <th class="sortable" data-sort="platform">系统信息</th>
                     </tr>
                 </thead>
                 <tbody id="serverList"></tbody>
@@ -98,6 +122,7 @@
         let currentPage = 1;
         const itemsPerPage = 100;
         let allServers = [];
+        let currentSort = { field: 'isOnline', direction: 'desc' };  // 默认按在线状态降序排序
 
         async function updateServers() {
             try {
@@ -127,7 +152,9 @@
         function renderPage(page) {
             const start = (page - 1) * itemsPerPage;
             const end = start + itemsPerPage;
-            const pageServers = allServers.slice(start, end);
+            // 先排序，再分页
+            const sortedServers = sortServers(allServers, currentSort.field, currentSort.direction);
+            const pageServers = sortedServers.slice(start, end);
             
             const serverList = document.getElementById('serverList');
             serverList.innerHTML = pageServers.map(server => `
@@ -220,6 +247,71 @@
         // 每30秒更新一次
         setInterval(updateServers, 30000);
         updateServers();
+
+        // 添加排序函数
+        function sortServers(servers, field, direction) {
+            return [...servers].sort((a, b) => {
+                // 特殊处理某些字段
+                switch(field) {
+                    case 'isOnline':
+                        return direction === 'asc' ? 
+                            (a.isOnline === b.isOnline ? 0 : a.isOnline ? -1 : 1) :
+                            (a.isOnline === b.isOnline ? 0 : a.isOnline ? 1 : -1);
+                    case 'received':
+                        return direction === 'asc' ? 
+                            (a.traffic.received - b.traffic.received) :
+                            (b.traffic.received - a.traffic.received);
+                    case 'sent':
+                        return direction === 'asc' ? 
+                            (a.traffic.sent - b.traffic.sent) :
+                            (b.traffic.sent - a.traffic.sent);
+                    case 'platform':
+                        const platformA = `${a.systemInfo.platform} / ${a.systemInfo.arch}`;
+                        const platformB = `${b.systemInfo.platform} / ${b.systemInfo.arch}`;
+                        return direction === 'asc' ? 
+                            platformA.localeCompare(platformB) :
+                            platformB.localeCompare(platformA);
+                    default:
+                        if (typeof a[field] === 'string') {
+                            return direction === 'asc' ? 
+                                a[field].localeCompare(b[field]) :
+                                b[field].localeCompare(a[field]);
+                        }
+                        return direction === 'asc' ? 
+                            (a[field] - b[field]) :
+                            (b[field] - a[field]);
+                }
+            });
+        }
+
+        // 添加初始化排序事件监听
+        function initSortListeners() {
+            document.querySelectorAll('th.sortable').forEach(th => {
+                th.addEventListener('click', () => {
+                    const field = th.dataset.sort;
+                    if (currentSort.field === field) {
+                        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        currentSort.field = field;
+                        currentSort.direction = 'desc';
+                    }
+                    
+                    // 更新排序图标
+                    document.querySelectorAll('th.sortable').forEach(header => {
+                        header.classList.remove('asc', 'desc');
+                    });
+                    th.classList.add(currentSort.direction);
+                    
+                    renderPage(currentPage);
+                });
+            });
+        }
+
+        // 在页面加载完成后初始化排序
+        document.addEventListener('DOMContentLoaded', () => {
+            initSortListeners();
+            updateServers();
+        });
     </script>
 </body>
 </html> 
