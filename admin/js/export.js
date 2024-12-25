@@ -56,7 +56,7 @@ async function exportTXT() {
 }
 
 // 导出远程推流M3U
-function exportRemoteM3U() {
+function exportRtmpM3U() {
     fetch('/api/streams')
         .then(response => response.json())
         .then(streams => {
@@ -65,7 +65,7 @@ function exportRemoteM3U() {
             
             // 按分类分组
             const streamsByCategory = {};
-            streams.filter(stream => stream.manuallyStarted).forEach(stream => {
+            streams.filter(stream => stream.processRunning).forEach(stream => {
                 const category = stream.category || '未分类';
                 if (!streamsByCategory[category]) {
                     streamsByCategory[category] = [];
@@ -92,12 +92,12 @@ function exportRemoteM3U() {
 }
 
 // 导出远程推流TXT
-function exportRemoteTXT() {
+function exportRtmpTXT() {
     fetch('/api/streams')
         .then(response => response.json())
         .then(streams => {
             let content = '';
-            const rtmpStreams = streams.filter(stream => stream.manuallyStarted);
+            const rtmpStreams = streams.filter(stream => stream.processRunning);
             
             // 按分类分组
             const streamsByCategory = {};
@@ -127,8 +127,8 @@ function exportRemoteTXT() {
         });
 }
 
-// 导出源地址
-function exportSourceUrls() {
+// 导出源地址TXT
+function exportSourceTXT() {
     fetch('/api/streams')
         .then(response => response.json())
         .then(streams => {
@@ -153,12 +153,11 @@ function exportSourceUrls() {
                 content += '\n';
             }
             
-            downloadFile(content, 'source_urls.txt');
-            showToast('源地址已导出');
+            downloadFile(content, 'source_playlist.txt');
         })
         .catch(error => {
-            console.error('Error exporting source URLs:', error);
-            alert('导出源地址失败');
+            console.error('Error exporting source TXT:', error);
+            alert('导出源地址TXT失败');
         });
 }
 

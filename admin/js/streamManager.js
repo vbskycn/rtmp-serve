@@ -1,0 +1,248 @@
+// 启动推流
+async function startRtmpPush(streamId) {
+    try {
+        const response = await fetch(`/api/streams/${streamId}/start`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ rtmpPush: true })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Network response was not ok');
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || '启动推流失败');
+        }
+        
+        loadStreams();
+        showToast('推流已启动');
+    } catch (error) {
+        console.error('Error starting RTMP push:', error);
+        alert('启动推流失败: ' + error.message);
+    }
+}
+
+// 停止流
+async function stopStream(streamId) {
+    try {
+        const response = await fetch(`/api/streams/${streamId}/stop`, {
+            method: 'POST'
+        });
+        const result = await response.json();
+        if (result.success) {
+            showToast('流已停止');
+            loadStreams();
+        } else {
+            throw new Error(result.error || '停止失败');
+        }
+    } catch (error) {
+        console.error('Error stopping stream:', error);
+        alert('停止流失败: ' + error.message);
+    }
+}
+
+// 删除流
+async function deleteStream(streamId) {
+    if (!confirm('确定要删除这个流吗？')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/streams/${streamId}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+        if (result.success) {
+            showToast('流已删除');
+            loadStreams();
+        } else {
+            throw new Error(result.error || '删除失败');
+        }
+    } catch (error) {
+        console.error('Error deleting stream:', error);
+        alert('删除流失败: ' + error.message);
+    }
+}
+
+// 编辑流
+async function editStream(streamId) {
+    try {
+        const response = await fetch(`/api/streams/${streamId}`);
+        const stream = await response.json();
+        
+        document.getElementById('editStreamId').value = streamId;
+        document.getElementById('editStreamCategory').value = stream.category || '';
+        document.getElementById('editStreamName').value = stream.name;
+        document.getElementById('editStreamUrl').value = stream.url;
+        
+        const modal = new bootstrap.Modal(document.getElementById('editStreamModal'));
+        modal.show();
+    } catch (error) {
+        console.error('Error loading stream details:', error);
+        alert('加载流信息失败');
+    }
+}
+
+// 批量启动推流
+async function batchStartRtmpPush() {
+    const selectedStreams = getSelectedStreams();
+    if (!selectedStreams.length) {
+        alert('请先选择要操作的流');
+        return;
+    }
+
+    if (!confirm(`确定要启动选中的 ${selectedStreams.length} 个流吗？`)) return;
+
+    const modal = showProgressModal('批量启动推流');
+    let success = 0;
+    let failed = 0;
+    const errors = [];
+
+    try {
+        const batchSize = 4;
+        for (let i = 0; i < selectedStreams.length; i += batchSize) {
+            const batch = selectedStreams.slice(i, Math.min(i + batchSize, selectedStreams.length));
+            await Promise.all(batch.map(async streamId => {
+                try {
+                    const response = await fetch(`/api/streams/${streamId}/start`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rtmpPush: true })
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        success++;
+                    } else {
+                        throw new Error(result.error || '启动失败');
+                    }
+                } catch (error) {
+                    failed++;
+                    errors.push(`${streamId}: ${error.message}`);
+                }
+                updateProgressModal(modal, { success, failed, total: selectedStreams.length });
+            }));
+            if (i + batchSize < selectedStreams.length) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+        }
+    } catch (error) {
+        console.error('Batch start error:', error);
+    } finally {
+        setTimeout(() => {
+            modal.remove();
+            loadStreams();
+            if (errors.length > 0) {
+                alert(`批量启动完成\n成功: ${success}\n失败: ${failed}\n\n失败详情:\n${errors.join('\n')}`);
+            } else {
+                showToast(`批量启动完成: ${success}个成功`);
+            }
+        }, 1000);
+    }
+}
+
+// 批量停止
+async function batchStop() {
+    const selectedStreams = getSelectedStreams();
+    if (!selectedStreams.length) {
+        alert('请先选择要操作的流');
+        return;
+    }
+
+    if (!confirm(`确定要停止选中的 ${selectedStreams.length} 个流吗？`)) return;
+
+    const modal = showProgressModal('批量停止');
+    let success = 0;
+    let failed = 0;
+    const errors = [];
+
+    try {
+        const batchSize = 10;
+        for (let i = 0; i < selectedStreams.length; i += batchSize) {
+            const batch = selectedStreams.slice(i, Math.min(i + batchSize, selectedStreams.length));
+            await Promise.all(batch.map(async streamId => {
+                try {
+                    const response = await fetch(`/api/streams/${streamId}/stop`, {
+                        method: 'POST'
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        success++;
+                    } else {
+                        throw new Error(result.error || '停止失败');
+                    }
+                } catch (error) {
+                    failed++;
+                    errors.push(`${streamId}: ${error.message}`);
+                }
+                updateProgressModal(modal, { success, failed, total: selectedStreams.length });
+            }));
+            if (i + batchSize < selectedStreams.length) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+    } catch (error) {
+        console.error('Batch stop error:', error);
+    } finally {
+        setTimeout(() => {
+            modal.remove();
+            loadStreams();
+            if (errors.length > 0) {
+                alert(`批量停止完成\n成功: ${success}\n失败: ${failed}\n\n失败详情:\n${errors.join('\n')}`);
+            } else {
+                showToast(`批量停止完成: ${success}个成功`);
+            }
+        }, 1000);
+    }
+}
+
+// 批量删除
+async function batchDelete() {
+    const selectedStreams = getSelectedStreams();
+    if (!selectedStreams.length) {
+        alert('请先选择要操作的流');
+        return;
+    }
+
+    if (!confirm(`确定要删除选中的 ${selectedStreams.length} 个流吗？此操作不可恢复！`)) return;
+
+    const modal = showProgressModal('批量删除');
+    let success = 0;
+    let failed = 0;
+    const errors = [];
+
+    try {
+        for (const streamId of selectedStreams) {
+            try {
+                const response = await fetch(`/api/streams/${streamId}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+                if (result.success) {
+                    success++;
+                } else {
+                    throw new Error(result.error || '删除失败');
+                }
+            } catch (error) {
+                failed++;
+                errors.push(`${streamId}: ${error.message}`);
+            }
+            updateProgressModal(modal, { success, failed, total: selectedStreams.length });
+        }
+    } catch (error) {
+        console.error('Batch delete error:', error);
+    } finally {
+        setTimeout(() => {
+            modal.remove();
+            loadStreams();
+            if (errors.length > 0) {
+                alert(`批量删除完成\n成功: ${success}\n失败: ${failed}\n\n失败详情:\n${errors.join('\n')}`);
+            } else {
+                showToast(`批量删除完成: ${success}个成功`);
+            }
+        }, 1000);
+    }
+} 
