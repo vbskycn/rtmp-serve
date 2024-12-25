@@ -351,7 +351,7 @@
                     // 添加分类标题行
                     const categoryRow = document.createElement('tr');
                     categoryRow.innerHTML = `
-                        <td colspan="7" class="bg-light">
+                        <td colspan="8" class="bg-light">
                             <strong>${category}</strong>
                         </td>
                     `;
@@ -375,7 +375,7 @@
                             statusClass = 'error';
                             statusText = '已失效';
                         } 
-                        // 检查流是否在（包括通过播放链接启动的）
+                        // 检查流是否在运行（包括通过播放链接启动的）
                         else if (stream.processRunning || stream.stats?.startTime) {
                             statusClass = 'active';
                             statusText = '运行中';
@@ -388,6 +388,10 @@
                         // 添加推流状态样式
                         const rtmpStatusStyle = isManuallyStarted ? 'background-color: #28a745;' : 'background-color: #6c757d;';
                         const rtmpStatusText = isManuallyStarted ? '推流中' : '未推流';
+
+                        // 添加自启动状态样式
+                        const autoStartStyle = stream.autoStart ? 'background-color: #28a745;' : 'background-color: #6c757d;';
+                        const autoStartText = stream.autoStart ? '已启用' : '未启用';
 
                         tr.innerHTML = `
                             <td>
@@ -443,9 +447,8 @@
                                 </div>
                             </td>
                             <td>
-                                <span class="auto-start-status ${streamManager.isAutoStart(stream.id) ? 'active' : ''}"
-                                      style="background-color: ${streamManager.isAutoStart(stream.id) ? '#28a745' : '#6c757d'}">
-                                    ${streamManager.isAutoStart(stream.id) ? '已启用' : '未启用'}
+                                <span class="auto-start-status" style="${autoStartStyle}">
+                                    ${autoStartText}
                                 </span>
                             </td>
                             <td class="stream-actions">
@@ -1497,6 +1500,14 @@
                 alert('设置失败，请检查网络连接');
             }
         }
+
+        // 在页面加载时获取服务器配置
+        document.addEventListener('DOMContentLoaded', async () => {
+            await getServerConfig();
+            loadStreams();
+            // 每30秒刷新一次
+            setInterval(loadStreams, 30000);
+        });
     </script>
 
     <!-- 在 body 标签束前添加编辑模态框 -->
