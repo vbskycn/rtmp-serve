@@ -505,68 +505,74 @@
 
         // 加载流列表
         async function loadStreams() {
-            try {
-                const response = await fetch('/api/streams');
-                const streams = await response.json();
-                
-                // 更新统计数据（不会导致页面抖动）
-                document.getElementById('totalStreams').textContent = streams.length;
-                
-                // 获取活跃流的数量
-                const activeStreams = streams.filter(stream => {
-                    return stream.processRunning || stream.stats?.startTime;
-                });
-                document.getElementById('activeStreams').textContent = activeStreams.length;
+            let retryCount = 0;
+            const maxRetries = 3;
 
-                // 更新系统统计信息
+            while (retryCount < maxRetries) {
                 try {
-                    const statsResponse = await fetch('/api/stats');
-                    const statsData = await statsResponse.json();
-                    
-                    // 平滑更新统计显示
-                    updateStatElement('totalStreams', streams.length);
-                    updateStatElement('activeStreams', statsData.activeStreams);
-                    updateStatElement('systemUptime', formatUptime(statsData.uptime));
-                    updateStatElement('trafficReceived', statsData.traffic.received);
-                    updateStatElement('trafficSent', statsData.traffic.sent);
-                } catch (error) {
-                    console.error('Error loading system stats:', error);
-                }
-
-                // 按分类分组
-                const groupedStreams = {};
-                streams.forEach(stream => {
-                    const category = stream.category || '未分类';
-                    if (!groupedStreams[category]) {
-                        groupedStreams[category] = [];
+                    const response = await fetch('/api/streams');
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
                     }
-                    groupedStreams[category].push(stream);
-                });
-
-                const tbody = document.querySelector('#streamTable');
-                
-                // 遍历所有行，更新状态而不是重新创建
-                for (const [category, categoryStreams] of Object.entries(groupedStreams)) {
-                    categoryStreams.forEach(stream => {
-                        const existingRow = tbody.querySelector(`tr[data-stream-id="${stream.id}"]`);
-                        if (existingRow) {
-                            // 只更新需要实时更新的元素
-                            updateStreamRow(existingRow, stream);
+                    const streams = await response.json();
+                    
+                    // 验证流数据的完整性
+                    const validStreams = streams.filter(stream => {
+                        if (!stream.name) {
+                            console.warn(`Stream ${stream.id} has no name`);
+                            stream.name = '未命名流';  // 设置默认名称
                         }
+                        return true;  // 保留所有流，但确保它们有名称
                     });
-                }
 
-                // 只有在流的数量或顺序发生变化时才完全重新渲染
-                const currentStreamIds = Array.from(tbody.querySelectorAll('tr[data-stream-id]'))
-                    .map(row => row.dataset.streamId);
-                const newStreamIds = streams.map(stream => stream.id);
+                    // 更新统计数据
+                    document.getElementById('totalStreams').textContent = validStreams.length;
+                    
+                    // 获取活跃流的数量
+                    const activeStreams = validStreams.filter(stream => {
+                        return stream.processRunning || stream.stats?.startTime;
+                    });
+                    document.getElementById('activeStreams').textContent = activeStreams.length;
 
-                if (JSON.stringify(currentStreamIds) !== JSON.stringify(newStreamIds)) {
-                    // 完全重新渲染表格
-                    renderFullTable(tbody, groupedStreams);
+                    // 按分类分组并更新表格
+                    const groupedStreams = {};
+                    validStreams.forEach(stream => {
+                        const category = stream.category || '未分类';
+                        if (!groupedStreams[category]) {
+                            groupedStreams[category] = [];
+                        }
+                        groupedStreams[category].push(stream);
+                    });
+
+                    const tbody = document.querySelector('#streamTable');
+                    
+                    // 检查是否需要完全重新渲染
+                    const currentStreamIds = Array.from(tbody.querySelectorAll('tr[data-stream-id]'))
+                        .map(row => row.dataset.streamId);
+                    const newStreamIds = validStreams.map(stream => stream.id);
+
+                    if (JSON.stringify(currentStreamIds) !== JSON.stringify(newStreamIds)) {
+                        renderFullTable(tbody, groupedStreams);
+                    } else {
+                        // 只更新现有行
+                        validStreams.forEach(stream => {
+                            const existingRow = tbody.querySelector(`tr[data-stream-id="${stream.id}"]`);
+                            if (existingRow) {
+                                updateStreamRow(existingRow, stream);
+                            }
+                        });
+                    }
+
+                    break;  // 成功后跳出重试循环
+                } catch (error) {
+                    console.error(`Error loading streams (attempt ${retryCount + 1}):`, error);
+                    retryCount++;
+                    if (retryCount === maxRetries) {
+                        console.error('Failed to load streams after maximum retries');
+                    } else {
+                        await new Promise(resolve => setTimeout(resolve, 1000));  // 等待1秒后重试
+                    }
                 }
-            } catch (error) {
-                console.error('Error loading streams:', error);
             }
         }
 
@@ -672,6 +678,12 @@
                     </button>
                 `;
             }
+
+            // 更新名称显示
+            const nameInput = row.querySelector('td:nth-child(2) input.form-control');
+            if (nameInput && stream.name) {
+                nameInput.value = stream.name;
+            }
         }
 
         // 修改 renderFullTable 函数
@@ -693,47 +705,33 @@
                     categoryStreams.forEach(stream => {
                         const tr = document.createElement('tr');
                         tr.dataset.streamId = stream.id;
-                        const playUrl = stream.processRunning ? 
-                            `${serverConfig.rtmp.pullServer}${stream.id}.flv` : 
-                            '';
                         
-                        // 检查是否是手动启动的流
-                        const isManuallyStarted = stream.manuallyStarted;
+                        // 确保流名称始终有值
+                        const streamName = stream.name || '未命名流';
                         
-                        // 修改状态判断逻辑
-                        let statusClass = '';
-                        let statusText = '';
-                        let statusStyle = '';
-                        
-                        if (stream.status === 'invalid') {
-                            statusClass = 'error';
-                            statusText = '已失效';
-                            statusStyle = 'background-color: #dc3545;';  // 红色
-                        } else if (stream.status === 'running') {
-                            statusClass = 'active';
-                            statusText = '已运行';
-                            statusStyle = 'background-color: #28a745;';  // 绿色
-                        } else {
-                            statusClass = 'inactive';
-                            statusText = '已停止';
-                            statusStyle = 'background-color: #6c757d;';  // 灰色
-                        }
+                        // 修改名称列的HTML结构
+                        const nameColumnHtml = `
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div class="input-group input-group-compact">
+                                        ${stream.tvg?.logo ? `<img src="${stream.tvg.logo}" alt="" style="height: 20px; margin-right: 4px;">` : ''}
+                                        <input type="text" class="form-control form-control-sm" 
+                                               value="${streamName}" 
+                                               readonly 
+                                               style="font-family: monospace; background-color: #f8f9fa;">
+                                    </div>
+                                </div>
+                            </td>
+                        `;
 
+                        // 更新tr的innerHTML
                         tr.innerHTML = `
                             <td>
                                 <input type="checkbox" class="stream-checkbox" value="${stream.id}" 
                                        onchange="updateBatchButtons()" 
                                        ${document.getElementById('selectAll').checked ? 'checked' : ''}>
                             </td>
-                            <td>
-                                <div class="d-flex align-items-center">
-                                    <div class="input-group input-group-compact">
-                                        <img src="${stream.tvg?.logo || ''}" alt="" style="height: 20px; margin-right: 4px;">
-                                        <input type="text" class="form-control form-control-sm" value="${stream.name}" readonly 
-                                               style="font-family: monospace; background-color: #f8f9fa;">
-                                    </div>
-                                </div>
-                            </td>
+                            ${nameColumnHtml}
                             <td>
                                 <span class="status ${statusClass}" style="${statusStyle}">
                                     ${statusText}
