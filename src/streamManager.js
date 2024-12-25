@@ -1160,15 +1160,15 @@ class StreamManager extends EventEmitter {
     getTrafficStats() {
         try {
             // 确保将 BigInt 转换为 Number
-            const received = Number(this.stats.trafficReceived || 0);
-            const sent = Number(this.stats.trafficSent || 0);
+            const received = Number(this.totalTraffic.received || 0);
+            const sent = Number(this.totalTraffic.sent || 0);
             
             return {
                 received: this.formatBytes(received),
                 sent: this.formatBytes(sent)
             };
         } catch (error) {
-            this.logger.error('Error getting traffic stats:', error);
+            logger.error('Error getting traffic stats:', error);
             return {
                 received: '0 B',
                 sent: '0 B'
