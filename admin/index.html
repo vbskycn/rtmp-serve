@@ -478,7 +478,7 @@
                         autoStartBtn.className = 'btn btn-warning btn-sm auto-start-btn';
                         autoStartBtn.style.backgroundColor = '#ffc107';
                         autoStartBtn.style.color = '#000';
-                        autoStartBtn.innerHTML = '<i class="fa fa-moon-o"></i> ��启已开';
+                        autoStartBtn.innerHTML = '<i class="fa fa-moon-o"></i> 自启已开';
                     } else {
                         autoStartBtn.className = 'btn btn-outline-success btn-sm auto-start-btn';
                         autoStartBtn.style.backgroundColor = 'transparent';
@@ -855,6 +855,74 @@
             } catch (error) {
                 console.error('Logout error:', error);
             }
+        }
+
+        // 工具面板切换
+        function toggleTools() {
+            const content = document.getElementById('toolsContent');
+            const chevron = document.querySelector('.tools-toggle .fa-chevron-down');
+            
+            if (content.style.display === 'none' || !content.style.display) {
+                // 展开面板
+                content.style.display = 'block';
+                content.style.opacity = '0';
+                content.style.maxHeight = '0';
+                
+                // 使用 requestAnimationFrame 确保过渡效果生效
+                requestAnimationFrame(() => {
+                    content.style.transition = 'opacity 0.3s, max-height 0.3s';
+                    content.style.opacity = '1';
+                    content.style.maxHeight = content.scrollHeight + 'px';
+                });
+                
+                // 旋转箭头
+                chevron.style.transform = 'rotate(180deg)';
+            } else {
+                // 收起面板
+                content.style.opacity = '0';
+                content.style.maxHeight = '0';
+                
+                // 等待过渡完成后隐藏
+                setTimeout(() => {
+                    content.style.display = 'none';
+                }, 300);
+                
+                // 恢复箭头
+                chevron.style.transform = 'rotate(0)';
+            }
+        }
+
+        // 页面加载时初始化工具面板状态
+        document.addEventListener('DOMContentLoaded', function() {
+            const content = document.getElementById('toolsContent');
+            content.style.display = 'none';
+            content.style.transition = 'opacity 0.3s, max-height 0.3s';
+            content.style.overflow = 'hidden';
+        });
+
+        // 在 script 标签中添加刷新页面函数
+        function refreshPage() {
+            // 显示加载提示
+            const button = document.querySelector('button[onclick="refreshPage()"]');
+            const originalHtml = button.innerHTML;
+            button.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 刷新中...';
+            button.disabled = true;
+
+            // 刷新数据
+            Promise.all([
+                getServerConfig(),
+                loadStreams(),
+                updateSystemStats()
+            ]).then(() => {
+                showToast('刷新成功');
+            }).catch(error => {
+                console.error('Error refreshing page:', error);
+                alert('刷新失败');
+            }).finally(() => {
+                // 恢复按钮状态
+                button.innerHTML = originalHtml;
+                button.disabled = false;
+            });
         }
     </script>
 </body>

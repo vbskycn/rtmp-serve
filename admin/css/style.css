@@ -159,28 +159,41 @@ textarea {
 }
 
 .tools-panel {
-    background: #f8f9fa;
-    border-radius: 8px;
-    padding: 15px;
     margin-bottom: 20px;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    overflow: hidden;
 }
 
 .tools-toggle {
+    padding: 10px 15px;
+    background-color: #f8f9fa;
     cursor: pointer;
     user-select: none;
 }
 
+.tools-toggle:hover {
+    background-color: #e9ecef;
+}
+
+.tools-toggle .fa-chevron-down {
+    transition: transform 0.3s;
+}
+
 .tools-content {
-    display: none;
-    margin-top: 15px;
+    padding: 15px;
+    background-color: #fff;
+    transition: opacity 0.3s, max-height 0.3s;
+    overflow: hidden;
 }
 
-.tools-content.show {
-    display: block;
+/* 确保工具面板内的卡片有合适的间距 */
+.tools-content .card {
+    margin-bottom: 15px;
 }
 
-.stream-list-container {
-    margin-top: 20px;
+.tools-content .card:last-child {
+    margin-bottom: 0;
 }
 
 /* 表格列宽度控制 */
