@@ -646,7 +646,7 @@
             const playUrlCell = row.querySelector('.input-group-compact');
             if (playUrlCell) {
                 const playUrl = stream.processRunning ? 
-                    `${serverConfig.rtmp.pullServer}${stream.id}` : 
+                    `${serverConfig.rtmp.pullServer}${stream.id}.flv` : 
                     '';
 
                 playUrlCell.innerHTML = playUrl ? `
@@ -691,7 +691,7 @@
                         const tr = document.createElement('tr');
                         tr.dataset.streamId = stream.id;
                         const playUrl = stream.processRunning ? 
-                            `${serverConfig.rtmp.pullServer}${stream.id}` : 
+                            `${serverConfig.rtmp.pullServer}${stream.id}.flv` : 
                             '';
                         
                         // 检查是否是手动启动的流
@@ -2266,10 +2266,10 @@
                 
                 let m3uContent = '#EXTM3U\n';
                 
-                // 只导出正在运行的流
+                // 只导出正在运行的流,并添加 .flv 后缀
                 streams.forEach(stream => {
                     if (stream.processRunning) {
-                        const playUrl = `${serverConfig.rtmp.pullServer}${stream.id}`;
+                        const playUrl = `${serverConfig.rtmp.pullServer}${stream.id}.flv`;
                         m3uContent += `#EXTINF:-1 tvg-id="${stream.tvg?.id || ''}" tvg-name="${stream.tvg?.name || stream.name}" tvg-logo="${stream.tvg?.logo || ''}" group-title="${stream.category || '未分类'}",${stream.name}\n`;
                         m3uContent += `${playUrl}\n`;
                     }
@@ -2304,7 +2304,7 @@
                 
                 let txtContent = '';
                 
-                // 按分类组织内容
+                // 按分类组织内容,并添加 .flv 后缀
                 const categories = {};
                 streams.forEach(stream => {
                     if (stream.processRunning) {
@@ -2312,7 +2312,7 @@
                         if (!categories[category]) {
                             categories[category] = [];
                         }
-                        const playUrl = `${serverConfig.rtmp.pullServer}${stream.id}`;
+                        const playUrl = `${serverConfig.rtmp.pullServer}${stream.id}.flv`;
                         categories[category].push(`${stream.name},${playUrl}`);
                     }
                 });
