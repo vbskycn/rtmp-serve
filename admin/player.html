@@ -209,19 +209,32 @@
                 const stream = await response.json();
                 document.querySelector('.stream-title').textContent = stream.name;
 
+                // 获取服务器配置
+                const configResponse = await fetch('/api/config');
+                const config = await configResponse.json();
+                
+                // 使用正确的播放地址
+                const actualPlayUrl = stream.processRunning ? 
+                    `${config.rtmp.pullServer}${stream.id}.flv` : 
+                    null;
+
+                if (!actualPlayUrl) {
+                    throw new Error('Stream is not running');
+                }
+
                 // 销毁现有播放器
                 if (dp) {
                     dp.destroy();
                     dp = null;
                 }
 
-                // 创建新的DPlayer实例，优化HLS配置
+                // 创建新的DPlayer实例
                 dp = new DPlayer({
                     container: document.getElementById('dplayer'),
                     live: true,
                     video: {
-                        url: playUrl,
-                        type: 'hls',
+                        url: actualPlayUrl,
+                        type: 'flv',  // 修改为 flv 类型
                         autoplay: true,
                         hlsjsConfig: {
                             debug: false,
@@ -486,7 +499,7 @@
                     if (!categories[category]) {
                         categories[category] = [];
                     }
-                    // 添加播放地址
+                    // 使用正确的播放地址格式
                     stream.playUrl = `${config.rtmp.pullServer}${stream.id}.flv`;
                     categories[category].push(stream);
                 });
@@ -592,30 +605,6 @@
         // 初始化
         loadPlaylist();
         initPlayer();
-
-        async function loadStreamInfo() {
-            try {
-                // 获取服务器配置
-                const configResponse = await fetch('/api/config');
-                const config = await configResponse.json();
-                const serverHost = config.server.host;
-                const serverPort = config.server.port;
-
-                const streamId = new URLSearchParams(window.location.search).get('id');
-                if (!streamId) return;
-
-                const response = await fetch(`/api/streams/${streamId}`);
-                const stream = await response.json();
-                
-                if (stream) {
-                    document.title = stream.name;
-                    const playUrl = `http://${serverHost}:${serverPort}/play/${stream.id}`;
-                    initPlayer(playUrl);
-                }
-            } catch (error) {
-                console.error('Error loading stream:', error);
-            }
-        }
 
         // 修改定时刷新逻辑，每30秒更新一次播放列表
         setInterval(loadPlaylist, 30000);
