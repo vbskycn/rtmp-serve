@@ -670,30 +670,81 @@ class StreamManager extends EventEmitter {
     // 添加更新流量统计的方法
     async updateTrafficStats() {
         try {
-            // 遍历所有活跃的流程序
-            for (const [streamId, processInfo] of this.streamProcesses) {
-                if (!processInfo || !processInfo.ffmpeg) continue;
+            // 获取所有流的ID
+            const streams = await this.getAllStreams();
+            
+            for (const stream of streams) {
+                const streamPath = path.join(this.streamsPath, stream.id);
+                
+                try {
+                    // 检查目录是否存在
+                    const exists = await fs.access(streamPath)
+                        .then(() => true)
+                        .catch(() => false);
+                    
+                    if (!exists) {
+                        // 如果目录不存在但流还在运行，可能需要创建目录
+                        if (stream.processRunning) {
+                            await fs.mkdir(streamPath, { recursive: true });
+                        }
+                        continue; // 跳过这个流的统计
+                    }
 
-                const outputPath = path.join(__dirname, '../streams', streamId);
-                
-                // 计算 HLS 段文件的大小
-                const files = await fs.promises.readdir(outputPath);
-                const tsFiles = files.filter(f => f.endsWith('.ts'));
-                
-                let totalSize = 0;
-                for (const file of tsFiles) {
-                    const stats = await fs.promises.stat(path.join(outputPath, file));
-                    totalSize += stats.size;
+                    // 读取目录内容
+                    const files = await fs.readdir(streamPath);
+                    
+                    // 计算目录大小
+                    let totalSize = 0;
+                    for (const file of files) {
+                        const filePath = path.join(streamPath, file);
+                        try {
+                            const stats = await fs.stat(filePath);
+                            totalSize += stats.size;
+                        } catch (err) {
+                            // 忽略单个文件的错误
+                            this.logger.debug(`Error getting file stats for ${filePath}: ${err.message}`);
+                        }
+                    }
+
+                    // 更新流的统计信息
+                    if (!this.trafficStats[stream.id]) {
+                        this.trafficStats[stream.id] = {
+                            received: 0,
+                            sent: 0,
+                            lastUpdate: Date.now()
+                        };
+                    }
+
+                    const timeDiff = (Date.now() - this.trafficStats[stream.id].lastUpdate) / 1000; // 转换为秒
+                    if (timeDiff > 0) {
+                        const bytesPerSecond = totalSize / timeDiff;
+                        this.trafficStats[stream.id].received = bytesPerSecond;
+                        this.trafficStats[stream.id].sent = bytesPerSecond;
+                        this.trafficStats[stream.id].lastUpdate = Date.now();
+                    }
+
+                } catch (err) {
+                    // 将错误级别改为debug，因为这可能是正常的情况（流已停止）
+                    this.logger.debug(`Error updating traffic stats for stream ${stream.id}: ${err.message}`);
                 }
-
-                // 更新接收和发送的流量
-                this.trafficStats.received += totalSize;
-                this.trafficStats.sent += totalSize;
             }
 
-            this.trafficStats.lastUpdate = Date.now();
-        } catch (error) {
-            logger.error('Error updating traffic stats:', error);
+            // 计算总流量
+            let totalReceived = 0;
+            let totalSent = 0;
+            Object.values(this.trafficStats).forEach(stats => {
+                totalReceived += stats.received;
+                totalSent += stats.sent;
+            });
+
+            // 更新全局统计信息
+            this.globalStats.traffic = {
+                received: this.formatBytes(totalReceived),
+                sent: this.formatBytes(totalSent)
+            };
+
+        } catch (err) {
+            this.logger.error('Error updating global traffic stats:', err);
         }
     }
 
