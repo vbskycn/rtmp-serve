@@ -680,7 +680,7 @@ class StreamManager extends EventEmitter {
     // 添加更新流量统计的方法
     async updateTrafficStats() {
         try {
-            // 获取所有流的ID
+            // 获取所有流
             const streams = await this.getAllStreams();
             
             for (const stream of streams) {
@@ -754,7 +754,7 @@ class StreamManager extends EventEmitter {
             };
 
         } catch (err) {
-            logger.error('Error updating global traffic stats:', err);
+            this.logger.error('Error updating global traffic stats:', err);
         }
     }
 
@@ -844,6 +844,32 @@ class StreamManager extends EventEmitter {
                 success: false,
                 error: error.message
             };
+        }
+    }
+
+    // 添加 getAllStreams 方法
+    async getAllStreams() {
+        try {
+            // 将 Map 转换为数组并添加额外信息
+            const streams = Array.from(this.streams.entries()).map(([id, stream]) => {
+                const processInfo = this.streamProcesses.get(id);
+                const status = this.streamStatus.get(id) || 'stopped';
+                const retries = this.retryAttempts.get(id) || 0;
+                
+                return {
+                    ...stream,
+                    id,
+                    processRunning: processInfo?.streamStarted || false,
+                    status,
+                    retryCount: retries,
+                    autoStart: this.autoStartStreams.has(id)
+                };
+            });
+            
+            return streams;
+        } catch (error) {
+            this.logger.error('Error getting all streams:', error);
+            return [];
         }
     }
 }

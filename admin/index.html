@@ -503,7 +503,7 @@
             }
         }
 
-        // 修改 loadStreams 函数中的更新逻辑
+        // 修改 loadStreams 函数，添加智能更新逻辑
         async function loadStreams() {
             try {
                 const response = await fetch('/api/streams');
@@ -513,19 +513,16 @@
                 const validStreams = streams.filter(stream => {
                     if (!stream.name) {
                         console.warn(`Stream ${stream.id} has no name`);
-                        stream.name = '未命名流';  // 设置默认名称
+                        stream.name = '未命名流';
                     }
                     return true;
                 });
 
-                // 更新统计数据
-                document.getElementById('totalStreams').textContent = validStreams.length;
-                
-                // 获取活跃流的数量
-                const activeStreams = validStreams.filter(stream => {
-                    return stream.processRunning || stream.stats?.startTime;
-                });
-                document.getElementById('activeStreams').textContent = activeStreams.length;
+                // 更新统计数据（不触发重排）
+                updateStatElement('totalStreams', validStreams.length);
+                updateStatElement('activeStreams', validStreams.filter(s => 
+                    s.processRunning || s.stats?.startTime
+                ).length);
 
                 // 按分类分组
                 const groupedStreams = {};
@@ -537,13 +534,174 @@
                     groupedStreams[category].push(stream);
                 });
 
-                // 始终完全重新渲染表格，确保名称显示正确
                 const tbody = document.querySelector('#streamTable');
-                renderFullTable(tbody, groupedStreams);
-
+                
+                // 检查是否需要完全重新渲染
+                const needsFullRerender = checkIfNeedsFullRerender(tbody, groupedStreams);
+                
+                if (needsFullRerender) {
+                    // 完全重新渲染，但保持平滑过渡
+                    const newTbody = document.createElement('tbody');
+                    newTbody.id = 'streamTable';
+                    renderFullTable(newTbody, groupedStreams);
+                    
+                    // 使用 CSS transform 进行平滑过渡
+                    tbody.style.transition = 'opacity 0.3s';
+                    tbody.style.opacity = '0';
+                    
+                    setTimeout(() => {
+                        tbody.parentNode.replaceChild(newTbody, tbody);
+                        requestAnimationFrame(() => {
+                            newTbody.style.opacity = '1';
+                        });
+                    }, 300);
+                } else {
+                    // 只更新需要更新的部分
+                    updateExistingRows(tbody, groupedStreams);
+                }
             } catch (error) {
                 console.error('Error loading streams:', error);
             }
+        }
+
+        // 添加检查是否需要完全重新渲染的函数
+        function checkIfNeedsFullRerender(tbody, groupedStreams) {
+            // 获取当前显示的流ID列表
+            const currentIds = Array.from(tbody.querySelectorAll('tr[data-stream-id]'))
+                .map(row => row.dataset.streamId);
+            
+            // 获取新数据中的流ID列表
+            const newIds = Object.values(groupedStreams)
+                .flat()
+                .map(stream => stream.id);
+            
+            // 如果流的数量或顺序发生变化，需要完全重新渲染
+            if (currentIds.length !== newIds.length) return true;
+            return !currentIds.every((id, index) => id === newIds[index]);
+        }
+
+        // 添加更新现有行的函数
+        function updateExistingRows(tbody, groupedStreams) {
+            Object.values(groupedStreams)
+                .flat()
+                .forEach(stream => {
+                    const row = tbody.querySelector(`tr[data-stream-id="${stream.id}"]`);
+                    if (row) {
+                        // 只更新可能发生变化的元素
+                        updateRowElements(row, stream);
+                    }
+                });
+        }
+
+        // 添加更新行元素的函数
+        function updateRowElements(row, stream) {
+            // 更新状态
+            const statusSpan = row.querySelector('.status');
+            if (statusSpan) {
+                let statusClass = '';
+                let statusText = '';
+                let statusStyle = '';
+                
+                if (stream.status === 'invalid') {
+                    statusClass = 'error';
+                    statusText = '已失效';
+                    statusStyle = 'background-color: #dc3545;';
+                } else if (stream.processRunning && stream.status === 'running') {
+                    statusClass = 'active';
+                    statusText = '运行中';
+                    statusStyle = 'background-color: #28a745;';
+                } else {
+                    statusClass = 'inactive';
+                    statusText = '已停止';
+                    statusStyle = 'background-color: #6c757d;';
+                }
+                
+                // 只在状态发生变化时更新
+                if (statusSpan.textContent !== statusText) {
+                    statusSpan.className = `status ${statusClass}`;
+                    statusSpan.style = statusStyle;
+                    statusSpan.textContent = statusText;
+                }
+            }
+
+            // 更新推流状态
+            const rtmpStatus = row.querySelector('.rtmp-status');
+            if (rtmpStatus) {
+                const newStatus = stream.processRunning ? '已推流' : '未推流';
+                const newColor = stream.processRunning ? '#28a745' : '#6c757d';
+                
+                if (rtmpStatus.textContent !== newStatus) {
+                    rtmpStatus.style.backgroundColor = newColor;
+                    rtmpStatus.textContent = newStatus;
+                }
+            }
+
+            // 更新播放地址
+            const playUrlInput = row.querySelector('td:nth-child(6) input.form-control');
+            if (playUrlInput) {
+                const newPlayUrl = stream.processRunning ? 
+                    `${serverConfig.rtmp.pullServer}${stream.id}.flv` : 
+                    '未推流';
+                    
+                if (playUrlInput.value !== newPlayUrl) {
+                    playUrlInput.value = newPlayUrl;
+                    
+                    // 更新复制和播放按钮状态
+                    const copyBtn = playUrlInput.parentElement.querySelector('.btn-outline-primary');
+                    const playBtn = playUrlInput.parentElement.querySelector('.btn-outline-success');
+                    
+                    if (stream.processRunning) {
+                        copyBtn.disabled = false;
+                        playBtn.disabled = false;
+                    } else {
+                        copyBtn.disabled = true;
+                        playBtn.disabled = true;
+                    }
+                }
+            }
+
+            // 更新自启动按钮状态
+            const autoStartBtn = row.querySelector('.auto-start-btn');
+            if (autoStartBtn) {
+                const newAutoStart = stream.autoStart;
+                const currentAutoStart = autoStartBtn.classList.contains('btn-warning');
+                
+                if (newAutoStart !== currentAutoStart) {
+                    if (newAutoStart) {
+                        autoStartBtn.className = 'btn btn-warning btn-sm auto-start-btn';
+                        autoStartBtn.style.backgroundColor = '#ffc107';
+                        autoStartBtn.style.color = '#000';
+                        autoStartBtn.innerHTML = '<i class="fa fa-moon-o"></i> 自启已开';
+                    } else {
+                        autoStartBtn.className = 'btn btn-outline-success btn-sm auto-start-btn';
+                        autoStartBtn.style.backgroundColor = 'transparent';
+                        autoStartBtn.style.color = '#28a745';
+                        autoStartBtn.innerHTML = '<i class="fa fa-sun-o"></i> 自启开';
+                    }
+                }
+            }
+        }
+
+        // 修改初始化函数，调整更新间隔
+        async function init() {
+            await getServerConfig();
+            await loadStreams();
+            await updateSystemStats();
+            
+            // 使用 requestAnimationFrame 进行更平滑的更新
+            let lastUpdate = 0;
+            const UPDATE_INTERVAL = 5000; // 5秒更新一次
+
+            function update(timestamp) {
+                if (timestamp - lastUpdate >= UPDATE_INTERVAL) {
+                    loadStreams();
+                    updateSystemStats();
+                    lastUpdate = timestamp;
+                }
+                requestAnimationFrame(update);
+            }
+
+            requestAnimationFrame(update);
         }
 
         // 修改系统状态更新函数
@@ -589,21 +747,6 @@
             }
 
             return parts.join('') || '刚刚启动';
-        }
-
-        // 修改初始化函数
-        async function init() {
-            await getServerConfig();
-            await loadStreams();
-            
-            // 立即更新一次系统状态
-            await updateSystemStats();
-            
-            // 设置定时更新
-            setInterval(async () => {
-                await loadStreams();
-                await updateSystemStats();
-            }, 5000);
         }
 
         // 修改更新统计元素的函数
@@ -1040,21 +1183,6 @@
         // 刷新流列表
         function refreshStreams() {
             loadStreams();
-        }
-
-        // 初始加载
-        async function init() {
-            await getServerConfig();
-            await loadStreams();
-            
-            // 立即更新一次系统状态
-            await updateSystemStats();
-            
-            // 设置定时更新
-            setInterval(async () => {
-                await loadStreams();
-                await updateSystemStats();
-            }, 5000);
         }
 
         // 启动始化
