@@ -125,6 +125,10 @@ class StreamManager extends EventEmitter {
         try {
             if (fs.existsSync(this.configPath)) {
                 const data = fs.readFileSync(this.configPath, 'utf8');
+                if (!data.trim()) {
+                    logger.warn('Streams config file is empty');
+                    return;
+                }
                 const configs = JSON.parse(data);
                 for (const [id, config] of Object.entries(configs)) {
                     this.streams.set(id, {
@@ -144,9 +148,23 @@ class StreamManager extends EventEmitter {
                     });
                 }
                 logger.info(`Loaded ${this.streams.size} streams from config`);
+            } else {
+                logger.warn('Streams config file not found');
             }
         } catch (error) {
             logger.error('Error loading streams config:', error);
+            // 如果文件损坏，尝试备份并创建新的
+            try {
+                if (fs.existsSync(this.configPath)) {
+                    const backupPath = `${this.configPath}.backup.${Date.now()}`;
+                    fs.copyFileSync(this.configPath, backupPath);
+                    logger.info(`Created backup of corrupted config at ${backupPath}`);
+                    fs.writeFileSync(this.configPath, '{}');
+                    logger.info('Created new empty streams config');
+                }
+            } catch (e) {
+                logger.error('Error handling corrupted config:', e);
+            }
         }
     }
 
@@ -1135,7 +1153,7 @@ class StreamManager extends EventEmitter {
         try {
             const statsPath = path.join(__dirname, '../config/stats.json');
             const stats = {
-                startTime: this.startTime,  // 保存实际的启动时间
+                startTime: this.startTime,
                 traffic: {
                     sent: this.totalTraffic.sent.toString(),
                     received: this.totalTraffic.received.toString()
@@ -1155,19 +1173,35 @@ class StreamManager extends EventEmitter {
             const statsPath = path.join(__dirname, '../config/stats.json');
             if (fs.existsSync(statsPath)) {
                 const data = await fs.promises.readFile(statsPath, 'utf8');
-                const stats = JSON.parse(data);
-                
-                // 只加载流量数据，不加载启动时间
-                this.totalTraffic.sent = BigInt(stats.traffic.sent);
-                this.totalTraffic.received = BigInt(stats.traffic.received);
-                
-                logger.info('Stats loaded successfully');
+                if (data.trim()) {
+                    const stats = JSON.parse(data);
+                    // 只加载流量数据，不加载启动时间
+                    this.totalTraffic.sent = BigInt(stats.traffic?.sent || '0');
+                    this.totalTraffic.received = BigInt(stats.traffic?.received || '0');
+                    logger.info('Stats loaded successfully');
+                } else {
+                    // 如果文件为空，初始化默认值
+                    this.totalTraffic.sent = 0n;
+                    this.totalTraffic.received = 0n;
+                    // 写入默认统计数据
+                    await this.saveStats();
+                }
+            } else {
+                // 如果文件不存在，创建默认统计数据
+                this.totalTraffic.sent = 0n;
+                this.totalTraffic.received = 0n;
+                await this.saveStats();
             }
         } catch (error) {
             logger.error('Error loading stats:', error);
-            // 如果加载失败，只重置流量数据
+            // 如果加载失败，重置流量数据并创建新的统计文件
             this.totalTraffic.sent = 0n;
             this.totalTraffic.received = 0n;
+            try {
+                await this.saveStats();
+            } catch (e) {
+                logger.error('Error creating new stats file:', e);
+            }
         }
     }
 
@@ -1274,13 +1308,29 @@ class StreamManager extends EventEmitter {
             const autoStartPath = path.join(__dirname, '../config/autostart.json');
             if (fs.existsSync(autoStartPath)) {
                 const data = fs.readFileSync(autoStartPath, 'utf8');
-                const autoStartList = JSON.parse(data);
-                this.autoStartStreams = new Set(autoStartList);
-                logger.info(`Loaded ${this.autoStartStreams.size} auto-start streams`);
+                if (data.trim()) {  // 检查文件是否为空
+                    const autoStartList = JSON.parse(data);
+                    this.autoStartStreams = new Set(autoStartList);
+                } else {
+                    this.autoStartStreams = new Set();
+                    // 写入空数组到文件
+                    fs.writeFileSync(autoStartPath, '[]');
+                }
+            } else {
+                // 如果文件不存在，创建包含空数组的文件
+                fs.writeFileSync(autoStartPath, '[]');
+                this.autoStartStreams = new Set();
             }
+            logger.info(`Loaded ${this.autoStartStreams.size} auto-start streams`);
         } catch (error) {
             logger.error('Error loading auto-start streams:', error);
             this.autoStartStreams = new Set();
+            // 尝试重新创建文件
+            try {
+                fs.writeFileSync(path.join(__dirname, '../config/autostart.json'), '[]');
+            } catch (e) {
+                logger.error('Error creating autostart.json:', e);
+            }
         }
     }
 
