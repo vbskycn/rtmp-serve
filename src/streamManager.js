@@ -43,6 +43,11 @@ class StreamManager extends EventEmitter {
             }
         };
 
+        // 初始化自动启动流
+        setTimeout(() => {
+            this.startAutoStartStreams();
+        }, 5000);
+
         // 加载配置
         this.loadConfig();
         
@@ -51,11 +56,6 @@ class StreamManager extends EventEmitter {
         
         // 加载自动配置
         this.loadAutoConfig();
-
-        // 初始化自动启动流
-        setTimeout(() => {
-            this.startAutoStartStreams();
-        }, 5000);
 
         // 添加流量统计
         this.trafficStats = {
@@ -79,28 +79,14 @@ class StreamManager extends EventEmitter {
     // 加载配置
     loadConfig() {
         try {
-            this.config = require('../config/config.json');
-            
-            // 如果配置中的 host 是 auto，则尝试获取实际 IP
-            if (this.config.server.host === 'auto') {
-                // 这里先设置一个默认值，实际 IP 会在服务启动时通过 API 更新
-                this.config.server.host = process.env.SERVER_HOST || 'localhost';
+            logger.info(`Loaded config with version: ${config.version}`);
+            // 避免重复加载和启动
+            if (!this.configLoaded) {
+                this.config = config;
+                this.configLoaded = true;
             }
-            
-            logger.info(`Loaded config with version: ${this.config.version}`);
         } catch (error) {
             logger.error('Error loading config:', error);
-            this.config = {
-                version: process.env.APP_VERSION || 'unknown',
-                server: {
-                    host: process.env.SERVER_HOST || 'localhost',
-                    port: process.env.SERVER_PORT || 3000
-                },
-                rtmp: {
-                    pushServer: process.env.RTMP_PUSH_SERVER || 'rtmp://ali.push.yximgs.com/live/',
-                    pullServer: process.env.RTMP_PULL_SERVER || 'http://ali.hlspull.yximgs.com/live/'
-                }
-            };
         }
     }
 
@@ -180,52 +166,36 @@ class StreamManager extends EventEmitter {
     // 修改 loadAutoConfig 方法，确保正确调用 createDefaultAutoConfig
     loadAutoConfig() {
         try {
-            const autoConfigPath = path.join(__dirname, '../config/auto_config.json');
+            const autoConfigPath = path.join(__dirname, '../config/auto-start.json');
             if (fs.existsSync(autoConfigPath)) {
-                const data = fs.readFileSync(autoConfigPath, 'utf8');
-                if (data.trim()) {
-                    const config = JSON.parse(data);
-                    this.autoPlayStreams = new Set(config.autoPlay || []);
-                    this.autoStartStreams = new Set(config.autoStart || []);
+                const autoConfig = JSON.parse(fs.readFileSync(autoConfigPath, 'utf8'));
+                // 避免重复加载
+                if (!this.autoConfigLoaded) {
+                    this.autoStartStreams = new Set(autoConfig.streams || []);
+                    this.autoConfigLoaded = true;
                     logger.info(`Loaded auto config: ${this.autoStartStreams.size} auto-start streams`);
-                } else {
-                    this.createDefaultAutoConfig(autoConfigPath);
                 }
-            } else {
-                this.createDefaultAutoConfig(autoConfigPath);
             }
         } catch (error) {
             logger.error('Error loading auto config:', error);
-            this.createDefaultAutoConfig(path.join(__dirname, '../config/auto_config.json'));
         }
     }
 
     // 修改 loadStreams 方法
     loadStreams() {
         try {
-            if (fs.existsSync(this.configPath)) {
-                const data = fs.readFileSync(this.configPath, 'utf8');
-                if (data.trim()) {
-                    const streams = JSON.parse(data);
-                    if (Array.isArray(streams)) {
-                        streams.forEach(stream => {
-                            if (stream.id) {
-                                this.streams.set(stream.id, stream);
-                            }
-                        });
-                    }
+            const streamsPath = path.join(__dirname, '../config/streams.json');
+            if (fs.existsSync(streamsPath)) {
+                const streamsData = JSON.parse(fs.readFileSync(streamsPath, 'utf8'));
+                // 避免重复加载
+                if (!this.streamsLoaded) {
+                    this.streams = new Map(Object.entries(streamsData));
+                    this.streamsLoaded = true;
                     logger.info(`Loaded ${this.streams.size} streams from config`);
-                } else {
-                    logger.info('Streams config file is empty');
                 }
-            } else {
-                logger.info('Creating empty streams config file');
-                fs.writeFileSync(this.configPath, JSON.stringify([], null, 2));
             }
         } catch (error) {
             logger.error('Error loading streams:', error);
-            // 如果加载失败，确保 streams 是空的 Map
-            this.streams = new Map();
         }
     }
 
@@ -499,7 +469,14 @@ class StreamManager extends EventEmitter {
 
     // 修改 startAutoStartStreams 方法
     async startAutoStartStreams() {
+        // 防止重复启动
+        if (this.autoStartInProgress) {
+            logger.debug('Auto-start already in progress, skipping');
+            return;
+        }
+
         try {
+            this.autoStartInProgress = true;
             const autoStartStreams = Array.from(this.autoStartStreams);
             logger.info(`Starting auto-start streams, count: ${autoStartStreams.length}`);
             
@@ -542,6 +519,8 @@ class StreamManager extends EventEmitter {
             
         } catch (error) {
             logger.error('Error in startAutoStartStreams:', error);
+        } finally {
+            this.autoStartInProgress = false;
         }
     }
 
