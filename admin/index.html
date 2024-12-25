@@ -709,6 +709,25 @@
                         // 确保流名称始终有值
                         const streamName = stream.name || '未命名流';
                         
+                        // 确定状态样式和文本
+                        let statusClass = '';
+                        let statusText = '';
+                        let statusStyle = '';
+                        
+                        if (stream.status === 'invalid') {
+                            statusClass = 'error';
+                            statusText = '已失效';
+                            statusStyle = 'background-color: #dc3545;';  // 红色
+                        } else if (stream.processRunning && stream.status === 'running') {
+                            statusClass = 'active';
+                            statusText = '运行中';
+                            statusStyle = 'background-color: #28a745;';  // 绿色
+                        } else {
+                            statusClass = 'inactive';
+                            statusText = '已停止';
+                            statusStyle = 'background-color: #6c757d;';  // 灰色
+                        }
+
                         // 修改名称列的HTML结构
                         const nameColumnHtml = `
                             <td>
@@ -723,6 +742,10 @@
                                 </div>
                             </td>
                         `;
+
+                        const playUrl = stream.processRunning ? 
+                            `${serverConfig.rtmp.pullServer}${stream.id}.flv` : 
+                            '';
 
                         // 更新tr的innerHTML
                         tr.innerHTML = `
@@ -1078,7 +1101,7 @@
                 }
             }
 
-            alert(`批量导入完成\n成功: ${successCount}\n失败: ${failCount}`);
+            alert(`批量导入完成\n成功: ${successCount}\n��败: ${failCount}`);
             if (successCount > 0) {
                 this.reset();
                 loadStreams();
