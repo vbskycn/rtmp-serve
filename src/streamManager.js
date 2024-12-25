@@ -583,20 +583,6 @@ class StreamManager extends EventEmitter {
         try {
             logger.info(`[${streamId}] Starting stream with FFmpeg...`);
             
-            // 检查源地址有效性
-            const isSourceValid = await this.checkStreamSource(streamConfig.url);
-            if (!isSourceValid) {
-                logger.error(`[${streamId}] Stream source is invalid: ${streamConfig.url}`);
-                this.streamStatus.set(streamId, 'invalid');
-                throw new Error('Stream source is invalid or not accessible');
-            }
-
-            // 检查流是否已经在运行
-            if (this.streamProcesses.has(streamId)) {
-                logger.warn(`[${streamId}] Stream process already exists, stopping old process`);
-                await this.stopStreaming(streamId);
-            }
-
             const args = [
                 '-i', streamConfig.url,
                 '-c:v', 'copy',
@@ -608,12 +594,15 @@ class StreamManager extends EventEmitter {
             return new Promise((resolve, reject) => {
                 try {
                     const ffmpeg = spawn('ffmpeg', args);
-                    let pullStreamStarted = false;  // 拉流是否成功
-                    let pushStreamStarted = false;  // 推流是否成功
+                    let pullStreamStarted = false;
+                    let consecutiveErrors = 0;  // 连续错误计数
                     let errorMessages = [];
                     let lastFrameTime = Date.now();
                     let frameCount = 0;
                     let ffmpegOutput = '';
+
+                    // 添加错误计数器重置定时器
+                    let errorResetTimer = null;
 
                     ffmpeg.stderr.on('data', (data) => {
                         const message = data.toString();
@@ -627,30 +616,38 @@ class StreamManager extends EventEmitter {
                             message.includes('Stream #0')
                         )) {
                             pullStreamStarted = true;
+                            consecutiveErrors = 0;  // 重置错误计数
                             logger.info(`[${streamId}] Pull stream successful`);
                         }
 
-                        // 检测推流成功
-                        if (pullStreamStarted && !pushStreamStarted && (
-                            message.includes('Output #0') ||
-                            message.includes('frame=') ||
-                            message.includes('speed=')
-                        )) {
-                            pushStreamStarted = true;
-                            logger.info(`[${streamId}] Push stream successful`);
+                        // 检测错误
+                        if (message.includes('Error') || 
+                            message.includes('Failed to') || 
+                            message.includes('Could not') ||
+                            message.includes('Invalid data')) {
                             
-                            // 只有在拉流和推流都成功时，才更新进程信息
-                            this.streamProcesses.set(streamId, {
-                                ffmpeg,
-                                pullStreamStarted,
-                                pushStreamStarted,
-                                frameCount,
-                                lastFrameTime,
-                                startTime: Date.now()
-                            });
-                            
-                            // 更新状态为运行中
-                            this.streamStatus.set(streamId, 'running');
+                            errorMessages.push(message.trim());
+                            consecutiveErrors++;
+                            logger.error(`[${streamId}] Error detected (${consecutiveErrors}): ${message.trim()}`);
+
+                            // 清除之前的重置定时器
+                            if (errorResetTimer) {
+                                clearTimeout(errorResetTimer);
+                            }
+
+                            // 设置新的重置定时器
+                            errorResetTimer = setTimeout(() => {
+                                consecutiveErrors = 0;
+                            }, 30000); // 30秒内没有新错误就重置计数
+
+                            // 检查是否需要停止流
+                            if (shouldStopStream(message) || consecutiveErrors >= 5) {
+                                logger.error(`[${streamId}] Critical error or too many errors, stopping stream`);
+                                this.streamStatus.set(streamId, 'error');
+                                ffmpeg.kill('SIGTERM');
+                                reject(new Error('Stream source is invalid or not accessible'));
+                                return;
+                            }
                         }
 
                         // 更新帧计数
@@ -658,46 +655,41 @@ class StreamManager extends EventEmitter {
                         if (frameMatch) {
                             frameCount = parseInt(frameMatch[1]);
                             lastFrameTime = Date.now();
-                            
-                            // 更新进程信息中的帧计数
-                            const processInfo = this.streamProcesses.get(streamId);
-                            if (processInfo) {
-                                processInfo.frameCount = frameCount;
-                                processInfo.lastFrameTime = lastFrameTime;
-                            }
-                        }
-
-                        // 检测错误
-                        if (message.includes('Error') || 
-                            message.includes('Invalid') || 
-                            message.includes('Could not') ||
-                            message.includes('Failed to')) {
-                            errorMessages.push(message.trim());
-                            logger.error(`[${streamId}] Error detected: ${message.trim()}`);
-                            
-                            // 如果是致命错误，立即停止
-                            if (message.includes('Connection refused') ||
-                                message.includes('No such file or directory') ||
-                                message.includes('Invalid data found') ||
-                                message.includes('Server returned 404') ||
-                                message.includes('Unable to open resource')) {
-                                
-                                this.streamStatus.set(streamId, 'error');
-                                ffmpeg.kill('SIGTERM');
-                                reject(new Error(message.trim()));
-                            }
+                            consecutiveErrors = 0;  // 收到新帧时重置错误计数
                         }
                     });
 
+                    // 添加判断是否应该停止流的函数
+                    function shouldStopStream(message) {
+                        const criticalErrors = [
+                            'Connection refused',
+                            'No such file or directory',
+                            'Invalid data found',
+                            'Server returned 404',
+                            'Unable to open resource',
+                            'Failed to open segment',
+                            'Error opening input',
+                            'Could not find codec parameters',
+                            'Error while opening encoder',
+                            'Immediate exit requested'
+                        ];
+
+                        return criticalErrors.some(error => message.includes(error));
+                    }
+
                     ffmpeg.on('exit', (code, signal) => {
+                        if (errorResetTimer) {
+                            clearTimeout(errorResetTimer);
+                        }
+
                         const timeSinceLastFrame = Date.now() - lastFrameTime;
                         logger.info(`[${streamId}] FFmpeg process exited with code ${code}, signal: ${signal}`);
-                        logger.debug(`[${streamId}] Final status - Pull: ${pullStreamStarted}, Push: ${pushStreamStarted}, Frames: ${frameCount}`);
-
-                        if (code !== 0 || !pullStreamStarted || !pushStreamStarted) {
+                        
+                        // 如果进程退出时还没有成功拉流，或者有太多错误，就认为是失败的
+                        if (!pullStreamStarted || consecutiveErrors >= 5) {
                             const error = errorMessages.length > 0 ? 
                                 errorMessages.join('\n') : 
-                                'Stream failed to start properly';
+                                'Failed to start stream';
                                 
                             logger.error(`[${streamId}] Stream failed: ${error}`);
                             this.streamStatus.set(streamId, 'error');
@@ -708,6 +700,16 @@ class StreamManager extends EventEmitter {
                             resolve({ success: true });
                         }
                     });
+
+                    // 设置启动超时
+                    setTimeout(() => {
+                        if (!pullStreamStarted) {
+                            logger.error(`[${streamId}] Stream failed to start within timeout`);
+                            this.streamStatus.set(streamId, 'error');
+                            ffmpeg.kill('SIGTERM');
+                            reject(new Error('Stream failed to start within timeout'));
+                        }
+                    }, 10000); // 10秒超时
 
                 } catch (error) {
                     logger.error(`[${streamId}] Error in FFmpeg process:`, error);
