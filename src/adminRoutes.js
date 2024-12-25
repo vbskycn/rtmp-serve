@@ -77,8 +77,12 @@ router.post('/api/streams', async (req, res) => {
 // 获取所有流列表
 router.get('/api/streams', async (req, res) => {
     try {
+        logger.debug('Getting streams list...');
         const streams = [];
+        logger.debug(`Total streams in manager: ${streamManager.streams.size}`);
+        
         for (const [id, streamConfig] of streamManager.streams.entries()) {
+            logger.debug(`Processing stream: ${id}`);
             const playUrl = `${streamManager.getServerUrl()}/play/${id}`;
             streams.push({
                 id,
@@ -86,9 +90,12 @@ router.get('/api/streams', async (req, res) => {
                 playUrl,
                 stats: streamManager.streamStats.get(id),
                 processRunning: await checkStreamStatus(id),
-                manuallyStarted: streamManager.manuallyStartedStreams.has(id)
+                manuallyStarted: streamManager.manuallyStartedStreams.has(id),
+                autoStart: streamManager.isAutoStart(id)
             });
         }
+        
+        logger.debug(`Sending ${streams.length} streams to client`);
         res.json(streams);
     } catch (error) {
         logger.error('Error getting streams:', error);

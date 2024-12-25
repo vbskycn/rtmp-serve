@@ -237,10 +237,13 @@
         // 加载流列表
         async function loadStreams() {
             try {
+                console.log('Fetching streams...');
                 const response = await fetch('/api/streams');
+                console.log('Response status:', response.status);
                 const streams = await response.json();
+                console.log('Received streams:', streams);
                 
-                // 更新统计数据（不会导致页面抖动）
+                // 更新统计数据
                 document.getElementById('totalStreams').textContent = streams.length;
                 
                 // 获取活跃流的数量
@@ -248,21 +251,6 @@
                     return stream.processRunning || stream.stats?.startTime;
                 });
                 document.getElementById('activeStreams').textContent = activeStreams.length;
-
-                // 更新系统统计信息
-                try {
-                    const statsResponse = await fetch('/api/stats');
-                    const statsData = await statsResponse.json();
-                    
-                    // 平滑更新统计显示
-                    updateStatElement('totalStreams', streams.length);
-                    updateStatElement('activeStreams', statsData.activeStreams);
-                    updateStatElement('systemUptime', formatUptime(statsData.uptime));
-                    updateStatElement('trafficReceived', statsData.traffic.received);
-                    updateStatElement('trafficSent', statsData.traffic.sent);
-                } catch (error) {
-                    console.error('Error loading system stats:', error);
-                }
 
                 // 按分类分组
                 const groupedStreams = {};
@@ -276,26 +264,8 @@
 
                 const tbody = document.querySelector('#streamTable');
                 
-                // 遍历现有行，更新状态而不是重新创建
-                for (const [category, categoryStreams] of Object.entries(groupedStreams)) {
-                    categoryStreams.forEach(stream => {
-                        const existingRow = tbody.querySelector(`tr[data-stream-id="${stream.id}"]`);
-                        if (existingRow) {
-                            // 只更新需要实时更新的元素
-                            updateStreamRow(existingRow, stream);
-                        }
-                    });
-                }
-
-                // 只有在流的数量或顺序发生变化时才完全重新渲染
-                const currentStreamIds = Array.from(tbody.querySelectorAll('tr[data-stream-id]'))
-                    .map(row => row.dataset.streamId);
-                const newStreamIds = streams.map(stream => stream.id);
-
-                if (JSON.stringify(currentStreamIds) !== JSON.stringify(newStreamIds)) {
-                    // 完全重新渲染表格
-                    renderFullTable(tbody, groupedStreams);
-                }
+                // 完全重新渲染表格
+                renderFullTable(tbody, groupedStreams);
             } catch (error) {
                 console.error('Error loading streams:', error);
             }
@@ -1454,7 +1424,7 @@
                 }
             } catch (error) {
                 console.error('Change password error:', error);
-                alert('修改密码失败，请��查网络连接');
+                alert('修改密码失败，请检查网络连接');
             }
         }
 

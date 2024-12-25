@@ -124,13 +124,26 @@ class StreamManager extends EventEmitter {
     loadStreams() {
         try {
             if (fs.existsSync(this.configPath)) {
+                logger.debug(`Loading streams from: ${this.configPath}`);
                 const data = fs.readFileSync(this.configPath, 'utf8');
+                
+                // 添加数据内容日志
+                logger.debug(`Raw config data: ${data}`);
+                
                 if (!data.trim()) {
                     logger.warn('Streams config file is empty');
                     return;
                 }
+                
                 const configs = JSON.parse(data);
+                logger.debug(`Parsed configs: ${JSON.stringify(configs)}`);
+                
+                // 清空现有的流
+                this.streams.clear();
+                this.streamStats.clear();
+                
                 for (const [id, config] of Object.entries(configs)) {
+                    logger.debug(`Loading stream: ${id}`);
                     this.streams.set(id, {
                         ...config,
                         stats: {
@@ -149,7 +162,18 @@ class StreamManager extends EventEmitter {
                 }
                 logger.info(`Loaded ${this.streams.size} streams from config`);
             } else {
-                logger.warn('Streams config file not found');
+                logger.warn(`Streams config file not found at: ${this.configPath}`);
+                // 如果配置文件不存在，创建一个空的配置文件
+                try {
+                    const configDir = path.dirname(this.configPath);
+                    if (!fs.existsSync(configDir)) {
+                        fs.mkdirSync(configDir, { recursive: true });
+                    }
+                    fs.writeFileSync(this.configPath, '{}');
+                    logger.info('Created new empty streams config file');
+                } catch (e) {
+                    logger.error('Error creating empty config file:', e);
+                }
             }
         } catch (error) {
             logger.error('Error loading streams config:', error);
