@@ -295,4 +295,20 @@ textarea {
 
 .me-3 {
     margin-right: 1rem !important;
+}
+
+.auto-start-status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    color: white;
+    font-size: 12px;
+}
+
+.auto-start-status.active {
+    background-color: #28a745;
+}
+
+.auto-start-column {
+    width: 80px;
 } 

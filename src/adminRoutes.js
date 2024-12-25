@@ -561,4 +561,36 @@ router.get('/api/servers', verifyToken, (req, res) => {
     }
 });
 
+// 获取自启动状态
+router.get('/api/streams/:id/autostart', (req, res) => {
+    const { id } = req.params;
+    const isAutoStart = streamManager.isAutoStart(id);
+    res.json({ autoStart: isAutoStart });
+});
+
+// 批量设置自启动状态
+router.post('/api/streams/autostart', async (req, res) => {
+    try {
+        const { streamIds, autoStart } = req.body;
+        if (!Array.isArray(streamIds)) {
+            return res.status(400).json({
+                success: false,
+                error: '无效的流ID列表'
+            });
+        }
+
+        const updated = await streamManager.setAutoStart(streamIds, autoStart);
+        res.json({
+            success: true,
+            message: `已${autoStart ? '启用' : '禁用'}${streamIds.length}个流的自启动`
+        });
+    } catch (error) {
+        logger.error('Error setting auto-start:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 module.exports = router; 

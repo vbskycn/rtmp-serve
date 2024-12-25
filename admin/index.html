@@ -185,6 +185,12 @@
                         <button onclick="exportSourceUrls()" class="btn btn-light btn-sm">
                             <i class="fa fa-download"></i> 导出源地址
                         </button>
+                        <button onclick="batchSetAutoStart(true)" class="btn btn-success btn-sm" id="batchAutoStartBtn" disabled>
+                            <i class="fa fa-power-off"></i> 批量开启自启动
+                        </button>
+                        <button onclick="batchSetAutoStart(false)" class="btn btn-secondary btn-sm" id="batchAutoStartDisableBtn" disabled>
+                            <i class="fa fa-power-off"></i> 批量关闭自启动
+                        </button>
                     </div>
                 </div>
                 <div class="card-body">
@@ -200,6 +206,7 @@
                                     <th class="rtmp-status-column">推流状态</th>
                                     <th class="source-column">源地址</th>
                                     <th class="play-column">播放地址</th>
+                                    <th class="auto-start-column">自启动</th>
                                     <th class="action-column">操作</th>
                                 </tr>
                             </thead>
@@ -280,7 +287,7 @@
                     });
                 }
 
-                // 只有在流的数量或顺序发���变化时才完全重新渲染
+                // 只有在流的数量或顺序发生变化时才完全重新渲染
                 const currentStreamIds = Array.from(tbody.querySelectorAll('tr[data-stream-id]'))
                     .map(row => row.dataset.streamId);
                 const newStreamIds = streams.map(stream => stream.id);
@@ -436,6 +443,12 @@
                                         ` : ''}
                                     </div>
                                 </div>
+                            </td>
+                            <td>
+                                <span class="auto-start-status ${streamManager.isAutoStart(stream.id) ? 'active' : ''}"
+                                      style="background-color: ${streamManager.isAutoStart(stream.id) ? '#28a745' : '#6c757d'}">
+                                    ${streamManager.isAutoStart(stream.id) ? '已启用' : '未启用'}
+                                </span>
                             </td>
                             <td class="stream-actions">
                                 <div class="btn-group btn-group-sm">
@@ -751,6 +764,8 @@
             document.getElementById('batchRestartBtn').disabled = selectedCount === 0;
             document.getElementById('batchStopBtn').disabled = selectedCount === 0;
             document.getElementById('batchDeleteBtn').disabled = selectedCount === 0;
+            document.getElementById('batchAutoStartBtn').disabled = selectedCount === 0;
+            document.getElementById('batchAutoStartDisableBtn').disabled = selectedCount === 0;
         }
 
         // 获取选中的流
@@ -1439,7 +1454,7 @@
                 }
             } catch (error) {
                 console.error('Change password error:', error);
-                alert('修改密码失败，请检查网络连接');
+                alert('修改密码失败，请��查网络连接');
             }
         }
 
@@ -1450,6 +1465,38 @@
                 window.location.href = '/login.html';  // 修改这里的重定向路径
             } catch (error) {
                 console.error('Logout error:', error);
+            }
+        }
+
+        // 批量设置自启动状态
+        async function batchSetAutoStart(enable) {
+            const selectedStreams = getSelectedStreams();
+            if (!selectedStreams.length) return;
+            
+            if (!confirm(`确定要${enable ? '启用' : '禁用'}选中的 ${selectedStreams.length} 个流的自启动吗？`)) return;
+
+            try {
+                const response = await fetch('/api/streams/autostart', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        streamIds: selectedStreams,
+                        autoStart: enable
+                    })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    alert(result.message);
+                    loadStreams();  // 刷新列表
+                } else {
+                    alert('设置失败: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error setting auto-start:', error);
+                alert('设置失败，请检查网络连接');
             }
         }
     </script>

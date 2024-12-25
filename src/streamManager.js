@@ -109,6 +109,15 @@ class StreamManager extends EventEmitter {
         logger.info('Environment version:', process.env.APP_VERSION);
         logger.info('Config file version:', require('../config/config.json').version);
         logger.info('Final config version:', this.config.version);
+
+        // 添加自启动流的集合
+        this.autoStartStreams = new Set();
+        
+        // 从配置文件加载自启动流列表
+        this.loadAutoStartStreams();
+        
+        // 启动时自动启动已配置的流
+        this.startAutoStartStreams();
     }
 
     // 加载保存的流配置
@@ -1257,6 +1266,79 @@ class StreamManager extends EventEmitter {
             logger.error('Error getting server IP:', error);
             return 'unknown';
         }
+    }
+
+    // 添加加载自启动流配置的方法
+    loadAutoStartStreams() {
+        try {
+            const autoStartPath = path.join(__dirname, '../config/autostart.json');
+            if (fs.existsSync(autoStartPath)) {
+                const data = fs.readFileSync(autoStartPath, 'utf8');
+                const autoStartList = JSON.parse(data);
+                this.autoStartStreams = new Set(autoStartList);
+                logger.info(`Loaded ${this.autoStartStreams.size} auto-start streams`);
+            }
+        } catch (error) {
+            logger.error('Error loading auto-start streams:', error);
+            this.autoStartStreams = new Set();
+        }
+    }
+
+    // 添加保存自启动流配置的方法
+    async saveAutoStartStreams() {
+        try {
+            const autoStartPath = path.join(__dirname, '../config/autostart.json');
+            const autoStartList = Array.from(this.autoStartStreams);
+            await fs.promises.writeFile(autoStartPath, JSON.stringify(autoStartList, null, 2));
+            logger.info(`Saved ${autoStartList.length} auto-start streams`);
+            return true;
+        } catch (error) {
+            logger.error('Error saving auto-start streams:', error);
+            return false;
+        }
+    }
+
+    // 添加启动自启动流的方法
+    async startAutoStartStreams() {
+        logger.info(`Starting ${this.autoStartStreams.size} auto-start streams...`);
+        for (const streamId of this.autoStartStreams) {
+            try {
+                if (this.streams.has(streamId)) {
+                    await this.startStreaming(streamId, true);
+                    logger.info(`Auto-started stream: ${streamId}`);
+                } else {
+                    logger.warn(`Auto-start stream not found: ${streamId}`);
+                    this.autoStartStreams.delete(streamId);
+                }
+            } catch (error) {
+                logger.error(`Error auto-starting stream: ${streamId}`, error);
+            }
+        }
+        await this.saveAutoStartStreams();
+    }
+
+    // 添加设置自启动状态的方法
+    async setAutoStart(streamIds, autoStart) {
+        let updated = false;
+        for (const streamId of streamIds) {
+            if (this.streams.has(streamId)) {
+                if (autoStart) {
+                    this.autoStartStreams.add(streamId);
+                } else {
+                    this.autoStartStreams.delete(streamId);
+                }
+                updated = true;
+            }
+        }
+        if (updated) {
+            await this.saveAutoStartStreams();
+        }
+        return updated;
+    }
+
+    // 添加获取自启动状态的方法
+    isAutoStart(streamId) {
+        return this.autoStartStreams.has(streamId);
     }
 }
 
