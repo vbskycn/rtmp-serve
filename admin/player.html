@@ -375,7 +375,7 @@
         }
 
         // 修改切换流的函数
-        async function switchStream(newStreamId) {
+        async function switchStream(newStreamId, playUrl) {
             try {
                 // 显示加载动画
                 document.querySelector('.loading-overlay').style.display = 'flex';
@@ -410,22 +410,16 @@
                 // 等待一小段时间确保清理完成
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 
-                // 重新初始化播放器
-                await initPlayer();
+                // 使用传入的播放地址初始化播放器
+                await initPlayer(playUrl);
 
-                // 强制开始播放
-                if (dp) {
-                    dp.play();
-                    // 添加播放检查
-                    setTimeout(() => {
-                        if (dp && dp.video.paused) {
-                            dp.play().catch(error => {
-                                console.warn('Autoplay failed on retry:', error);
-                            });
-                        }
-                    }, 1500);
+                // 更新页面标题
+                const streamItem = document.querySelector(`.stream-item[data-stream-id="${streamId}"]`);
+                if (streamItem) {
+                    document.title = streamItem.textContent.trim();
+                    document.querySelector('.stream-title').textContent = streamItem.textContent.trim();
                 }
-                
+
             } catch (error) {
                 console.error('Error switching stream:', error);
                 document.querySelector('.loading-overlay').style.display = 'none';
@@ -474,21 +468,44 @@
 
         async function loadPlaylist() {
             try {
-                const response = await fetch('/api/streams');
-                const streams = await response.json();
+                // 获取服务器配置
+                const configResponse = await fetch('/api/config');
+                const config = await configResponse.json();
                 
+                // 获取所有流
+                const response = await fetch('/api/streams');
+                const allStreams = await response.json();
+                
+                // 只过滤出正在推流的流
+                const activeStreams = allStreams.filter(stream => stream.processRunning);
+                
+                // 按分类组织
                 const categories = {};
-                streams.forEach(stream => {
+                activeStreams.forEach(stream => {
                     const category = stream.category || '未分类';
                     if (!categories[category]) {
                         categories[category] = [];
                     }
+                    // 添加播放地址
+                    stream.playUrl = `${config.rtmp.pullServer}${stream.id}.flv`;
                     categories[category].push(stream);
                 });
 
                 const playlistContainer = document.getElementById('playlist');
                 playlistContainer.innerHTML = '';
 
+                // 如果没有正在推流的流，显示提示
+                if (activeStreams.length === 0) {
+                    playlistContainer.innerHTML = `
+                        <div class="p-3 text-center text-muted">
+                            <i class="fa fa-info-circle fa-2x mb-2"></i>
+                            <p>当前没有正在推流的频道</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                // 渲染分类和流列表
                 for (const [category, streams] of Object.entries(categories)) {
                     const categoryDiv = document.createElement('div');
                     categoryDiv.className = 'category';
@@ -497,7 +514,7 @@
                     categoryTitle.className = 'category-title';
                     categoryTitle.innerHTML = `
                         <span><i class="fa fa-folder"></i> ${category}</span>
-                        <span class="badge bg-secondary">${streams.length}</span>
+                        <span class="badge bg-success">${streams.length}</span>
                     `;
                     categoryTitle.onclick = () => toggleCategory(categoryTitle);
 
@@ -508,14 +525,17 @@
                         const streamItem = document.createElement('div');
                         streamItem.className = 'stream-item';
                         streamItem.dataset.streamId = stream.id;
+                        streamItem.dataset.playUrl = stream.playUrl;  // 保存播放地址
+                        
                         if (stream.id === streamId) {
                             streamItem.classList.add('active');
                             streamList.classList.add('active');
                         }
+                        
                         streamItem.innerHTML = `
                             <i class="fa fa-play-circle-o"></i> ${stream.name}
                         `;
-                        streamItem.onclick = () => switchStream(stream.id);
+                        streamItem.onclick = () => switchStream(stream.id, stream.playUrl);
                         streamList.appendChild(streamItem);
                     });
 
@@ -523,8 +543,30 @@
                     categoryDiv.appendChild(streamList);
                     playlistContainer.appendChild(categoryDiv);
                 }
+
+                // 自动展开当前流所在的分类
+                const activeItem = playlistContainer.querySelector('.stream-item.active');
+                if (activeItem) {
+                    const parentList = activeItem.closest('.stream-list');
+                    if (parentList) {
+                        parentList.classList.add('active');
+                        const categoryTitle = parentList.previousElementSibling;
+                        if (categoryTitle) {
+                            const icon = categoryTitle.querySelector('.fa');
+                            icon.classList.remove('fa-folder');
+                            icon.classList.add('fa-folder-open');
+                        }
+                    }
+                }
             } catch (error) {
                 console.error('Error loading playlist:', error);
+                // 显示错误提示
+                document.getElementById('playlist').innerHTML = `
+                    <div class="p-3 text-center text-danger">
+                        <i class="fa fa-exclamation-circle fa-2x mb-2"></i>
+                        <p>加载播放列表失败</p>
+                    </div>
+                `;
             }
         }
 
@@ -574,6 +616,9 @@
                 console.error('Error loading stream:', error);
             }
         }
+
+        // 修改定时刷新逻辑，每30秒更新一次播放列表
+        setInterval(loadPlaylist, 30000);
     </script>
 </body>
 </html> 

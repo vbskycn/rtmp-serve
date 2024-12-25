@@ -499,16 +499,16 @@ class StreamManager extends EventEmitter {
             // 检查重试次数
             const attempts = this.retryAttempts.get(streamId) || 0;
             if (attempts >= this.MAX_RETRIES) {
-                logger.error(`Stream ${streamId} marked as invalid after ${attempts} retries`);
+                logger.error(`Stream ${streamId} failed after ${attempts} retries`);
                 this.retryAttempts.delete(streamId);
-                this.streamStatus.set(streamId, 'invalid');
+                this.streamStatus.set(streamId, 'error');  // 改为 'error' 而不是 'invalid'
                 throw new Error(`Stream failed after ${attempts} retries`);
             }
 
             // 更新重试计数
             this.retryAttempts.set(streamId, attempts + 1);
 
-            // 设置 FFmpeg 参数 - 只做 RTMP 推流
+            // 设置 FFmpeg 参数
             const args = [
                 '-i', streamConfig.url,
                 '-c:v', 'copy',
@@ -522,6 +522,7 @@ class StreamManager extends EventEmitter {
                     const ffmpeg = spawn('ffmpeg', args);
                     let streamStarted = false;
                     let errorMessages = [];
+                    let isRealError = false;
 
                     ffmpeg.stderr.on('data', (data) => {
                         const message = data.toString();
@@ -537,24 +538,34 @@ class StreamManager extends EventEmitter {
                                     streamStarted: true
                                 });
                                 this.streamStatus.set(streamId, 'running');
+                                // 重置重试计数
+                                this.retryAttempts.set(streamId, 0);
                             }
                         }
                         
-                        // 检测错误
-                        if (message.includes('Error') || 
-                            message.includes('Invalid')) {
-                            logger.error(`FFmpeg stderr: ${message}`);
-                            errorMessages.push(message);
-                            
-                            // 对于严重错误，立即停止
-                            if (message.includes('Server error') || 
+                        // 检测错误，但忽略一些非致命错误
+                        if (message.includes('Error') || message.includes('Invalid')) {
+                            // 记录所有错误消息用于调试
+                            logger.debug(`FFmpeg message for ${streamId}: ${message}`);
+
+                            // 判断是否是致命错误
+                            const isFatalError = 
                                 message.includes('Invalid data found') ||
-                                message.includes('Operation not permitted') ||
-                                message.includes('Connection reset by peer')) {
-                                this.cleanupStream(streamId);
-                                ffmpeg.kill('SIGTERM');
-                                reject(new Error(errorMessages.join('\n')));
-                                return;
+                                message.includes('Error opening input') ||
+                                message.includes('Unable to open resource') ||
+                                message.includes('Connection refused') ||
+                                message.includes('No such file or directory');
+
+                            if (isFatalError) {
+                                isRealError = true;
+                                logger.error(`Fatal error for stream ${streamId}: ${message}`);
+                                errorMessages.push(message);
+                            } else if (message.includes('Broken pipe')) {
+                                // 对于 Broken pipe 错误，如果流已经开始，就不认为是错误
+                                if (!streamStarted) {
+                                    isRealError = true;
+                                    errorMessages.push(message);
+                                }
                             }
                         }
                     });
@@ -564,10 +575,24 @@ class StreamManager extends EventEmitter {
                             // 非正常退出且不是手动停止
                             logger.error(`Stream ${streamId} exited with code ${code}`);
                             this.cleanupStream(streamId);
+                            
+                            // 只有在遇到真正的错误时才重试
+                            if (isRealError && this.autoStartStreams.has(streamId)) {
+                                setTimeout(() => {
+                                    this.startStreaming(streamId, true)
+                                        .catch(err => logger.error(`Error restarting stream ${streamId}:`, err));
+                                }, this.RETRY_DELAY);
+                            }
+                            
                             reject(new Error(`FFmpeg exited with code ${code}: ${errorMessages.join('\n')}`));
                         } else if (signal === 'SIGTERM') {
                             // 手动停止
                             logger.info(`Stream ${streamId} manually stopped`);
+                            this.cleanupStream(streamId);
+                            resolve({ success: true });
+                        } else {
+                            // 正常退出
+                            logger.info(`Stream ${streamId} completed normally`);
                             this.cleanupStream(streamId);
                             resolve({ success: true });
                         }
@@ -615,13 +640,16 @@ class StreamManager extends EventEmitter {
         this.streamProcesses.delete(streamId);
         this.manuallyStartedStreams.delete(streamId);
         this.streamStatus.set(streamId, 'stopped');
-        // 如果是自动启动的流，从列表中移除
+        
+        // 移除这部分代码，不再自动删除自动启动状态
+        /*
         if (this.autoStartStreams.has(streamId)) {
             this.autoStartStreams.delete(streamId);
             this.saveAutoConfig().catch(err => {
                 logger.error(`Error saving auto config after cleanup: ${err}`);
             });
         }
+        */
     }
 
     // 添加停止流的方法

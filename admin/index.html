@@ -455,12 +455,17 @@
                                 style="background-color: #ffc107; color: #000; font-weight: bold;">
                             <i class="fa fa-moon-o"></i> 批量自启关
                         </button>
-                        <button onclick="exportRtmpM3U()" class="btn btn-light btn-sm">
-                            <i class="fa fa-download"></i> 导出远程推流M3U
-                        </button>
-                        <button onclick="exportRtmpTXT()" class="btn btn-light btn-sm">
-                            <i class="fa fa-download"></i> 导出远程推流TXT
-                        </button>
+                        <div class="btn-group">
+                            <button onclick="exportRtmpM3U()" class="btn btn-light btn-sm">
+                                <i class="fa fa-download"></i> 导出远程推流M3U
+                            </button>
+                            <button onclick="exportRtmpTXT()" class="btn btn-light btn-sm">
+                                <i class="fa fa-download"></i> 导出远程推流TXT
+                            </button>
+                            <button onclick="exportSourceTXT()" class="btn btn-light btn-sm">
+                                <i class="fa fa-download"></i> 导出源地址TXT
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <div class="card-body">
@@ -2600,6 +2605,123 @@
 
             // 刷新流列表
             loadStreams();
+        }
+
+        // 添加导出函数
+        function exportRtmpM3U() {
+            fetch('/api/streams')
+                .then(response => response.json())
+                .then(streams => {
+                    let m3uContent = '#EXTM3U\n';
+                    streams.forEach(stream => {
+                        if (stream.processRunning) {  // 只导出正在推流的频道
+                            const playUrl = `${serverConfig.rtmp.pullServer}${stream.id}.flv`;
+                            m3uContent += `#EXTINF:-1,${stream.name}\n${playUrl}\n`;
+                        }
+                    });
+                    
+                    // 创建并下载文件
+                    const blob = new Blob([m3uContent], { type: 'text/plain;charset=utf-8' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'playlist.m3u';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                })
+                .catch(error => {
+                    console.error('Error exporting M3U:', error);
+                    alert('导出M3U失败');
+                });
+        }
+
+        function exportRtmpTXT() {
+            fetch('/api/streams')
+                .then(response => response.json())
+                .then(streams => {
+                    let txtContent = '';
+                    // 按分类组织流
+                    const categories = {};
+                    
+                    streams.forEach(stream => {
+                        if (stream.processRunning) {  // 只导出正在推流的频道
+                            const category = stream.category || '未分类';
+                            if (!categories[category]) {
+                                categories[category] = [];
+                            }
+                            const playUrl = `${serverConfig.rtmp.pullServer}${stream.id}.flv`;
+                            categories[category].push(`${stream.name},${playUrl}`);
+                        }
+                    });
+                    
+                    // 生成TXT内容
+                    Object.entries(categories).forEach(([category, items]) => {
+                        txtContent += `${category},#genre#\n`;
+                        items.forEach(item => {
+                            txtContent += `${item}\n`;
+                        });
+                        txtContent += '\n';
+                    });
+                    
+                    // 创建并下载文件
+                    const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'playlist.txt';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                })
+                .catch(error => {
+                    console.error('Error exporting TXT:', error);
+                    alert('导出TXT失败');
+                });
+        }
+
+        function exportSourceTXT() {
+            fetch('/api/streams')
+                .then(response => response.json())
+                .then(streams => {
+                    let txtContent = '';
+                    // 按分类组织流
+                    const categories = {};
+                    
+                    streams.forEach(stream => {
+                        const category = stream.category || '未分类';
+                        if (!categories[category]) {
+                            categories[category] = [];
+                        }
+                        categories[category].push(`${stream.name},${stream.url}`);
+                    });
+                    
+                    // 生成TXT内容
+                    Object.entries(categories).forEach(([category, items]) => {
+                        txtContent += `${category},#genre#\n`;
+                        items.forEach(item => {
+                            txtContent += `${item}\n`;
+                        });
+                        txtContent += '\n';
+                    });
+                    
+                    // 创建并下载文件
+                    const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'source_playlist.txt';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                })
+                .catch(error => {
+                    console.error('Error exporting source TXT:', error);
+                    alert('导出源地址TXT失败');
+                });
         }
     </script>
 
