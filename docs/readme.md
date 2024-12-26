@@ -73,18 +73,22 @@ docker run -d \
   
   
 # 自己158部署
+# 停止并移除已有的容器
 docker stop rtmp-serve
 docker rm rtmp-serve
+# 拉取最新的镜像
 docker pull zhoujie218/rtmp-serve:latest
+# 启动新的容器
 docker run -d \
   --name rtmp-serve \
   --restart unless-stopped \
   -p 3000:3000 \
   -v $(pwd)/streams:/app/streams \
-  -v $(pwd)/logs:/app/logs \  
+  -v $(pwd)/logs:/app/logs \
   -e NODE_ENV=production \
   -e TZ=Asia/Shanghai \
-  zhoujie218/rtmp-serve:latest  
+  zhoujie218/rtmp-serve:latest
+
   
 ```
 
