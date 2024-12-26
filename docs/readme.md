@@ -137,7 +137,9 @@ docker exec -it rtmp-serve sh
 ## 访问地址
 
 - 管理界面: `http://your-ip:3000/admin`
+
 - 监控页面: `http://your-ip:3000/monitor.html`
+
 - 统计页面
 
   ```
@@ -145,6 +147,124 @@ docker exec -it rtmp-serve sh
   ```
 
   
+
+## PM2 来管理你的项目。
+
+### 1. 首先安装 
+
+```
+PM2npm install -g pm2
+```
+
+### 2. 启动项目
+
+有几种方式可以启动你的项目：
+
+基本启动方式
+
+```
+pm2 start src/server.js --name "stream-server"
+```
+
+*# 或者使用更详细的配置启动*
+
+```
+pm2 start src/server.js --name "stream-server" --log ./logs/app.log --time
+```
+
+### 3. 常用的 PM2 命令
+
+查看所有运行的进程
+
+```
+pm2 list
+```
+
+### 停止特定的进程
+
+``` 
+pm2 stop stream-server
+```
+
+### 使用名称停止
+
+``` 
+pm2 stop 0
+```
+
+### 使用 id 停止**# 重启进程
+
+```
+pm2 restart stream-server
+```
+
+### 删除进程
+
+```
+pm2 delete stream-server
+```
+
+### *查看日志*
+
+```
+pm2 logs stream-server
+```
+
+### 查看进程详细信息
+
+```
+pm2 show stream-server
+```
+
+### 停止所有进程
+
+```
+pm2 stop all
+```
+
+### 删除所有进程
+
+```
+pm2 delete all
+```
+
+### 4. 创建 PM2 配置文件
+
+为了更好地管理你的应用，建议创建一个 PM2 配置文件。创建 ecosystem.config.js：
+
+ecosystem.config.js
+
+1/1
+
+然后你可以使用配置文件启动：
+
+pm2 start ecosystem.config.js
+
+### 5. 设置开机自启*# 生成开机自启动脚本*pm2 startup*# 保存当前运行的进程列表，以便开机自启*pm2 save
+
+### 6. 监控*# 打开实时监控界面*pm2 monit*# 查看性能指标*pm2 plus  *# 需要注册 PM2 Plus 账户*
+
+### 注意事项：
+
+确保你的项目中的路径都使用绝对路径，避免 PM2 启动时出现路径问题
+
+建议在 ecosystem.config.js 中配置日志文件路径，方便后续查看
+
+如果你的应用需要特定的环境变量，可以在 ecosystem.config.js 的 env 中配置
+
+使用 pm2 logs 命令可以实时查看应用日志，对调试很有帮助
+
+如果你遇到任何问题，可以查看错误日志：
+
+pm2 logs stream-server --err
+
+或者查看详细状态：
+
+pm2 show stream-server
+
+
+
+
 
 ## 注意事项
 
