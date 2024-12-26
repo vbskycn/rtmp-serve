@@ -161,18 +161,23 @@ function getLocalIP() {
 // 在服务器启动前检查和更新配置
 async function initializeServer() {
     try {
-        if (config.server.host === 'auto') {
-            config.server.host = getLocalIP();
-            // 保存更新后的配置
-            fs.writeFileSync(
-                path.join(__dirname, '../config/config.json'),
-                JSON.stringify(config, null, 2)
-            );
-        }
+        // 获取环境变量或使用默认值
+        const serverHost = process.env.SERVER_HOST || getLocalIP();
+        const serverPort = parseInt(process.env.SERVER_PORT) || config.server.port;
+
+        // 更新配置
+        config.server.host = serverHost;
+        config.server.port = serverPort;
+
+        // 保存更新后的配置
+        fs.writeFileSync(
+            path.join(__dirname, '../config/config.json'),
+            JSON.stringify(config, null, 2)
+        );
         
         // 启动服务器
-        app.listen(port, () => {
-            logger.info(`Server running on ${config.server.host}:${port}`);
+        app.listen(serverPort, serverHost, () => {
+            logger.info(`Server running on http://${serverHost}:${serverPort}`);
         });
     } catch (error) {
         logger.error('Error initializing server:', error);
@@ -246,28 +251,4 @@ process.on('SIGINT', async () => {
         await streamManager.stopStreaming(streamId);
     }
     process.exit(0);
-});
-
-function getServerIP() {
-    const interfaces = os.networkInterfaces();
-    for (const name of Object.keys(interfaces)) {
-        for (const interface of interfaces[name]) {
-            // 跳过内部 IP
-            if (interface.internal) continue;
-            // 获取 IPv4 地址
-            if (interface.family === 'IPv4') {
-                return interface.address;
-            }
-        }
-    }
-    return '0.0.0.0';
-}
-
-// 获取配置
-const serverHost = process.env.SERVER_HOST || getServerIP();
-const serverPort = process.env.SERVER_PORT || config.server.port;
-
-// 启动服务器时使用这些值
-app.listen(serverPort, serverHost, () => {
-    console.log(`服务器运行在 http://${serverHost}:${serverPort}`);
 }); 
