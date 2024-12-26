@@ -1,6 +1,6 @@
 {
-  "name": "stream-proxy",
-  "version": "1.0.0",
+  "name": "rtmp-proxy",
+  "version": "1.7.10",
   "description": "Stream proxy server",
   "main": "src/server.js",
   "scripts": {

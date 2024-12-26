@@ -1,6 +1,6 @@
 module.exports = {
   apps: [{
-    name: "stream-server",
+    name: "rtmp-server",
     script: "./src/server.js",
     cwd: __dirname,
     env: {
