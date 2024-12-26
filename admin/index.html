@@ -642,17 +642,25 @@
         }
 
         // 添加更新统计信息的函数
-        function updateStats() {
-            fetch('/api/stats')
-                .then(response => response.json())
-                .then(stats => {
-                    document.getElementById('systemUptime').textContent = stats.uptime;
-                    document.getElementById('trafficReceived').textContent = stats.traffic.received;
-                    document.getElementById('trafficSent').textContent = stats.traffic.sent;
-                    document.getElementById('totalStreams').textContent = stats.totalStreams;
-                    document.getElementById('activeStreams').textContent = stats.activeStreams;
-                })
-                .catch(error => console.error('Error updating stats:', error));
+        async function updateStats() {
+            try {
+                const response = await fetch('/api/stats');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const stats = await response.json();
+                
+                // 只更新除了流数量之外的统计信息
+                document.getElementById('systemUptime').textContent = stats.uptime;
+                document.getElementById('trafficReceived').textContent = stats.traffic.received;
+                document.getElementById('trafficSent').textContent = stats.traffic.sent;
+                
+                // 不再更新这两个值，让它们由 loadStreams 函数专门处理
+                // document.getElementById('totalStreams').textContent = stats.totalStreams;
+                // document.getElementById('activeStreams').textContent = stats.activeStreams;
+            } catch (error) {
+                console.error('Error updating stats:', error);
+            }
         }
 
         // 修改初始化函数
@@ -664,11 +672,11 @@
             // 立即更新一次统计
             updateStats();
             
-            // 每秒更新统计信息
+            // 每秒更新基本统计信息（不包括流数量）
             setInterval(updateStats, 1000);
             
-            // 每10秒更新流列表
-            setInterval(loadStreams, 10000);
+            // 每5秒更新一次流列表和流数量统计
+            setInterval(loadStreams, 5000);
         }
 
         // 启动始化
