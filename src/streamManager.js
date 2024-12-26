@@ -73,20 +73,22 @@ class StreamManager extends EventEmitter {
         // 修改流量统计初始化
         this.startTime = Date.now();
         this.totalTraffic = {
-            sent: 0n,
-            received: 0n
+            received: 0n,
+            sent: 0n
         };
         
         // 每秒更新流量统计
         setInterval(() => {
             this.updateTrafficStats();
-            this.emit('statsUpdated', this.getStats());
         }, 1000);
         
-        // 每10秒存统计数据
+        // 每分钟保存统计数据
         setInterval(() => {
             this.saveStats();
-        }, 10000);
+        }, 60000);
+        
+        // 加载保存的统计数据
+        this.loadStats();
         
         // 直接配置心跳
         this.heartbeatConfig = {
@@ -1142,69 +1144,118 @@ class StreamManager extends EventEmitter {
 
     // 修改更新流量统计的方法
     updateTrafficStats() {
-        const activeStreams = this.streamProcesses.size;
-        if (activeStreams > 0) {
-            // 每个活跃流每秒接收约2MB数据
-            this.totalTraffic.received += BigInt(2 * 1024 * 1024 * activeStreams);
-            
-            // 计算所有流的观看者总数
-            let totalViewers = 0;
-            for (const [streamId] of this.streamProcesses) {
-                totalViewers += this.activeViewers.get(streamId) || 0;
-            }
-            
-            // 每个观看者每秒发送约1MB数据
-            this.totalTraffic.sent += BigInt(1024 * 1024 * (totalViewers + activeStreams));
-        }
-    }
-
-    // 修改获取流量统计的方法
-    getTrafficStats() {
         try {
-            // 确保将 BigInt 转换为 Number
-            const received = Number(this.totalTraffic.received || 0);
-            const sent = Number(this.totalTraffic.sent || 0);
-            
-            return {
-                received: this.formatBytes(received),
-                sent: this.formatBytes(sent)
-            };
+            const activeStreams = Array.from(this.streamProcesses.keys());
+            if (activeStreams.length === 0) return;
+
+            for (const streamId of activeStreams) {
+                const streamPath = path.join(__dirname, '../streams', streamId);
+                if (!fs.existsSync(streamPath)) continue;
+
+                // 计算目录大小
+                const files = fs.readdirSync(streamPath);
+                let totalSize = 0;
+                for (const file of files) {
+                    if (file.endsWith('.ts')) {
+                        const filePath = path.join(streamPath, file);
+                        const stats = fs.statSync(filePath);
+                        totalSize += stats.size;
+                    }
+                }
+
+                // 更新接收流量（假设源数据比实际输出大约2倍）
+                this.totalTraffic.received += BigInt(totalSize * 2);
+
+                // 计算发送流量（基于观看者数量）
+                const viewers = this.activeViewers.get(streamId) || 0;
+                if (viewers > 0) {
+                    this.totalTraffic.sent += BigInt(totalSize * viewers);
+                }
+
+                // 更新单个流的统计信息
+                if (!this.trafficStats.has(streamId)) {
+                    this.initTrafficStats(streamId);
+                }
+                const streamStats = this.trafficStats.get(streamId);
+                if (streamStats) {
+                    streamStats.bytesReceived += totalSize * 2;
+                    streamStats.bytesSent += totalSize * viewers;
+                    streamStats.lastUpdate = new Date();
+                }
+            }
+
+            // 触发统计更新事件
+            this.emit('statsUpdated', this.getStats());
+
+            // 定期保存统计数据
+            if (Date.now() - (this._lastStatsSave || 0) > 60000) { // 每分钟保存一次
+                this.saveStats();
+                this._lastStatsSave = Date.now();
+            }
+
         } catch (error) {
-            logger.error('Error getting traffic stats:', error);
-            return {
-                received: '0 B',
-                sent: '0 B'
-            };
+            logger.error('Error updating traffic stats:', error);
         }
     }
 
-    // 改进格式化字节数的方法
-    formatBytes(bytes) {
-        if (!bytes) return '0 B';
+    // 修改初始化流量统计的方法
+    initTrafficStats(streamId) {
+        this.trafficStats.set(streamId, {
+            startTime: new Date(),
+            bytesReceived: 0,
+            bytesSent: 0,
+            lastUpdate: new Date(),
+            segments: new Set() // 用于追踪已统计的分片
+        });
+    }
+
+    // 修改获取统计信息的方法
+    getStats() {
+        const now = Date.now();
+        const uptime = now - this.startTime;
         
-        // 将 BigInt 转换为 Number
-        const bytesNum = Number(bytes);
-        
-        // 如果转换后的数字太大，返回 TB 或更大的单位
-        if (bytesNum > Number.MAX_SAFE_INTEGER) {
-            return '> 8192 TB';
+        // 计算活跃流数量
+        const activeStreams = Array.from(this.streamProcesses.keys()).filter(streamId => {
+            const process = this.streamProcesses.get(streamId);
+            return process && process.ffmpeg && !process.ffmpeg.killed;
+        });
+
+        // 计算总观看人数
+        let totalViewers = 0;
+        for (const viewers of this.activeViewers.values()) {
+            totalViewers += viewers;
         }
-        
-        const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-        const i = Math.floor(Math.log(bytesNum) / Math.log(k));
-        
-        return parseFloat((bytesNum / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+
+        return {
+            uptime: this.formatUptime(uptime),
+            traffic: {
+                received: this.formatBytes(Number(this.totalTraffic.received)),
+                sent: this.formatBytes(Number(this.totalTraffic.sent))
+            },
+            totalStreams: this.streams.size,
+            activeStreams: activeStreams.length,
+            totalViewers: totalViewers,
+            lastUpdate: new Date().toISOString()
+        };
     }
 
     // 修改保存统计数据的方法
     async saveStats() {
         try {
             const statsPath = path.join(__dirname, '../config/stats.json');
-            const stats = {};
-            
+            const stats = {
+                startTime: this.startTime,
+                lastUpdate: new Date().toISOString(),
+                totalTraffic: {
+                    received: String(this.totalTraffic.received),
+                    sent: String(this.totalTraffic.sent)
+                },
+                streams: {}
+            };
+
+            // 保存每个流的统计信息
             for (const [streamId, streamStats] of this.trafficStats) {
-                stats[streamId] = {
+                stats.streams[streamId] = {
                     startTime: streamStats.startTime,
                     bytesReceived: streamStats.bytesReceived,
                     bytesSent: streamStats.bytesSent,
@@ -1227,33 +1278,35 @@ class StreamManager extends EventEmitter {
                 const data = await fs.promises.readFile(statsPath, 'utf8');
                 if (data.trim()) {
                     const stats = JSON.parse(data);
-                    // 只加载流量数据，不加载启动时间
-                    this.totalTraffic.sent = BigInt(stats.traffic?.sent || '0');
-                    this.totalTraffic.received = BigInt(stats.traffic?.received || '0');
+                    
+                    // 恢复总流量统计
+                    if (stats.totalTraffic) {
+                        this.totalTraffic.received = BigInt(stats.totalTraffic.received || '0');
+                        this.totalTraffic.sent = BigInt(stats.totalTraffic.sent || '0');
+                    }
+
+                    // 恢复每个流的统计信息
+                    if (stats.streams) {
+                        for (const [streamId, streamStats] of Object.entries(stats.streams)) {
+                            this.trafficStats.set(streamId, {
+                                startTime: new Date(streamStats.startTime),
+                                bytesReceived: streamStats.bytesReceived,
+                                bytesSent: streamStats.bytesSent,
+                                lastUpdate: new Date(streamStats.lastUpdate),
+                                segments: new Set()
+                            });
+                        }
+                    }
+
                     logger.info('Stats loaded successfully');
-                } else {
-                    // 如果文件为空，初始化默认值
-                    this.totalTraffic.sent = 0n;
-                    this.totalTraffic.received = 0n;
-                    // 写入默认统计数据
-                    await this.saveStats();
                 }
-            } else {
-                // 如果文件不存在，创建默认统计数据
-                this.totalTraffic.sent = 0n;
-                this.totalTraffic.received = 0n;
-                await this.saveStats();
             }
         } catch (error) {
             logger.error('Error loading stats:', error);
-            // 如果加载失败，重置流量数据并创建新的统计文件
-            this.totalTraffic.sent = 0n;
+            // 重置统计数据
             this.totalTraffic.received = 0n;
-            try {
-                await this.saveStats();
-            } catch (e) {
-                logger.error('Error creating new stats file:', e);
-            }
+            this.totalTraffic.sent = 0n;
+            this.trafficStats.clear();
         }
     }
 
@@ -1461,7 +1514,8 @@ class StreamManager extends EventEmitter {
             startTime: new Date(),
             bytesReceived: 0,
             bytesSent: 0,
-            lastUpdate: new Date()
+            lastUpdate: new Date(),
+            segments: new Set() // 用于追踪已统计的分片
         });
     }
 
@@ -1546,10 +1600,19 @@ class StreamManager extends EventEmitter {
     async saveStats() {
         try {
             const statsPath = path.join(__dirname, '../config/stats.json');
-            const stats = {};
-            
+            const stats = {
+                startTime: this.startTime,
+                lastUpdate: new Date().toISOString(),
+                totalTraffic: {
+                    received: String(this.totalTraffic.received),
+                    sent: String(this.totalTraffic.sent)
+                },
+                streams: {}
+            };
+
+            // 保存每个流的统计信息
             for (const [streamId, streamStats] of this.trafficStats) {
-                stats[streamId] = {
+                stats.streams[streamId] = {
                     startTime: streamStats.startTime,
                     bytesReceived: streamStats.bytesReceived,
                     bytesSent: streamStats.bytesSent,
@@ -1569,6 +1632,18 @@ class StreamManager extends EventEmitter {
         const now = Date.now();
         const uptime = now - this.startTime;
         
+        // 计算活跃流数量
+        const activeStreams = Array.from(this.streamProcesses.keys()).filter(streamId => {
+            const process = this.streamProcesses.get(streamId);
+            return process && process.ffmpeg && !process.ffmpeg.killed;
+        });
+
+        // 计算总观看人数
+        let totalViewers = 0;
+        for (const viewers of this.activeViewers.values()) {
+            totalViewers += viewers;
+        }
+
         return {
             uptime: this.formatUptime(uptime),
             traffic: {
@@ -1576,7 +1651,9 @@ class StreamManager extends EventEmitter {
                 sent: this.formatBytes(Number(this.totalTraffic.sent))
             },
             totalStreams: this.streams.size,
-            activeStreams: this.streamProcesses.size
+            activeStreams: activeStreams.length,
+            totalViewers: totalViewers,
+            lastUpdate: new Date().toISOString()
         };
     }
 
