@@ -20,7 +20,7 @@ const logger = winston.createLogger({
                 winston.format.simple()
             ),
             // 只输出 warn 以上级别的日志到控制台
-            level: 'warn'
+            level: 'info'
         }),
         // 文件输出
         new winston.transports.File({
