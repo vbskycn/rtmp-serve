@@ -433,18 +433,10 @@ router.get('/api/streams/:streamId', async (req, res) => {
 });
 
 // 修改获取系统统计信息的路由
-router.get('/api/stats', (req, res) => {
+router.get('/api/stats', async (req, res) => {
     try {
-        const trafficStats = streamManager.getTrafficStats();
-        const stats = {
-            uptime: Date.now() - streamManager.startTime, // 使用实际的启动时间
-            totalStreams: streamManager.streams.size,
-            activeStreams: streamManager.streamProcesses.size,
-            traffic: {
-                sent: trafficStats.sent,
-                received: trafficStats.received
-            }
-        };
+        // 使用新的 getStats 方法替代 getTrafficStats
+        const stats = streamManager.getStats();
         res.json(stats);
     } catch (error) {
         logger.error('Error getting system stats:', error);

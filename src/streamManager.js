@@ -1183,11 +1183,8 @@ class StreamManager extends EventEmitter {
                 streamStats.lastUpdate = new Date();
             }
 
-            // 定期保存统计数据
-            if (Date.now() - (this._lastStatsSave || 0) > 60000) { // 每分钟保存一次
-                this.saveStats();
-                this._lastStatsSave = Date.now();
-            }
+            // 触发统计更新事件
+            this.emit('statsUpdated', this.getStats());
 
         } catch (error) {
             logger.error('Error updating traffic stats:', error);
@@ -1196,13 +1193,15 @@ class StreamManager extends EventEmitter {
 
     // 修改初始化流量统计的方法
     initTrafficStats(streamId) {
-        this.trafficStats.set(streamId, {
+        const stats = {
             startTime: new Date(),
             bytesReceived: 0,
             bytesSent: 0,
             lastUpdate: new Date(),
             segments: new Set() // 用于追踪已统计的分片
-        });
+        };
+        this.trafficStats.set(streamId, stats);
+        return stats;
     }
 
     // 修改获取统计信息的方法
