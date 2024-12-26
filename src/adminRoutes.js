@@ -607,4 +607,22 @@ router.post('/api/streams/autostart', async (req, res) => {
     }
 });
 
+// 修改重启服务器的路由
+router.post('/restart', async (req, res) => {
+    try {
+        // 执行 PM2 重启命令
+        const { exec } = require('child_process');
+        exec('pm2 restart rtmp-server', (error, stdout, stderr) => {
+            if (error) {
+                console.error(`执行错误: ${error}`);
+                return res.json({ success: false, error: '重启失败: ' + error.message });
+            }
+            res.json({ success: true, message: '重启命令已发送' });
+        });
+    } catch (error) {
+        console.error('重启服务器失败:', error);
+        res.json({ success: false, error: '重启失败: ' + error.message });
+    }
+});
+
 module.exports = router; 

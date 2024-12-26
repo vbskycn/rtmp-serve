@@ -1,13 +1,13 @@
 module.exports = {
   apps: [{
-    name: "rtmp-server",
-    script: "./src/server.js",
-    cwd: __dirname,
+    name: 'rtmp-server',
+    script: './src/server.js',
+    watch: false,
+    instances: 1,
+    autorestart: true,
+    max_memory_restart: '1G',
     env: {
-      NODE_ENV: "production",
-    },
-    error_file: "./logs/err.log",
-    out_file: "./logs/out.log",
-    time: true
+      NODE_ENV: 'production'
+    }
   }]
 }; 
