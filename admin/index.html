@@ -722,7 +722,7 @@
             }
         }
 
-        // 批量导入处
+        // 修改批量导入处理函数
         document.getElementById('batchImportForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -733,52 +733,141 @@
             let successCount = 0;
             let failCount = 0;
             
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
-                
-                // 检查是否是分类行
-                if (line.endsWith('#genre#')) {
-                    currentCategory = line.split(',')[0].trim();
-                    continue;
-                }
-                
-                // 处理常规流行
-                const [name, url] = line.split(',').map(s => s.trim());
-                
-                if (!name || !url) {
-                    failCount++;
-                    continue;
-                }
+            // 显示进度模态框
+            const progressModal = document.createElement('div');
+            progressModal.className = 'modal fade show';
+            progressModal.style.display = 'block';
+            progressModal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+            progressModal.innerHTML = `
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">批量导入进度</h5>
+                        </div>
+                        <div class="modal-body">
+                            <div class="progress mb-3">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <div id="importProgress">正在导入...</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(progressModal);
+            
+            const progressBar = progressModal.querySelector('.progress-bar');
+            const progressText = progressModal.querySelector('#importProgress');
 
-                try {
-                    const response = await fetch('/api/streams', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            name,
-                            url,
-                            category: currentCategory
-                        })
-                    });
+            try {
+                for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    
+                    // 更新进度
+                    const progress = ((i + 1) / lines.length * 100).toFixed(1);
+                    progressBar.style.width = `${progress}%`;
+                    
+                    // 检查是否是分类行
+                    if (line.endsWith('#genre#')) {
+                        currentCategory = line.split(',')[0].trim();
+                        progressText.textContent = `处理分类: ${currentCategory}`;
+                        continue;
+                    }
+                    
+                    // 处理常规流行
+                    const [name, url] = line.split(',').map(s => s.trim());
+                    
+                    if (!name || !url) {
+                        failCount++;
+                        continue;
+                    }
 
-                    const result = await response.json();
-                    if (result.success) {
-                        successCount++;
-                    } else {
+                    try {
+                        progressText.textContent = `正在导入: ${name}`;
+                        const response = await fetch('/api/streams', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                name,
+                                url,
+                                category: currentCategory
+                            })
+                        });
+
+                        const result = await response.json();
+                        if (result.success) {
+                            successCount++;
+                        } else {
+                            failCount++;
+                        }
+                    } catch (error) {
+                        console.error('Error adding stream:', error);
                         failCount++;
                     }
-                } catch (error) {
-                    console.error('Error adding stream:', error);
-                    failCount++;
                 }
-            }
 
-            alert(`批量导入完成\n成功: ${successCount}\n失败: ${failCount}`);
-            if (successCount > 0) {
-                this.reset();
-                loadStreams();
+                // 移除进度模态框
+                progressModal.remove();
+
+                // 显示导入结果
+                const resultMessage = `批量导入完成\n成功: ${successCount}\n失败: ${failCount}\n\n系统将自动重启以应用更改...`;
+                alert(resultMessage);
+
+                if (successCount > 0) {
+                    this.reset();
+                    
+                    // 触发服务器重启
+                    // 获取当前配置并重新保存以触发重启
+                    const restartModal = document.createElement('div');
+                    restartModal.className = 'modal fade show';
+                    restartModal.style.display = 'block';
+                    restartModal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+                    restartModal.innerHTML = `
+                        <div class="modal-dialog modal-dialog-centered">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title">系统重启</h5>
+                                </div>
+                                <div class="modal-body">
+                                    <p>系统正在重启，请稍候...</p>
+                                    <div class="d-flex justify-content-center">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    document.body.appendChild(restartModal);
+
+                    try {
+                        const configResponse = await fetch('/api/config');
+                        const config = await configResponse.json();
+                        
+                        await fetch('/api/config', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(config)
+                        });
+
+                        // 等待服务器重启完成
+                        setTimeout(() => {
+                            checkServerAndReload();
+                        }, 2000);
+                    } catch (error) {
+                        console.error('重启失败:', error);
+                        alert('重启失败: ' + error.message);
+                        restartModal.remove();
+                    }
+                }
+            } catch (error) {
+                console.error('批量导入失败:', error);
+                progressModal.remove();
+                alert('批量导入失败: ' + error.message);
             }
         });
 
@@ -1557,12 +1646,12 @@
                     <div class="modal-dialog modal-dialog-centered">
                         <div class="modal-content">
                             <div class="modal-header">
-                                <h5 class="modal-title">服务器重启</h5>
+                                <h5 class="modal-title">系统重启</h5>
                             </div>
                             <div class="modal-body">
-                                <p>正在重启服务器，请稍候... <span id="restartCountdown">5</span></p>
+                                <p>系统将在 <span id="restartCountdown">5</span> 秒后重启...</p>
                                 <div class="progress">
-                                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning" 
+                                    <div class="progress-bar progress-bar-striped progress-bar-animated" 
                                          role="progressbar" 
                                          style="width: 100%"></div>
                                 </div>
@@ -1571,15 +1660,6 @@
                     </div>
                 `;
                 document.body.appendChild(modal);
-
-                // 发送重启请求
-                const response = await fetch('/api/restart', {
-                    method: 'POST'
-                });
-
-                if (!response.ok) {
-                    throw new Error('重启请求失败');
-                }
 
                 // 倒计时
                 let countdown = 5;
@@ -1591,17 +1671,38 @@
                         clearInterval(timer);
                         // 显示重连中的提示
                         modal.querySelector('.modal-body').innerHTML = `
-                            <p>服务器正在重启，正在等待重新连接...</p>
+                            <p>系统正在重启，请稍候...</p>
                             <div class="d-flex justify-content-center">
-                                <div class="spinner-border text-warning" role="status">
+                                <div class="spinner-border text-primary" role="status">
                                     <span class="visually-hidden">Loading...</span>
                                 </div>
                             </div>
                         `;
-                        // 等待服务器重启完成
-                        setTimeout(() => {
-                            checkServerAndReload();
-                        }, 2000);
+
+                        // 获取当前配置并重新保存以触发重启
+                        fetch('/api/config')
+                            .then(response => response.json())
+                            .then(config => {
+                                // 重新保存当前配置来触发重启
+                                return fetch('/api/config', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify(config)
+                                });
+                            })
+                            .then(() => {
+                                // 等待服务器重启完成
+                                setTimeout(() => {
+                                    checkServerAndReload();
+                                }, 2000);
+                            })
+                            .catch(error => {
+                                console.error('重启失败:', error);
+                                alert('重启失败: ' + error.message);
+                                modal.remove();
+                            });
                     }
                 }, 1000);
 
