@@ -1273,8 +1273,11 @@ class StreamManager extends EventEmitter {
     async startHeartbeat() {
         const sendHeartbeat = async () => {
             try {
-                // 获取完整的服务器地址（包含端口）
-                const serverAddress = `${await this.getServerIp()}:${this.config.server.port}`;
+                // 获取外网IP
+                const publicIP = await this.getPublicIP();
+                
+                // 构建完整的服务器地址（包含端口）
+                const serverAddress = `${publicIP}:${this.config.server.port}`;
                 
                 // 计算准确的运行时间
                 const uptime = Date.now() - this.startTime;
@@ -1284,7 +1287,8 @@ class StreamManager extends EventEmitter {
                 
                 const stats = {
                     serverName: this.heartbeatConfig.serverName,
-                    serverIp: serverAddress,
+                    serverIp: serverAddress,  // 使用外网IP地址
+                    publicIP: publicIP,       // 额外添加一个公网IP字段
                     version: `v${this.config.version}`,
                     uptime: uptime,
                     totalStreams: this.streams.size,
@@ -1327,28 +1331,36 @@ class StreamManager extends EventEmitter {
         setInterval(sendHeartbeat, this.heartbeatConfig.interval);
     }
 
-    // 获取服务器IP地址
-    async getServerIp() {
+    // 添加获取公网IP的方法
+    async getPublicIP() {
         try {
-            if (this.config.server.host !== 'auto') {
-                return this.config.server.host;
-            }
+            // 尝试多个服务来确保可靠性
+            const services = [
+                'https://api.ipify.org?format=json',
+                'https://api.ip.sb/ip',
+                'https://api64.ipify.org?format=json'
+            ];
 
-            const { networkInterfaces } = require('os');
-            const nets = networkInterfaces();
-            
-            for (const name of Object.keys(nets)) {
-                for (const net of nets[name]) {
-                    // 跳过内部IP和IPv6
-                    if (!net.internal && net.family === 'IPv4') {
-                        return net.address;
+            for (const service of services) {
+                try {
+                    const response = await axios.get(service);
+                    if (response.data) {
+                        // 根据返回格式处理
+                        const ip = typeof response.data === 'string' 
+                            ? response.data.trim() 
+                            : response.data.ip;
+                        if (ip && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+                            return ip;
+                        }
                     }
+                } catch (err) {
+                    continue; // 如果一个服务失败，尝试下一个
                 }
             }
-            return 'unknown';
+            throw new Error('无法获取公网IP');
         } catch (error) {
-            logger.error('Error getting server IP:', error);
-            return 'unknown';
+            logger.error('获取公网IP失败:', error);
+            return process.env.SERVER_HOST || '0.0.0.0'; // 失败时使用环境变量或默认值
         }
     }
 
