@@ -99,7 +99,7 @@ class StreamManager extends EventEmitter {
         this.heartbeatConfig = {
             enabled: true,
             server: 'http://rtmp-serve.zhoujie218.top/api/heartbeat',  // 默认使用本机地址
-            interval: 300000,  // 5分钟
+            interval: 5000,  // 改为5秒 (从300000改为5000)
             serverName: require('os').hostname()  // 使用主机名作为服务器标识
         };
 
