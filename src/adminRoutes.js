@@ -607,8 +607,8 @@ router.post('/api/streams/autostart', async (req, res) => {
     }
 });
 
-// 修改重启服务器的路由
-router.post('/restart', async (req, res) => {
+// 修改重启服务器的路由 - 添加 /api 前缀
+router.post('/api/restart', async (req, res) => {
     try {
         // 执行 PM2 重启命令
         const { exec } = require('child_process');
