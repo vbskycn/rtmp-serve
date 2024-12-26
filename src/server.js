@@ -246,4 +246,28 @@ process.on('SIGINT', async () => {
         await streamManager.stopStreaming(streamId);
     }
     process.exit(0);
+});
+
+function getServerIP() {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const interface of interfaces[name]) {
+            // 跳过内部 IP
+            if (interface.internal) continue;
+            // 获取 IPv4 地址
+            if (interface.family === 'IPv4') {
+                return interface.address;
+            }
+        }
+    }
+    return '0.0.0.0';
+}
+
+// 获取配置
+const serverHost = process.env.SERVER_HOST || getServerIP();
+const serverPort = process.env.SERVER_PORT || config.server.port;
+
+// 启动服务器时使用这些值
+app.listen(serverPort, serverHost, () => {
+    console.log(`服务器运行在 http://${serverHost}:${serverPort}`);
 }); 

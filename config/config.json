@@ -1,8 +1,8 @@
 {
     "version": "1.7.5",
     "server": {
-        "host": "auto",
-        "port": 3000
+        "host": "${SERVER_HOST}",
+        "port": "${SERVER_PORT}"
     },
     "rtmp": {
         "pushServer": "rtmp://ali.push.yximgs.com/live/",
