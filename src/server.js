@@ -43,26 +43,30 @@ app.use(express.static(path.join(__dirname, '../admin')));
 // 设置管理路由
 app.use(adminRoutes);
 
-// 播放由
+// 修改播放路由
 app.get('/play/:streamId', async (req, res) => {
     try {
         const { streamId } = req.params;
-        // 尝试两种形式的streamId
-        const fullStreamId = streamId.startsWith('stream_') ? streamId : `stream_${streamId}`;
-        const shortStreamId = streamId.startsWith('stream_') ? streamId.replace('stream_', '') : streamId;
-        
-        // 先尝试完整ID，再尝试短ID
-        let stream = streamManager.streams.get(fullStreamId);
-        if (!stream) {
-            stream = streamManager.streams.get(`stream_${shortStreamId}`);
+        // 尝试不同形式的streamId
+        const possibleIds = [
+            streamId,
+            `stream_${streamId}`,
+            streamId.startsWith('stream_') ? streamId.substring(7) : streamId
+        ];
+
+        let stream;
+        for (const id of possibleIds) {
+            stream = streamManager.streams.get(id);
+            if (stream) break;
         }
-        
+
         if (!stream) {
-            logger.error(`Stream not found: ${streamId} (tried ${fullStreamId} and stream_${shortStreamId})`);
+            logger.error(`Stream not found: ${streamId} (tried ${possibleIds.join(', ')})`);
             return res.status(404).send('Stream not found');
         }
 
-        const actualStreamId = stream.id; // 使用找到的流的实际ID
+        const actualStreamId = stream.id;
+        logger.info(`Found stream ${actualStreamId} for request ${streamId}`);
 
         // 如果流没有运行，启动它
         if (!streamManager.streamProcesses.has(actualStreamId)) {
@@ -78,49 +82,45 @@ app.get('/play/:streamId', async (req, res) => {
     }
 });
 
-// 直接访问 m3u8 文件的路由
+// 修改 m3u8 文件路由
 app.get('/streams/:streamId/playlist.m3u8', async (req, res) => {
     try {
         const { streamId } = req.params;
-        // 尝试两种形式的streamId
-        const fullStreamId = streamId.startsWith('stream_') ? streamId : `stream_${streamId}`;
-        const shortStreamId = streamId.startsWith('stream_') ? streamId.replace('stream_', '') : streamId;
-        
-        // 先尝试完整ID，再尝试短ID
-        let stream = streamManager.streams.get(fullStreamId);
-        if (!stream) {
-            stream = streamManager.streams.get(`stream_${shortStreamId}`);
+        // 尝试不同形式的streamId
+        const possibleIds = [
+            streamId,
+            `stream_${streamId}`,
+            streamId.startsWith('stream_') ? streamId.substring(7) : streamId
+        ];
+
+        let stream;
+        for (const id of possibleIds) {
+            stream = streamManager.streams.get(id);
+            if (stream) break;
         }
-        
+
         if (!stream) {
-            logger.error(`Stream not found: ${streamId} (tried ${fullStreamId} and stream_${shortStreamId})`);
+            logger.error(`Stream not found: ${streamId} (tried ${possibleIds.join(', ')})`);
             return res.status(404).send('Stream not found');
         }
 
-        const actualStreamId = stream.id; // 使用找到的流的实际ID
+        const actualStreamId = stream.id;
         const playlistPath = path.join(__dirname, '../streams', actualStreamId, 'playlist.m3u8');
         
         if (!fs.existsSync(playlistPath)) {
-            // 如果文件不存在，尝试启动流
             logger.info(`Starting stream for m3u8 request: ${actualStreamId}`);
             await streamManager.startStreaming(actualStreamId);
-            // 等待文件创建
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
         
         if (fs.existsSync(playlistPath)) {
-            // 添加观看者
             streamManager.addViewer(actualStreamId);
             
-            // 读取并修改 m3u8 文件内容
             let content = fs.readFileSync(playlistPath, 'utf8');
-            
-            // 替换分片路径为完整 URL
             content = content.replace(/segment_\d+\.ts/g, (match) => {
                 return `/streams/${actualStreamId}/${match}`;
             });
 
-            // 监听连接关闭
             res.on('close', () => {
                 streamManager.removeViewer(actualStreamId);
             });

@@ -342,7 +342,7 @@ class StreamManager extends EventEmitter {
 
     async getStreamUrl(streamId) {
         try {
-            const stream = this.streams.get(streamId);
+            const stream = this.getStreamById(streamId);
             if (!stream) {
                 logger.warn(`Stream not found: ${streamId}`);
                 return null;
@@ -354,15 +354,17 @@ class StreamManager extends EventEmitter {
                 return null;
             }
 
+            const actualStreamId = stream.id;
+
             // 检查流是否正在运行
-            if (!this.streamProcesses.has(streamId)) {
-                logger.info(`Starting stream ${streamId} on demand`);
-                await this.startStreaming(streamId);
+            if (!this.streamProcesses.has(actualStreamId)) {
+                logger.info(`Starting stream ${actualStreamId} on demand`);
+                await this.startStreaming(actualStreamId);
             }
 
             // 添加观看者
-            this.addViewer(streamId);
-            return `/streams/${streamId}/playlist.m3u8`;
+            this.addViewer(actualStreamId);
+            return `/streams/${actualStreamId}/playlist.m3u8`;
         } catch (error) {
             logger.error(`Error getting stream URL: ${streamId}`, error);
             return null;
@@ -1576,6 +1578,25 @@ class StreamManager extends EventEmitter {
             totalStreams: this.streams.size,
             activeStreams: this.streamProcesses.size
         };
+    }
+
+    // 在 StreamManager 类中添加这个方法
+    getStreamById(streamId) {
+        // 尝试不同形式的streamId
+        const possibleIds = [
+            streamId,
+            `stream_${streamId}`,
+            streamId.startsWith('stream_') ? streamId.substring(7) : streamId
+        ];
+
+        for (const id of possibleIds) {
+            const stream = this.streams.get(id);
+            if (stream) {
+                return stream;
+            }
+        }
+
+        return null;
     }
 }
 
