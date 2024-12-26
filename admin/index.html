@@ -260,7 +260,7 @@
                 
                 // 获取活跃流的数量
                 const activeStreams = streams.filter(stream => {
-                    return stream.processRunning || stream.stats?.startTime;
+                    return stream.processRunning;
                 });
                 updateStatElement('activeStreams', activeStreams.length);
 
