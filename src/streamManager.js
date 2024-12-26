@@ -22,6 +22,10 @@ class StreamManager extends EventEmitter {
         this.manuallyStartedStreams = new Set();
         this.config = config;  // 保存配置引用
         
+        // 确保使用绝对路径
+        this.rootDir = path.resolve(__dirname, '..');
+        this.configPath = path.join(this.rootDir, 'config/streams.json');
+        
         // 修改配置加载逻辑
         try {
             // 首先尝试从环境变量获取版本号
@@ -56,7 +60,7 @@ class StreamManager extends EventEmitter {
             };
         }
         
-        // 创建配置目录
+        // 修改配置目录的创建
         const configDir = path.dirname(this.configPath);
         if (!fs.existsSync(configDir)) {
             fs.mkdirSync(configDir, { recursive: true });
@@ -433,7 +437,7 @@ class StreamManager extends EventEmitter {
 
     async startStreamingWithFFmpeg(streamId, streamConfig, isManualStart = false) {
         const { spawn } = require('child_process');
-        const outputPath = path.join(__dirname, '../streams', streamId);
+        const outputPath = path.join(this.rootDir, 'streams', streamId);
         
         if (!fs.existsSync(outputPath)) {
             fs.mkdirSync(outputPath, { recursive: true });
@@ -704,7 +708,7 @@ class StreamManager extends EventEmitter {
     // 添加 streamlink 作为备选方案
     async startStreamingWithStreamlink(streamId, streamConfig) {
         const { spawn } = require('child_process');
-        const outputPath = path.join(__dirname, '../streams', streamId);
+        const outputPath = path.join(this.rootDir, 'streams', streamId);
 
         const args = [
             '--player-external-http',
@@ -832,7 +836,7 @@ class StreamManager extends EventEmitter {
                 this.activeViewers.delete(streamId);
                 
                 // 清理文件
-                const outputPath = path.join(__dirname, '../streams', streamId);
+                const outputPath = path.join(this.rootDir, 'streams', streamId);
                 if (fs.existsSync(outputPath)) {
                     try {
                         const files = fs.readdirSync(outputPath);
@@ -869,7 +873,7 @@ class StreamManager extends EventEmitter {
                 }
 
                 const stats = this.streamStats.get(streamId);
-                const outputPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
+                const outputPath = path.join(this.rootDir, 'streams', streamId, 'playlist.m3u8');
                 
                 if (!fs.existsSync(outputPath)) {
                     logger.warn(`Unhealthy stream detected: ${streamId}`);
@@ -890,7 +894,7 @@ class StreamManager extends EventEmitter {
 
     async cleanupUnusedFiles() {
         try {
-            const streamsDir = path.join(__dirname, '../streams');
+            const streamsDir = path.join(this.rootDir, 'streams');
             const dirs = fs.readdirSync(streamsDir);
             
             for (const dir of dirs) {
@@ -929,7 +933,7 @@ class StreamManager extends EventEmitter {
                 this.streamProcesses.delete(streamId);
                 
                 // 清理文件
-                const outputPath = path.join(__dirname, '../streams', streamId);
+                const outputPath = path.join(this.rootDir, 'streams', streamId);
                 if (fs.existsSync(outputPath)) {
                     fs.rmSync(outputPath, { recursive: true, force: true });
                 }
@@ -968,7 +972,7 @@ class StreamManager extends EventEmitter {
             (Date.now() - new Date(stats.startTime).getTime()) < 30000;  // 30秒内有活动
         
         // 检查是否有放列表文件
-        const playlistPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
+        const playlistPath = path.join(this.rootDir, 'streams', streamId, 'playlist.m3u8');
         const hasPlaylist = fs.existsSync(playlistPath);
         
         return hasProcess || hasRecentStats || hasPlaylist;
@@ -1094,8 +1098,8 @@ class StreamManager extends EventEmitter {
                 }
 
                 // 移动流媒体件
-                const oldPath = path.join(__dirname, '../streams', streamId);
-                const newPath = path.join(__dirname, '../streams', newId);
+                const oldPath = path.join(this.rootDir, 'streams', streamId);
+                const newPath = path.join(this.rootDir, 'streams', newId);
                 if (fs.existsSync(oldPath)) {
                     if (fs.existsSync(newPath)) {
                         fs.rmSync(newPath, { recursive: true, force: true });
@@ -1148,7 +1152,7 @@ class StreamManager extends EventEmitter {
             if (activeStreams.length === 0) return;
 
             for (const streamId of activeStreams) {
-                const streamPath = path.join(__dirname, '../streams', streamId);
+                const streamPath = path.join(this.rootDir, 'streams', streamId);
                 if (!fs.existsSync(streamPath)) continue;
 
                 // 计算目录大小
@@ -1241,7 +1245,7 @@ class StreamManager extends EventEmitter {
     // 修改保存统计数据的方法
     async saveStats() {
         try {
-            const statsPath = path.join(__dirname, '../config/stats.json');
+            const statsPath = path.join(this.rootDir, 'config/stats.json');
             const stats = {
                 startTime: this.startTime,
                 lastUpdate: new Date().toISOString(),
@@ -1272,7 +1276,7 @@ class StreamManager extends EventEmitter {
     // 修改加载统计数据的方法
     async loadStats() {
         try {
-            const statsPath = path.join(__dirname, '../config/stats.json');
+            const statsPath = path.join(this.rootDir, 'config/stats.json');
             if (fs.existsSync(statsPath)) {
                 const data = await fs.promises.readFile(statsPath, 'utf8');
                 if (data.trim()) {
@@ -1413,7 +1417,7 @@ class StreamManager extends EventEmitter {
     // 添加加载自启动流配置的方法
     loadAutoStartStreams() {
         try {
-            const autoStartPath = path.join(__dirname, '../config/autostart.json');
+            const autoStartPath = path.join(this.rootDir, 'config/autostart.json');
             if (fs.existsSync(autoStartPath)) {
                 const data = fs.readFileSync(autoStartPath, 'utf8');
                 if (data.trim()) {  // 检查文件是否为空
@@ -1435,7 +1439,7 @@ class StreamManager extends EventEmitter {
             this.autoStartStreams = new Set();
             // 尝试重新创建文件
             try {
-                fs.writeFileSync(path.join(__dirname, '../config/autostart.json'), '[]');
+                fs.writeFileSync(path.join(this.rootDir, 'config/autostart.json'), '[]');
             } catch (e) {
                 logger.error('Error creating autostart.json:', e);
             }
@@ -1445,7 +1449,7 @@ class StreamManager extends EventEmitter {
     // 添加保存自启动流配置的方法
     async saveAutoStartStreams() {
         try {
-            const autoStartPath = path.join(__dirname, '../config/autostart.json');
+            const autoStartPath = path.join(this.rootDir, 'config/autostart.json');
             const autoStartList = Array.from(this.autoStartStreams);
             await fs.promises.writeFile(autoStartPath, JSON.stringify(autoStartList, null, 2));
             logger.info(`Saved ${autoStartList.length} auto-start streams`);
@@ -1590,7 +1594,7 @@ class StreamManager extends EventEmitter {
     // 保存统计信息到文件
     async saveStats() {
         try {
-            const statsPath = path.join(__dirname, '../config/stats.json');
+            const statsPath = path.join(this.rootDir, 'config/stats.json');
             const stats = {
                 startTime: this.startTime,
                 lastUpdate: new Date().toISOString(),
