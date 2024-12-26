@@ -77,9 +77,14 @@ class StreamManager extends EventEmitter {
             sent: 0n
         };
         
+        // 添加流量统计集合
+        this.trafficStats = new Map();
+        
         // 每秒更新流量统计
         setInterval(() => {
             this.updateTrafficStats();
+            // 触发统计更新事件
+            this.emit('statsUpdated', this.getStats());
         }, 1000);
         
         // 每分钟保存统计数据
@@ -116,12 +121,6 @@ class StreamManager extends EventEmitter {
         
         // 启动时自动启动已配置的流
         this.startAutoStartStreams();
-
-        // 添加流量统计
-        this.trafficStats = new Map();
-        
-        // 定期保存统计信息
-        setInterval(() => this.saveStats(), 60000);
     }
 
     // 加载保存的流配置
@@ -980,7 +979,7 @@ class StreamManager extends EventEmitter {
         const count = this.activeViewers.get(streamId) || 0;
         this.activeViewers.set(streamId, count + 1);
         
-        // 清除自动停止定时器
+        // 清除自��停止定时器
         if (this.autoStopTimers.has(streamId)) {
             clearTimeout(this.autoStopTimers.get(streamId));
             this.autoStopTimers.delete(streamId);
@@ -1158,8 +1157,13 @@ class StreamManager extends EventEmitter {
                 for (const file of files) {
                     if (file.endsWith('.ts')) {
                         const filePath = path.join(streamPath, file);
-                        const stats = fs.statSync(filePath);
-                        totalSize += stats.size;
+                        try {
+                            const stats = fs.statSync(filePath);
+                            totalSize += stats.size;
+                        } catch (error) {
+                            // 忽略文件访问错误
+                            continue;
+                        }
                     }
                 }
 
@@ -1173,19 +1177,11 @@ class StreamManager extends EventEmitter {
                 }
 
                 // 更新单个流的统计信息
-                if (!this.trafficStats.has(streamId)) {
-                    this.initTrafficStats(streamId);
-                }
-                const streamStats = this.trafficStats.get(streamId);
-                if (streamStats) {
-                    streamStats.bytesReceived += totalSize * 2;
-                    streamStats.bytesSent += totalSize * viewers;
-                    streamStats.lastUpdate = new Date();
-                }
+                const streamStats = this.trafficStats.get(streamId) || this.initTrafficStats(streamId);
+                streamStats.bytesReceived += totalSize * 2;
+                streamStats.bytesSent += totalSize * viewers;
+                streamStats.lastUpdate = new Date();
             }
-
-            // 触发统计更新事件
-            this.emit('statsUpdated', this.getStats());
 
             // 定期保存统计数据
             if (Date.now() - (this._lastStatsSave || 0) > 60000) { // 每分钟保存一次
@@ -1226,11 +1222,15 @@ class StreamManager extends EventEmitter {
             totalViewers += viewers;
         }
 
+        // 计算总流量
+        const totalReceived = Number(this.totalTraffic.received);
+        const totalSent = Number(this.totalTraffic.sent);
+
         return {
             uptime: this.formatUptime(uptime),
             traffic: {
-                received: this.formatBytes(Number(this.totalTraffic.received)),
-                sent: this.formatBytes(Number(this.totalTraffic.sent))
+                received: this.formatBytes(totalReceived),
+                sent: this.formatBytes(totalSent)
             },
             totalStreams: this.streams.size,
             activeStreams: activeStreams.length,
@@ -1328,30 +1328,22 @@ class StreamManager extends EventEmitter {
     async startHeartbeat() {
         const sendHeartbeat = async () => {
             try {
-                // 获取外网IP
                 const publicIP = await this.getPublicIP();
-                
-                // 构建完整的服务器地址（包含端口）
                 const serverAddress = `${publicIP}:${this.config.server.port}`;
-                
-                // 计算准确的运行时间
                 const uptime = Date.now() - this.startTime;
                 
-                // 获取准确的流量统计
-                const trafficStats = this.getTrafficStats();
+                // 使用 getStats 方法获取统计信息
+                const stats = this.getStats();
                 
-                const stats = {
+                const heartbeatData = {
                     serverName: this.heartbeatConfig.serverName,
-                    serverIp: serverAddress,  // 使用外网IP地址
-                    publicIP: publicIP,       // 额外添加一个公网IP字段
+                    serverIp: serverAddress,
+                    publicIP: publicIP,
                     version: `v${this.config.version}`,
                     uptime: uptime,
-                    totalStreams: this.streams.size,
-                    activeStreams: this.streamProcesses.size,
-                    traffic: {
-                        received: trafficStats.received,
-                        sent: trafficStats.sent
-                    },
+                    totalStreams: stats.totalStreams,
+                    activeStreams: stats.activeStreams,
+                    traffic: stats.traffic,
                     systemInfo: {
                         platform: process.platform,
                         arch: process.arch,
@@ -1366,7 +1358,7 @@ class StreamManager extends EventEmitter {
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(stats)
+                    body: JSON.stringify(heartbeatData)
                 });
 
                 if (!response.ok) {
@@ -1567,7 +1559,7 @@ class StreamManager extends EventEmitter {
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]);
     }
 
     // 修改停止流方法
@@ -1644,11 +1636,15 @@ class StreamManager extends EventEmitter {
             totalViewers += viewers;
         }
 
+        // 计算总流量
+        const totalReceived = Number(this.totalTraffic.received);
+        const totalSent = Number(this.totalTraffic.sent);
+
         return {
             uptime: this.formatUptime(uptime),
             traffic: {
-                received: this.formatBytes(Number(this.totalTraffic.received)),
-                sent: this.formatBytes(Number(this.totalTraffic.sent))
+                received: this.formatBytes(totalReceived),
+                sent: this.formatBytes(totalSent)
             },
             totalStreams: this.streams.size,
             activeStreams: activeStreams.length,
