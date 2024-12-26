@@ -49,35 +49,24 @@ app.use(adminRoutes);
 app.get('/play/:streamId', async (req, res) => {
     try {
         const { streamId } = req.params;
-        // 尝试不同形式的streamId
-        const possibleIds = [
-            streamId,
-            `stream_${streamId}`,
-            streamId.startsWith('stream_') ? streamId.substring(7) : streamId
-        ];
-
-        let stream;
-        for (const id of possibleIds) {
-            stream = streamManager.streams.get(id);
-            if (stream) break;
+        const streamUrl = await streamManager.getStreamUrl(streamId);
+        
+        if (!streamUrl) {
+            logger.error(`Failed to get stream URL for: ${streamId}`);
+            return res.status(404).send('Stream not found or failed to start');
         }
 
-        if (!stream) {
-            logger.error(`Stream not found: ${streamId} (tried ${possibleIds.join(', ')})`);
-            return res.status(404).send('Stream not found');
+        // 检查播放列表文件是否存在
+        const actualStreamId = streamManager.getStreamById(streamId)?.id;
+        const playlistPath = path.join(__dirname, '../streams', actualStreamId, 'playlist.m3u8');
+        
+        if (!fs.existsSync(playlistPath)) {
+            logger.error(`Playlist file not found for stream: ${actualStreamId}`);
+            return res.status(404).send('Stream playlist not found');
         }
 
-        const actualStreamId = stream.id;
-        logger.info(`Found stream ${actualStreamId} for request ${streamId}`);
-
-        // 如果流没有运行，启动它
-        if (!streamManager.streamProcesses.has(actualStreamId)) {
-            logger.info(`Starting stream on demand: ${actualStreamId}`);
-            await streamManager.startStreaming(actualStreamId);
-        }
-
-        // 重定向到 HLS 播放列表
-        res.redirect(`/streams/${actualStreamId}/playlist.m3u8`);
+        // 重定向到实际的播放地址
+        res.redirect(streamUrl);
     } catch (error) {
         logger.error('Error serving stream:', error);
         res.status(500).send('Internal Server Error');
@@ -88,52 +77,49 @@ app.get('/play/:streamId', async (req, res) => {
 app.get('/streams/:streamId/playlist.m3u8', async (req, res) => {
     try {
         const { streamId } = req.params;
-        // 尝试不同形式的streamId
-        const possibleIds = [
-            streamId,
-            `stream_${streamId}`,
-            streamId.startsWith('stream_') ? streamId.substring(7) : streamId
-        ];
-
-        let stream;
-        for (const id of possibleIds) {
-            stream = streamManager.streams.get(id);
-            if (stream) break;
-        }
-
+        const stream = streamManager.getStreamById(streamId);
+        
         if (!stream) {
-            logger.error(`Stream not found: ${streamId} (tried ${possibleIds.join(', ')})`);
+            logger.error(`Stream not found: ${streamId}`);
             return res.status(404).send('Stream not found');
         }
 
         const actualStreamId = stream.id;
         const playlistPath = path.join(__dirname, '../streams', actualStreamId, 'playlist.m3u8');
         
+        // 如果播放列表不存在，尝试重新启动流
         if (!fs.existsSync(playlistPath)) {
-            logger.info(`Starting stream for m3u8 request: ${actualStreamId}`);
+            logger.info(`Playlist not found, starting stream: ${actualStreamId}`);
             await streamManager.startStreaming(actualStreamId);
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // 等待播放列表生成
+            let attempts = 0;
+            while (!fs.existsSync(playlistPath) && attempts < 10) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                attempts++;
+            }
+            
+            if (!fs.existsSync(playlistPath)) {
+                logger.error(`Failed to generate playlist for stream: ${actualStreamId}`);
+                return res.status(404).send('Stream playlist not found');
+            }
         }
         
-        if (fs.existsSync(playlistPath)) {
-            streamManager.addViewer(actualStreamId);
-            
-            let content = fs.readFileSync(playlistPath, 'utf8');
-            content = content.replace(/segment_\d+\.ts/g, (match) => {
-                return `/streams/${actualStreamId}/${match}`;
-            });
+        // 添加观看者并处理连接关闭
+        streamManager.addViewer(actualStreamId);
+        res.on('close', () => {
+            streamManager.removeViewer(actualStreamId);
+        });
 
-            res.on('close', () => {
-                streamManager.removeViewer(actualStreamId);
-            });
+        // 读取并修改播放列表内容
+        let content = fs.readFileSync(playlistPath, 'utf8');
+        content = content.replace(/segment_\d+\.ts/g, (match) => {
+            return `/streams/${actualStreamId}/${match}`;
+        });
 
-            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.send(content);
-        } else {
-            logger.error(`Playlist not found: ${actualStreamId}`);
-            res.status(404).send('Stream not found');
-        }
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.send(content);
     } catch (error) {
         logger.error('Error serving m3u8 file:', error);
         res.status(500).send('Internal Server Error');

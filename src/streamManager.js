@@ -347,24 +347,37 @@ class StreamManager extends EventEmitter {
 
     async getStreamUrl(streamId) {
         try {
+            // 获取流配置
             const stream = this.getStreamById(streamId);
             if (!stream) {
                 logger.warn(`Stream not found: ${streamId}`);
                 return null;
             }
 
-            // 如果流被手动停止,不要自动启动
-            if (stream.manualStopped) {
-                logger.info(`Stream ${streamId} was manually stopped, not auto-starting`);
-                return null;
-            }
-
             const actualStreamId = stream.id;
 
-            // 检查流是否正在运行
+            // 检查流是否已经在运行
             if (!this.streamProcesses.has(actualStreamId)) {
                 logger.info(`Starting stream ${actualStreamId} on demand`);
-                await this.startStreaming(actualStreamId);
+                try {
+                    // 尝试启动流
+                    await this.startStreaming(actualStreamId);
+                    
+                    // 等待playlist文件生成
+                    const playlistPath = path.join(this.rootDir, 'streams', actualStreamId, 'playlist.m3u8');
+                    let attempts = 0;
+                    while (!fs.existsSync(playlistPath) && attempts < 10) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        attempts++;
+                    }
+                    
+                    if (!fs.existsSync(playlistPath)) {
+                        throw new Error('Playlist file not generated');
+                    }
+                } catch (error) {
+                    logger.error(`Failed to start stream ${actualStreamId}:`, error);
+                    return null;
+                }
             }
 
             // 添加观看者
@@ -1171,7 +1184,7 @@ class StreamManager extends EventEmitter {
                     }
                 }
 
-                // 更新接收流量（假设源数据比实际输出大约2倍）
+                // 更新接收流量（假设源数据比实���输出大约2倍）
                 this.totalTraffic.received += BigInt(totalSize * 2);
 
                 // 计算发送流量（基于观看者数量）

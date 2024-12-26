@@ -118,7 +118,23 @@ npm start
 
 
 
+#### 使用方法:
 
+```
+# 使用启动脚本
+./start.sh
+```
+
+
+
+```
+node start.js
+
+# 使用 PM2
+pm2 start ecosystem.config.js
+
+
+```
 
 ## 容器管理
 
@@ -196,6 +212,7 @@ pm2 stop 0
 
 ```
 pm2 restart stream-server
+pm2 stop stream-server
 ```
 
 ### 删除进程
