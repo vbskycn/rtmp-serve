@@ -630,13 +630,33 @@
             loadStreams();
         }
 
-        // 初始加载
+        // 添加更新统计信息的函数
+        function updateStats() {
+            fetch('/api/stats')
+                .then(response => response.json())
+                .then(stats => {
+                    document.getElementById('systemUptime').textContent = stats.uptime;
+                    document.getElementById('trafficReceived').textContent = stats.traffic.received;
+                    document.getElementById('trafficSent').textContent = stats.traffic.sent;
+                    document.getElementById('totalStreams').textContent = stats.totalStreams;
+                    document.getElementById('activeStreams').textContent = stats.activeStreams;
+                })
+                .catch(error => console.error('Error updating stats:', error));
+        }
+
+        // 修改初始化函数
         async function init() {
             await getServerConfig();
             await loadServerConfig();
             await loadStreams();
             
-            // 每10秒更新一次状态
+            // 立即更新一次统计
+            updateStats();
+            
+            // 每秒更新统计信息
+            setInterval(updateStats, 1000);
+            
+            // 每10秒更新流列表
             setInterval(loadStreams, 10000);
         }
 

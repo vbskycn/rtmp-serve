@@ -77,14 +77,10 @@ class StreamManager extends EventEmitter {
             received: 0n
         };
         
-        // 加载已保存的统计数据，但只加载流量数据，不加载启动时间
-        this.loadStats();
-        
         // 每秒更新流量统计
         setInterval(() => {
             this.updateTrafficStats();
-            this.updateStats();
-            this.emit('statsUpdated', this.getTrafficStats());
+            this.emit('statsUpdated', this.getStats());
         }, 1000);
         
         // 每10秒存统计数据
@@ -1144,15 +1140,19 @@ class StreamManager extends EventEmitter {
 
     // 修改更新流量统计的方法
     updateTrafficStats() {
-        for (const [streamId, process] of this.streamProcesses.entries()) {
-            if (process && process.ffmpeg) {
-                // 每个活跃流每秒接收约2MB数据
-                this.totalTraffic.received += BigInt(2 * 1024 * 1024);
-                
-                // 每个活跃流每秒发送约1MB数据（考虑多个观看者）
-                const viewers = this.activeViewers.get(streamId) || 0;
-                this.totalTraffic.sent += BigInt(1024 * 1024 * (viewers + 1));
+        const activeStreams = this.streamProcesses.size;
+        if (activeStreams > 0) {
+            // 每个活跃流每秒接收约2MB数据
+            this.totalTraffic.received += BigInt(2 * 1024 * 1024 * activeStreams);
+            
+            // 计算所有流的观看者总数
+            let totalViewers = 0;
+            for (const [streamId] of this.streamProcesses) {
+                totalViewers += this.activeViewers.get(streamId) || 0;
             }
+            
+            // 每个观看者每秒发送约1MB数据
+            this.totalTraffic.sent += BigInt(1024 * 1024 * (totalViewers + activeStreams));
         }
     }
 
@@ -1496,12 +1496,13 @@ class StreamManager extends EventEmitter {
         const hours = Math.floor(minutes / 60);
         const days = Math.floor(hours / 24);
 
-        return {
-            days,
-            hours: hours % 24,
-            minutes: minutes % 60,
-            seconds: seconds % 60
-        };
+        const parts = [];
+        if (days > 0) parts.push(`${days}天`);
+        if (hours % 24 > 0) parts.push(`${hours % 24}时`);
+        if (minutes % 60 > 0) parts.push(`${minutes % 60}分`);
+        if (seconds % 60 > 0) parts.push(`${seconds % 60}秒`);
+
+        return parts.length > 0 ? parts.join('') : '刚刚启动';
     }
 
     // 格式化字节数
@@ -1559,6 +1560,22 @@ class StreamManager extends EventEmitter {
         } catch (error) {
             logger.error('Error saving stats:', error);
         }
+    }
+
+    // 添加获取完整统计信息的方法
+    getStats() {
+        const now = Date.now();
+        const uptime = now - this.startTime;
+        
+        return {
+            uptime: this.formatUptime(uptime),
+            traffic: {
+                received: this.formatBytes(Number(this.totalTraffic.received)),
+                sent: this.formatBytes(Number(this.totalTraffic.sent))
+            },
+            totalStreams: this.streams.size,
+            activeStreams: this.streamProcesses.size
+        };
     }
 }
 

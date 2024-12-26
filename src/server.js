@@ -251,6 +251,12 @@ app.post('/api/config', (req, res) => {
     }
 });
 
+// 添加获取统计信息的路由
+app.get('/api/stats', (req, res) => {
+    const stats = streamManager.getStats();
+    res.json(stats);
+});
+
 // 修改启动方式
 initializeServer();
 
