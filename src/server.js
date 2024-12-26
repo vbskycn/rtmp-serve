@@ -9,6 +9,7 @@ const config = require('../config/config.json');
 const os = require('os');
 const cookieParser = require('cookie-parser');
 const { authMiddleware } = require('./middleware/auth');
+const axios = require('axios');
 
 const app = express();
 // 使用配置文件中的端口
@@ -143,26 +144,44 @@ app.use((err, req, res, next) => {
     res.status(500).send('Internal Server Error');
 });
 
-// 添加获取本机IP的函数
-function getLocalIP() {
-    const interfaces = os.networkInterfaces();
-    for (const name of Object.keys(interfaces)) {
-        for (const interface of interfaces[name]) {
-            // 跳过内部IP和IPv6
-            if (interface.internal || interface.family === 'IPv6') {
-                continue;
+// 修改获取IP的函数
+async function getPublicIP() {
+    try {
+        // 尝试多个服务来确保可靠性
+        const services = [
+            'https://api.ipify.org?format=json',
+            'https://api.ip.sb/ip',
+            'https://api64.ipify.org?format=json'
+        ];
+
+        for (const service of services) {
+            try {
+                const response = await axios.get(service);
+                if (response.data) {
+                    // 根据返回格式处理
+                    const ip = typeof response.data === 'string' 
+                        ? response.data.trim() 
+                        : response.data.ip;
+                    if (ip && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+                        return ip;
+                    }
+                }
+            } catch (err) {
+                continue; // 如果一个服务失败，尝试下一个
             }
-            return interface.address;
         }
+        throw new Error('无法获取公网IP');
+    } catch (error) {
+        logger.error('获取公网IP失败:', error);
+        return process.env.SERVER_HOST || '0.0.0.0'; // 失败时使用环境变量或默认值
     }
-    return 'localhost';
 }
 
-// 在服务器启动前检查和更新配置
+// 修改 initializeServer 函数
 async function initializeServer() {
     try {
-        // 获取环境变量或使用默认值
-        const serverHost = process.env.SERVER_HOST || getLocalIP();
+        // 获取环境变量或公网IP
+        const serverHost = process.env.SERVER_HOST || await getPublicIP();
         const serverPort = parseInt(process.env.SERVER_PORT) || config.server.port;
 
         // 更新配置
@@ -176,8 +195,9 @@ async function initializeServer() {
         );
         
         // 启动服务器
-        app.listen(serverPort, serverHost, () => {
+        app.listen(serverPort, '0.0.0.0', () => { // 注意这里使用 0.0.0.0 来监听所有接口
             logger.info(`Server running on http://${serverHost}:${serverPort}`);
+            logger.info(`Public IP: ${serverHost}`);
         });
     } catch (error) {
         logger.error('Error initializing server:', error);
