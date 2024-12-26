@@ -979,7 +979,7 @@ class StreamManager extends EventEmitter {
         const count = this.activeViewers.get(streamId) || 0;
         this.activeViewers.set(streamId, count + 1);
         
-        // 清除自��停止定时器
+        // 清除自停止定时器
         if (this.autoStopTimers.has(streamId)) {
             clearTimeout(this.autoStopTimers.get(streamId));
             this.autoStopTimers.delete(streamId);
@@ -1559,7 +1559,7 @@ class StreamManager extends EventEmitter {
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]);
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
     // 修改停止流方法
