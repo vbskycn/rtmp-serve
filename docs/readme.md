@@ -89,7 +89,7 @@ docker run -d \
   -e TZ=Asia/Shanghai \
   zhoujie218/rtmp-serve:latest
 
-  
+
 ```
 
 ### 方式二：使用脚本部署
