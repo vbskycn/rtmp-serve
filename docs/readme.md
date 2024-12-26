@@ -133,7 +133,6 @@ node start.js
 # 使用 PM2
 pm2 start ecosystem.config.js
 
-
 ```
 
 ## 容器管理
@@ -199,7 +198,7 @@ pm2 list
 ### 停止特定的进程
 
 ``` 
-pm2 stop stream-server
+pm2 stop rtmp-server
 ```
 
 ### 使用名称停止
@@ -211,20 +210,20 @@ pm2 stop 0
 ### 使用 id 停止**# 重启进程
 
 ```
-pm2 restart stream-server
-pm2 stop stream-server
+pm2 restart rtmp-server
+pm2 stop rtmp-server
 ```
 
 ### 删除进程
 
 ```
-pm2 delete stream-server
+pm2 delete rtmp-server
 ```
 
 ### *查看日志*
 
 ```
-pm2 logs stream-server
+pm2 logs rtmp-server
 ```
 
 ### 查看进程详细信息

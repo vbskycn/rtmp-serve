@@ -1512,18 +1512,56 @@
 
         // 添加检查服务器状态并重载的函数
         async function checkServerAndReload() {
-            try {
-                const response = await fetch('/api/config');
-                if (response.ok) {
-                    window.location.reload();
-                } else {
-                    // 如果服务器还没准备好，继续尝试
-                    setTimeout(checkServerAndReload, 1000);
+            let retries = 0;
+            const maxRetries = 30; // 最多尝试30次，每次间隔2秒
+            
+            const check = async () => {
+                try {
+                    const response = await fetch('/api/config');
+                    if (response.ok) {
+                        console.log('服务器已重启完成');
+                        window.location.reload();
+                        return;
+                    }
+                } catch (error) {
+                    // 忽略错误，继续重试
                 }
-            } catch (error) {
-                // 如果连接失败，继续尝试
-                setTimeout(checkServerAndReload, 1000);
-            }
+
+                retries++;
+                if (retries < maxRetries) {
+                    // 更新进度提示
+                    const modalBody = document.querySelector('.modal.show .modal-body');
+                    if (modalBody) {
+                        modalBody.innerHTML = `
+                            <p>正在等待服务器重启完成...</p>
+                            <div class="progress mb-3">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                     role="progressbar" 
+                                     style="width: ${(retries / maxRetries) * 100}%"></div>
+                            </div>
+                            <div class="text-center">
+                                <small class="text-muted">已尝试 ${retries} 次，最多尝试 ${maxRetries} 次</small>
+                            </div>
+                        `;
+                    }
+                    setTimeout(check, 2000); // 每2秒检查一次
+                } else {
+                    // 超过最大重试次数
+                    const modalBody = document.querySelector('.modal.show .modal-body');
+                    if (modalBody) {
+                        modalBody.innerHTML = `
+                            <div class="alert alert-warning">
+                                <p>服务器可能需要更长时间重启，请手动刷新页面重试。</p>
+                                <button onclick="window.location.reload()" class="btn btn-primary mt-3">
+                                    <i class="fa fa-refresh"></i> 刷新页面
+                                </button>
+                            </div>
+                        `;
+                    }
+                }
+            };
+
+            check();
         }
 
         // 显示修改密码模态框
@@ -1661,33 +1699,40 @@
                 `;
                 document.body.appendChild(modal);
 
-                // 修改这里的 API 路径
-                const response = await fetch('/api/restart', {
-                    method: 'POST'
-                });
-
-                const result = await response.json();
-                if (result.success) {
-                    // 显示重连中的提示
-                    modal.querySelector('.modal-body').innerHTML = `
-                        <p>重启命令已发送，系统正在重启...</p>
-                        <div class="d-flex justify-content-center">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                        </div>
-                    `;
-
-                    // 等待服务器重启完成
-                    setTimeout(() => {
-                        checkServerAndReload();
-                    }, 5000); // 给予更多重启时间
-                } else {
-                    throw new Error(result.error || '重启失败');
+                try {
+                    // 发送重启命令
+                    await fetch('/api/restart', {
+                        method: 'POST'
+                    });
+                } catch (error) {
+                    // 忽略连接中断错误，因为这是预期的行为
+                    console.log('服务器正在重启...');
                 }
+
+                // 不管 fetch 是否成功，都显示重启提示
+                modal.querySelector('.modal-body').innerHTML = `
+                    <p>重启命令已发送，系统正在重启...</p>
+                    <div class="d-flex justify-content-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                    <div class="text-center mt-3">
+                        <small class="text-muted">系统重启中，请稍候...</small>
+                    </div>
+                `;
+
+                // 等待服务器重启完成
+                setTimeout(() => {
+                    checkServerAndReload();
+                }, 5000); // 给予更多重启时间
+
             } catch (error) {
                 console.error('重启服务器失败:', error);
-                alert('重启服务器失败: ' + error.message);
+                // 只有在发送命令前就失败的情况下才显示错误
+                if (error.message !== 'Failed to fetch') {
+                    alert('重启服务器失败: ' + error.message);
+                }
                 // 移除模态框
                 document.querySelector('.modal.show')?.remove();
             }
