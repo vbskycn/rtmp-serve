@@ -42,7 +42,6 @@ docker run -d \
   --name rtmp-serve \
   --restart unless-stopped \
   -p 3000:3000 \
-  -v $(pwd)/config:/app/config \
   -v $(pwd)/streams:/app/streams \
   -v $(pwd)/logs:/app/logs \
   -e NODE_ENV=production \
@@ -66,6 +65,8 @@ docker run -d \
   --name rtmp-serve \
   --restart unless-stopped \
   -p 3009:3000 \
+  -v $(pwd)/streams:/app/streams \
+  -v $(pwd)/logs:/app/logs \  
   -e NODE_ENV=production \
   -e TZ=Asia/Shanghai \
   zhoujie218/rtmp-serve:latest
@@ -79,6 +80,8 @@ docker run -d \
   --name rtmp-serve \
   --restart unless-stopped \
   -p 3000:3000 \
+  -v $(pwd)/streams:/app/streams \
+  -v $(pwd)/logs:/app/logs \  
   -e NODE_ENV=production \
   -e TZ=Asia/Shanghai \
   zhoujie218/rtmp-serve:latest  
