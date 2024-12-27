@@ -28,7 +28,7 @@ class StreamManager extends EventEmitter {
         
         // 修改配置加载逻辑
         try {
-            // 首先尝试从环境变量获取版本号
+            // 首先尝试从环境变量获���版本号
             const envVersion = process.env.APP_VERSION;
             
             // 加载配置文件
@@ -102,7 +102,7 @@ class StreamManager extends EventEmitter {
         // 直接配置心跳
         this.heartbeatConfig = {
             enabled: true,
-            server: 'http://rtmp-serve.zhoujie218.top/api/heartbeat',  // 默认使用本机地址
+            server: 'https://rtmp-serve.zhoujie218.top/api/heartbeat',  // 默认使用本机地址
             interval: 5000,  // 改为5秒 (从300000改为5000)
             serverName: require('os').hostname()  // 使用主机名作为服务器标识
         };
@@ -1184,7 +1184,7 @@ class StreamManager extends EventEmitter {
                     }
                 }
 
-                // 更新接收流量（假设源数据比实���输出大约2倍）
+                // 更新接收流量（假设源数据比实际输出大约2倍）
                 this.totalTraffic.received += BigInt(totalSize * 2);
 
                 // 计算发送流量（基于观看者数量）
@@ -1348,82 +1348,141 @@ class StreamManager extends EventEmitter {
                 const serverAddress = `${publicIP}:${this.config.server.port}`;
                 const uptime = Date.now() - this.startTime;
                 
-                // 使用 getStats 方法获取统计信息
+                // 获取系统信息
+                const os = require('os');
+                const systemInfo = {
+                    platform: os.platform(),
+                    arch: os.arch(),
+                    nodeVersion: process.version,
+                    memory: {
+                        total: os.totalmem(),
+                        free: os.freemem(),
+                        used: os.totalmem() - os.freemem()
+                    },
+                    cpu: os.cpus(),
+                    loadavg: os.loadavg()
+                };
+                
+                // 获取流统计信息
                 const stats = this.getStats();
                 
+                // 构建心跳数据
                 const heartbeatData = {
-                    serverName: this.heartbeatConfig.serverName,
-                    serverIp: serverAddress,
+                    serverName: this.heartbeatConfig.serverName || os.hostname(),
+                    serverAddress: serverAddress,
                     publicIP: publicIP,
-                    version: `v${this.config.version}`,
-                    uptime: uptime,
-                    totalStreams: stats.totalStreams,
-                    activeStreams: stats.activeStreams,
-                    traffic: stats.traffic,
-                    systemInfo: {
-                        platform: process.platform,
-                        arch: process.arch,
-                        nodeVersion: process.version,
-                        memory: process.memoryUsage(),
-                        cpu: process.cpuUsage()
-                    }
+                    version: this.config.version || 'unknown',
+                    uptime: this.formatUptime(uptime),
+                    totalStreams: this.streams.size,
+                    activeStreams: Array.from(this.streamProcesses.keys()).length,
+                    traffic: {
+                        received: this.formatBytes(Number(this.totalTraffic.received)),
+                        sent: this.formatBytes(Number(this.totalTraffic.sent))
+                    },
+                    streams: Array.from(this.streams.entries()).map(([id, stream]) => ({
+                        id: id,
+                        name: stream.name,
+                        active: this.streamProcesses.has(id),
+                        viewers: this.activeViewers.get(id) || 0,
+                        stats: this.getStreamStats(id)
+                    })),
+                    systemInfo: systemInfo
                 };
 
-                const response = await fetch(this.heartbeatConfig.server, {
-                    method: 'POST',
+                // 发送心跳请求
+                const response = await axios.post(this.heartbeatConfig.server, heartbeatData, {
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(heartbeatData)
+                    timeout: 5000 // 5秒超时
                 });
 
-                if (!response.ok) {
-                    throw new Error(`Heartbeat failed: ${response.statusText}`);
+                if (response.status === 200) {
+                    logger.debug('心跳发送成功:', {
+                        serverName: heartbeatData.serverName,
+                        activeStreams: heartbeatData.activeStreams,
+                        totalStreams: heartbeatData.totalStreams
+                    });
+                } else {
+                    throw new Error(`心跳请求失败: ${response.status} ${response.statusText}`);
                 }
-
-                logger.debug('Heartbeat sent successfully');
             } catch (error) {
-                logger.error('Error sending heartbeat:', error);
+                logger.error('发送心跳失败:', {
+                    error: error.message,
+                    server: this.heartbeatConfig.server,
+                    timestamp: new Date().toISOString()
+                });
             }
         };
 
         // 立即发送第一次心跳
         await sendHeartbeat();
 
-        // 设置定期发送心跳
-        setInterval(sendHeartbeat, this.heartbeatConfig.interval);
+        // 设置定期发送心跳 (每5秒一次)
+        const heartbeatInterval = setInterval(sendHeartbeat, 5000);
+
+        // 保存定时器引用以便需要时清理
+        this.heartbeatInterval = heartbeatInterval;
+
+        // 添加错误处理
+        process.on('SIGTERM', () => {
+            if (this.heartbeatInterval) {
+                clearInterval(this.heartbeatInterval);
+            }
+        });
     }
 
-    // 添加获取公网IP的方法
+    // 修改获取公网IP的方法
     async getPublicIP() {
         try {
-            // 尝试多个服务来确保可靠性
+            // 按优先级尝试多个IP获取服务
             const services = [
                 'https://api.ipify.org?format=json',
                 'https://api.ip.sb/ip',
-                'https://api64.ipify.org?format=json'
+                'https://api64.ipify.org?format=json',
+                'https://ifconfig.me/ip'
             ];
 
             for (const service of services) {
                 try {
-                    const response = await axios.get(service);
+                    const response = await axios.get(service, { 
+                        timeout: 3000,
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                        }
+                    });
+                    
                     if (response.data) {
-                        // 根据返回格式处理
                         const ip = typeof response.data === 'string' 
                             ? response.data.trim() 
                             : response.data.ip;
+                        
                         if (ip && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+                            logger.debug('成功获取公网IP:', ip);
                             return ip;
                         }
                     }
                 } catch (err) {
-                    continue; // 如果一个服务失败，尝试下一个
+                    logger.debug(`IP服务 ${service} 获取失败:`, err.message);
+                    continue;
                 }
             }
-            throw new Error('无法获取公网IP');
+
+            // 如果所有服务都失败，使用本地IP
+            const interfaces = require('os').networkInterfaces();
+            for (const iface of Object.values(interfaces)) {
+                for (const alias of iface) {
+                    if (alias.family === 'IPv4' && !alias.internal) {
+                        logger.warn('无法获取公网IP，使用本地IP:', alias.address);
+                        return alias.address;
+                    }
+                }
+            }
+
+            throw new Error('无法获取IP地址');
         } catch (error) {
-            logger.error('获取公网IP失败:', error);
-            return process.env.SERVER_HOST || '0.0.0.0'; // 失败时使用环境变量或默认值
+            logger.error('获取IP地址失败:', error);
+            return process.env.SERVER_HOST || '127.0.0.1';
         }
     }
 
@@ -1575,7 +1634,7 @@ class StreamManager extends EventEmitter {
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]);
     }
 
     // 修改停止流方法

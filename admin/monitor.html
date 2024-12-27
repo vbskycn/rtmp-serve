@@ -126,19 +126,45 @@
 
         async function updateServers() {
             try {
-                const [serversResponse, configResponse] = await Promise.all([
-                    fetch('/api/servers'),
-                    fetch('/api/config')
-                ]);
-                
+                const serversResponse = await fetch('/api/servers');
+                if (!serversResponse.ok) {
+                    throw new Error(`HTTP error! status: ${serversResponse.status}`);
+                }
                 const servers = await serversResponse.json();
-                const config = await configResponse.json();
                 
-                allServers = servers;
-                updateStats(servers);
+                // 处理服务器数据
+                allServers = servers.map(server => ({
+                    ...server,
+                    isOnline: server.lastUpdate ? 
+                        (Date.now() - new Date(server.lastUpdate).getTime() < 30000) : false,
+                    traffic: {
+                        received: server.traffic?.received || '0 B',
+                        sent: server.traffic?.sent || '0 B'
+                    },
+                    systemInfo: server.systemInfo || {
+                        platform: '未知',
+                        arch: '未知'
+                    },
+                    totalStreams: server.totalStreams || 0,
+                    activeStreams: server.activeStreams || 0,
+                    uptime: server.uptime || '未知'
+                }));
+
+                updateStats(allServers);
                 renderPage(currentPage);
+                
+                console.log('Servers data updated:', allServers); // 添加调试日志
             } catch (error) {
                 console.error('Error updating servers:', error);
+                // 显示错误信息给用户
+                document.getElementById('serverList').innerHTML = `
+                    <tr>
+                        <td colspan="10" class="text-center text-danger">
+                            <i class="fa fa-exclamation-triangle"></i> 
+                            获取服务器数据失败: ${error.message}
+                        </td>
+                    </tr>
+                `;
             }
         }
 
@@ -152,23 +178,47 @@
         function renderPage(page) {
             const start = (page - 1) * itemsPerPage;
             const end = start + itemsPerPage;
-            // 先排序，再分页
             const sortedServers = sortServers(allServers, currentSort.field, currentSort.direction);
             const pageServers = sortedServers.slice(start, end);
             
             const serverList = document.getElementById('serverList');
             serverList.innerHTML = pageServers.map(server => `
                 <tr class="${server.isOnline ? '' : 'offline'}">
-                    <td>${server.serverName}</td>
-                    <td><a href="http://${server.serverIp}" target="_blank">${server.serverIp}</a></td>
-                    <td><span class="badge ${server.isOnline ? 'bg-success' : 'bg-danger'}">${server.isOnline ? '在线' : '离线'}</span></td>
+                    <td>
+                        <div class="d-flex align-items-center">
+                            <span class="me-2 ${server.isOnline ? 'text-success' : 'text-danger'}">
+                                <i class="fa fa-circle"></i>
+                            </span>
+                            ${server.serverName || '未命名服务器'}
+                        </div>
+                    </td>
+                    <td>
+                        <a href="http://${server.serverIp}" target="_blank" 
+                           class="text-decoration-none">
+                            ${server.serverIp || '未知IP'}
+                            <i class="fa fa-external-link ms-1 small"></i>
+                        </a>
+                    </td>
+                    <td>
+                        <span class="badge ${server.isOnline ? 'bg-success' : 'bg-danger'}">
+                            ${server.isOnline ? '在线' : '离线'}
+                        </span>
+                    </td>
                     <td>${server.version || '未知'}</td>
                     <td>${formatUptime(server.uptime)}</td>
                     <td>${server.totalStreams}</td>
-                    <td>${server.activeStreams}</td>
-                    <td>${formatBytes(server.traffic.received)}</td>
-                    <td>${formatBytes(server.traffic.sent)}</td>
-                    <td>${server.systemInfo.platform} / ${server.systemInfo.arch}</td>
+                    <td>
+                        <span class="badge bg-info">
+                            ${server.activeStreams}
+                        </span>
+                    </td>
+                    <td>${server.traffic.received}</td>
+                    <td>${server.traffic.sent}</td>
+                    <td>
+                        <small class="text-muted">
+                            ${server.systemInfo.platform} / ${server.systemInfo.arch}
+                        </small>
+                    </td>
                 </tr>
             `).join('');
 
@@ -211,19 +261,37 @@
         }
 
         // 其他辅助函数保持不变
-        function formatUptime(ms) {
-            const seconds = Math.floor(ms / 1000);
-            const minutes = Math.floor(seconds / 60);
-            const hours = Math.floor(minutes / 60);
-            const days = Math.floor(hours / 24);
+        function formatUptime(uptime) {
+            if (!uptime || uptime === '未知') return '未知';
+            
+            try {
+                if (typeof uptime === 'string') {
+                    // 如果已经是格式化的字符串，直接返回
+                    if (uptime.includes('天') || uptime.includes('时') || 
+                        uptime.includes('分') || uptime.includes('秒')) {
+                        return uptime;
+                    }
+                }
 
-            const parts = [];
-            if (days > 0) parts.push(`${days}天`);
-            if (hours % 24 > 0 || days > 0) parts.push(`${hours % 24}时`);
-            if (minutes % 60 > 0 || hours > 0) parts.push(`${minutes % 60}分`);
-            if (parts.length === 0) parts.push('刚刚启动');
+                const ms = typeof uptime === 'number' ? uptime : parseInt(uptime);
+                if (isNaN(ms)) return '未知';
 
-            return parts.join(' ');
+                const seconds = Math.floor(ms / 1000);
+                const minutes = Math.floor(seconds / 60);
+                const hours = Math.floor(minutes / 60);
+                const days = Math.floor(hours / 24);
+
+                const parts = [];
+                if (days > 0) parts.push(`${days}天`);
+                if (hours % 24 > 0 || days > 0) parts.push(`${hours % 24}时`);
+                if (minutes % 60 > 0 || hours > 0) parts.push(`${minutes % 60}分`);
+                if (seconds % 60 > 0 || minutes > 0) parts.push(`${seconds % 60}秒`);
+                
+                return parts.length > 0 ? parts.join(' ') : '刚刚启动';
+            } catch (error) {
+                console.error('Error formatting uptime:', error);
+                return '未知';
+            }
         }
 
         function formatBytes(bytes) {
@@ -235,18 +303,31 @@
         }
 
         function refreshData() {
-            const refreshBtn = document.querySelector('.refresh-btn i');
-            refreshBtn.style.transition = 'transform 0.5s';
-            refreshBtn.style.transform = 'rotate(360deg)';
-            setTimeout(() => {
-                refreshBtn.style.transform = 'rotate(0deg)';
-            }, 500);
-            updateServers();
+            const refreshBtn = document.querySelector('.refresh-btn');
+            refreshBtn.disabled = true;
+            refreshBtn.innerHTML = '<i class="fa fa-refresh fa-spin"></i> 刷新中...';
+            
+            updateServers().finally(() => {
+                setTimeout(() => {
+                    refreshBtn.disabled = false;
+                    refreshBtn.innerHTML = '<i class="fa fa-refresh"></i> 刷新数据';
+                }, 1000);
+            });
         }
 
-        // 每5秒更新一次
-        setInterval(updateServers, 5000);
-        updateServers();
+        // 修改自动更新间隔为5秒
+        clearInterval(window.updateInterval);
+        window.updateInterval = setInterval(updateServers, 5000);
+
+        // 添加页面可见性检测
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                clearInterval(window.updateInterval);
+            } else {
+                updateServers();
+                window.updateInterval = setInterval(updateServers, 5000);
+            }
+        });
 
         // 添加排序函数
         function sortServers(servers, field, direction) {
