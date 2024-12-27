@@ -232,55 +232,61 @@
             const pageServers = sortedServers.slice(start, end);
             
             const serverList = document.getElementById('serverList');
-            serverList.innerHTML = pageServers.map(server => `
-                <tr class="${server.isOnline ? '' : 'offline'}">
-                    <td>
-                        <div class="d-flex align-items-center">
-                            <span class="me-2 ${server.isOnline ? 'text-success' : 'text-danger'}">
-                                <i class="fa fa-circle"></i>
-                            </span>
-                            ${server.serverName || '未命名服务器'}
-                        </div>
-                    </td>
-                    <td>
-                        <a href="http://${server.serverIp}:${server.serverAddress?.split(':')[1] || '3000'}/admin" 
-                           target="_blank" 
-                           rel="noopener noreferrer" 
-                           class="text-decoration-none">
-                            ${server.serverIp || '未知IP'}
-                            <i class="fa fa-external-link ms-1 small"></i>
-                        </a>
-                    </td>
-                    <td>
-                        <span class="badge ${server.isOnline ? 'bg-success' : 'bg-danger'}">
-                            ${server.isOnline ? '在线' : '离线'}
-                        </span>
-                    </td>
-                    <td>${server.version || '未知'}</td>
-                    <td>${formatUptime(server.uptime)}</td>
-                    <td>${server.totalStreams}</td>
-                    <td>
-                        <span class="badge bg-info">
-                            ${server.activeStreams}
-                        </span>
-                    </td>
-                    <td>${server.traffic.received}</td>
-                    <td>${server.traffic.sent}</td>
-                    <td>
-                        <div class="small">
-                            <div>${server.systemInfo?.platform || '未知'} / ${server.systemInfo?.arch || '未知'}</div>
-                            <div class="text-muted">
-                                <span title="内存使用率">
-                                    <i class="fa fa-memory"></i> ${server.resourceUsage?.memoryUsage || 'N/A'}
+            serverList.innerHTML = pageServers.map(server => {
+                // 构建正确的服务器管理地址
+                const serverPort = server.serverAddress?.split(':')[1] || '3000';
+                const serverProtocol = serverPort === '443' ? 'https' : 'http';
+                const adminUrl = `${serverProtocol}://${server.serverIp}:${serverPort}/`;
+                
+                return `
+                    <tr class="${server.isOnline ? '' : 'offline'}">
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <span class="me-2 ${server.isOnline ? 'text-success' : 'text-danger'}">
+                                    <i class="fa fa-circle"></i>
                                 </span>
-                                <span class="ms-2" title="CPU使用率">
-                                    <i class="fa fa-microchip"></i> ${server.resourceUsage?.cpuUsage || 'N/A'}
-                                </span>
+                                ${server.serverName || '未命名服务器'}
                             </div>
-                        </div>
-                    </td>
-                </tr>
-            `).join('');
+                        </td>
+                        <td>
+                            <a href="${adminUrl}" 
+                               onclick="window.open(this.href, '_blank', 'noopener,noreferrer'); return false;"
+                               class="text-decoration-none">
+                                ${server.serverIp || '未知IP'}:${serverPort}
+                                <i class="fa fa-external-link ms-1 small"></i>
+                            </a>
+                        </td>
+                        <td>
+                            <span class="badge ${server.isOnline ? 'bg-success' : 'bg-danger'}">
+                                ${server.isOnline ? '在线' : '离线'}
+                            </span>
+                        </td>
+                        <td>${server.version || '未知'}</td>
+                        <td>${formatUptime(server.uptime)}</td>
+                        <td>${server.totalStreams}</td>
+                        <td>
+                            <span class="badge bg-info">
+                                ${server.activeStreams}
+                            </span>
+                        </td>
+                        <td>${server.traffic.received}</td>
+                        <td>${server.traffic.sent}</td>
+                        <td>
+                            <div class="small">
+                                <div>${server.systemInfo?.platform || '未知'} / ${server.systemInfo?.arch || '未知'}</div>
+                                <div class="text-muted">
+                                    <span title="内存使用率">
+                                        <i class="fa fa-memory"></i> ${server.resourceUsage?.memoryUsage || 'N/A'}
+                                    </span>
+                                    <span class="ms-2" title="CPU使用率">
+                                        <i class="fa fa-microchip"></i> ${server.resourceUsage?.cpuUsage || 'N/A'}
+                                    </span>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
 
             updatePagination();
         }
