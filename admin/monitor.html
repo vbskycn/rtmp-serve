@@ -126,40 +126,62 @@
 
         async function updateServers() {
             try {
-                const serversResponse = await fetch('/api/servers');
+                const serversResponse = await fetch('/api/servers', {
+                    headers: {
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache'
+                    }
+                });
+                
                 if (!serversResponse.ok) {
                     throw new Error(`HTTP error! status: ${serversResponse.status}`);
                 }
+                
                 const servers = await serversResponse.json();
                 
                 // 处理服务器数据
                 allServers = servers.map(server => ({
                     ...server,
                     isOnline: server.lastUpdate ? 
-                        (Date.now() - new Date(server.lastUpdate).getTime() < 30000) : false,
+                        (Date.now() - new Date(server.lastUpdate).getTime() < 15000) : false, // 修改为15秒超时
                     traffic: {
-                        received: server.traffic?.received || '0 B',
-                        sent: server.traffic?.sent || '0 B'
+                        received: formatBytes(server.traffic?.received || 0),
+                        sent: formatBytes(server.traffic?.sent || 0)
                     },
                     systemInfo: server.systemInfo || {
                         platform: '未知',
-                        arch: '未知'
-                    },
-                    totalStreams: server.totalStreams || 0,
-                    activeStreams: server.activeStreams || 0,
-                    uptime: server.uptime || '未知'
+                        arch: '未知',
+                        memory: {
+                            total: 0,
+                            free: 0
+                        },
+                        cpu: []
+                    }
+                }));
+
+                // 添加系统资源使用率计算
+                allServers = allServers.map(server => ({
+                    ...server,
+                    resourceUsage: {
+                        memoryUsage: server.systemInfo.memory ? 
+                            ((server.systemInfo.memory.total - server.systemInfo.memory.free) / server.systemInfo.memory.total * 100).toFixed(1) + '%' : 
+                            'N/A',
+                        cpuUsage: server.systemInfo.cpu?.length ? 
+                            (server.systemInfo.cpu.reduce((acc, cpu) => acc + cpu.times.user + cpu.times.nice + cpu.times.sys, 0) / 
+                            (server.systemInfo.cpu.length * (cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.idle)) * 100).toFixed(1) + '%' : 
+                            'N/A'
+                    }
                 }));
 
                 updateStats(allServers);
                 renderPage(currentPage);
                 
-                console.log('Servers data updated:', allServers); // 添加调试日志
+                console.log('Servers data updated:', allServers);
             } catch (error) {
                 console.error('Error updating servers:', error);
-                // 显示错误信息给用户
                 document.getElementById('serverList').innerHTML = `
                     <tr>
-                        <td colspan="10" class="text-center text-danger">
+                        <td colspan="12" class="text-center text-danger">
                             <i class="fa fa-exclamation-triangle"></i> 
                             获取服务器数据失败: ${error.message}
                         </td>
@@ -193,8 +215,8 @@
                         </div>
                     </td>
                     <td>
-                        <a href="http://${server.serverIp}" target="_blank" 
-                           class="text-decoration-none">
+                        <a href="http://${server.serverIp}:${server.serverAddress?.split(':')[1] || '3000'}" 
+                           target="_blank" class="text-decoration-none">
                             ${server.serverIp || '未知IP'}
                             <i class="fa fa-external-link ms-1 small"></i>
                         </a>
@@ -215,9 +237,13 @@
                     <td>${server.traffic.received}</td>
                     <td>${server.traffic.sent}</td>
                     <td>
-                        <small class="text-muted">
-                            ${server.systemInfo.platform} / ${server.systemInfo.arch}
-                        </small>
+                        <div class="small">
+                            <div>${server.systemInfo.platform} / ${server.systemInfo.arch}</div>
+                            <div class="text-muted">
+                                内存: ${server.resourceUsage.memoryUsage}
+                                CPU: ${server.resourceUsage.cpuUsage}
+                            </div>
+                        </div>
                     </td>
                 </tr>
             `).join('');
@@ -392,6 +418,19 @@
         document.addEventListener('DOMContentLoaded', () => {
             initSortListeners();
             updateServers();
+            
+            // 修改更新间隔为5秒
+            window.updateInterval = setInterval(updateServers, 5000);
+            
+            // 添加页面可见性检测
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    clearInterval(window.updateInterval);
+                } else {
+                    updateServers();
+                    window.updateInterval = setInterval(updateServers, 5000);
+                }
+            });
         });
     </script>
 </body>

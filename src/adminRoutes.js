@@ -7,6 +7,7 @@ const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const { verifyUser, updatePassword, JWT_SECRET, verifyToken } = require('./middleware/auth');
 const config = require('../config/config.json');
+const os = require('os');
 
 // 创建 StreamManager 实例
 const streamManager = new StreamManager();
@@ -435,7 +436,7 @@ router.get('/api/streams/:streamId', async (req, res) => {
 // 修改获取系统统计信息的路由
 router.get('/api/stats', async (req, res) => {
     try {
-        // 使用新的 getStats 方法替代 getTrafficStats
+        // 使用新的 getStats 方法替��� getTrafficStats
         const stats = streamManager.getStats();
         res.json(stats);
     } catch (error) {
@@ -622,6 +623,114 @@ router.post('/api/restart', async (req, res) => {
     } catch (error) {
         console.error('重启服务器失败:', error);
         res.json({ success: false, error: '重启失败: ' + error.message });
+    }
+});
+
+// 添加 /api/servers 路由
+router.get('/api/servers', async (req, res) => {
+    try {
+        const streamManager = req.app.get('streamManager');
+        
+        // 获取系统信息
+        const systemInfo = {
+            platform: os.platform(),
+            arch: os.arch(),
+            nodeVersion: process.version,
+            memory: {
+                total: os.totalmem(),
+                free: os.freemem()
+            },
+            cpu: os.cpus()
+        };
+
+        // 获取服务器统计信息
+        const stats = streamManager.getStats();
+        
+        // 获取公网IP
+        const publicIP = await streamManager.getPublicIP();
+        
+        // 构建服务器信息
+        const serverInfo = [{
+            serverName: os.hostname(),
+            serverAddress: `${publicIP}:${streamManager.config.server.port}`,
+            serverIp: publicIP,
+            version: streamManager.config.version,
+            isOnline: true,
+            lastUpdate: new Date().toISOString(),
+            uptime: stats.uptime,
+            totalStreams: streamManager.streams.size,
+            activeStreams: streamManager.streamProcesses.size,
+            traffic: {
+                received: stats.traffic.received,
+                sent: stats.traffic.sent
+            },
+            systemInfo: {
+                platform: systemInfo.platform,
+                arch: systemInfo.arch,
+                nodeVersion: systemInfo.nodeVersion,
+                memory: {
+                    total: systemInfo.memory.total,
+                    free: systemInfo.memory.free,
+                    used: systemInfo.memory.total - systemInfo.memory.free
+                },
+                cpu: systemInfo.cpu.map(cpu => ({
+                    model: cpu.model,
+                    speed: cpu.speed,
+                    times: cpu.times
+                }))
+            },
+            streams: Array.from(streamManager.streams.entries()).map(([id, stream]) => ({
+                id: id,
+                name: stream.name,
+                active: streamManager.streamProcesses.has(id),
+                viewers: streamManager.activeViewers.get(id) || 0,
+                stats: streamManager.getStreamStats(id)
+            }))
+        }];
+
+        // 添加调试日志
+        logger.debug('Server info response:', {
+            serverCount: serverInfo.length,
+            firstServer: {
+                name: serverInfo[0].serverName,
+                ip: serverInfo[0].serverIp,
+                streams: serverInfo[0].totalStreams
+            }
+        });
+
+        res.json(serverInfo);
+    } catch (error) {
+        logger.error('Error in /api/servers:', error);
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: error.message
+        });
+    }
+});
+
+// 添加心跳接收路由
+router.post('/api/heartbeat', (req, res) => {
+    try {
+        const heartbeatData = req.body;
+        
+        // 记录心跳数据
+        logger.debug('Received heartbeat from:', {
+            serverName: heartbeatData.serverName,
+            serverIp: heartbeatData.serverIp,
+            timestamp: new Date().toISOString()
+        });
+
+        // 返回成功响应
+        res.json({
+            success: true,
+            receivedAt: Date.now()
+        });
+    } catch (error) {
+        logger.error('Error processing heartbeat:', error);
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: error.message
+        });
     }
 });
 
