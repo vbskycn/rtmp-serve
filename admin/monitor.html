@@ -130,7 +130,8 @@
                     headers: {
                         'Cache-Control': 'no-cache',
                         'Pragma': 'no-cache'
-                    }
+                    },
+                    credentials: 'same-origin' // 添加凭证支持
                 });
                 
                 if (!serversResponse.ok) {
@@ -138,12 +139,16 @@
                 }
                 
                 const servers = await serversResponse.json();
+                if (!Array.isArray(servers)) {
+                    console.warn('Received non-array response:', servers);
+                    return;
+                }
                 
                 // 处理服务器数据
                 allServers = servers.map(server => ({
                     ...server,
                     isOnline: server.lastUpdate ? 
-                        (Date.now() - new Date(server.lastUpdate).getTime() < 15000) : false, // 修改为15秒超时
+                        (Date.now() - new Date(server.lastUpdate).getTime() < 30000) : true, // 默认为true，因为是刚获取的数据
                     traffic: {
                         received: formatBytes(server.traffic?.received || 0),
                         sent: formatBytes(server.traffic?.sent || 0)
@@ -204,7 +209,7 @@
                 console.error('Error updating servers:', error);
                 document.getElementById('serverList').innerHTML = `
                     <tr>
-                        <td colspan="12" class="text-center text-danger">
+                        <td colspan="10" class="text-center text-danger">
                             <i class="fa fa-exclamation-triangle"></i> 
                             获取服务器数据失败: ${error.message}
                         </td>
@@ -238,8 +243,10 @@
                         </div>
                     </td>
                     <td>
-                        <a href="http://${server.serverIp}:${server.serverAddress?.split(':')[1] || '3000'}" 
-                           target="_blank" class="text-decoration-none">
+                        <a href="http://${server.serverIp}:${server.serverAddress?.split(':')[1] || '3000'}/admin" 
+                           target="_blank" 
+                           rel="noopener noreferrer" 
+                           class="text-decoration-none">
                             ${server.serverIp || '未知IP'}
                             <i class="fa fa-external-link ms-1 small"></i>
                         </a>
