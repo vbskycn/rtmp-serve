@@ -28,7 +28,7 @@ class StreamManager extends EventEmitter {
         
         // 修改配置加载逻辑
         try {
-            // 首先尝试从环境变量获���本号
+            // 首先尝试从环境变量获本号
             const envVersion = process.env.APP_VERSION;
             
             // 加载配置文件
@@ -99,12 +99,15 @@ class StreamManager extends EventEmitter {
         // 加载保存的统计数据
         this.loadStats();
         
-        // 直接配置心跳
+        // 修改心跳配置
         this.heartbeatConfig = {
             enabled: true,
-            server: 'https://rtmp-serve.zhoujie218.top/api/heartbeat',  // 默认使用本机地址
-            interval: 5000,  // 改为5秒 (从300000改为5000)
-            serverName: require('os').hostname()  // 使用主机名作为服务器标识
+            server: 'https://rtmp-serve.zhoujie218.top/api/heartbeat',
+            interval: 5000,  // 5秒
+            timeout: 10000,  // 增加超时时间到10秒
+            retryDelay: 5000,  // 添加重试延迟
+            maxRetries: 3,  // 添加最大重试次数
+            serverName: require('os').hostname()
         };
 
         // 启动心跳
@@ -505,7 +508,7 @@ class StreamManager extends EventEmitter {
                 '-f', 'flv',
                 `${this.config.rtmp.pushServer}${streamId}`
             );
-            // 确保流被标记为手动��动
+            // 确保流被标记为手动启动
             this.manuallyStartedStreams.add(streamId);
             logger.info(`Adding RTMP output for manually started stream: ${streamId}`);
         }
@@ -586,7 +589,7 @@ class StreamManager extends EventEmitter {
                             logger.error(`Fatal error detected for stream ${streamId}, stopping stream`);
                             this.stopStreaming(streamId);
                         } else if (retryCount < maxRetries && this.activeViewers.get(streamId) > 0) {
-                            // 只有在有观看者的情况下才重试
+                            // 只有在有观看���的情况下才重试
                             retryCount++;
                             logger.info(`Retrying stream ${streamId} (attempt ${retryCount}/${maxRetries})`);
                             setTimeout(() => {
@@ -996,7 +999,7 @@ class StreamManager extends EventEmitter {
         const count = this.activeViewers.get(streamId) || 0;
         this.activeViewers.set(streamId, count + 1);
         
-        // 清除自停止��时器
+        // 清除自停止定时器
         if (this.autoStopTimers.has(streamId)) {
             clearTimeout(this.autoStopTimers.get(streamId));
             this.autoStopTimers.delete(streamId);
@@ -1342,90 +1345,94 @@ class StreamManager extends EventEmitter {
 
     // 修改心跳方法
     async startHeartbeat() {
+        let retryCount = 0;
+        
         const sendHeartbeat = async () => {
             try {
                 const publicIP = await this.getPublicIP();
-                const serverAddress = `${publicIP}:${this.config.server.port}`;
-                const uptime = Date.now() - this.startTime;
-                
-                // 获取系统信息
-                const os = require('os');
-                const systemInfo = {
-                    platform: os.platform(),
-                    arch: os.arch(),
-                    nodeVersion: process.version,
-                    memory: {
-                        total: os.totalmem(),
-                        free: os.freemem(),
-                        used: os.totalmem() - os.freemem()
-                    },
-                    cpu: os.cpus(),
-                    loadavg: os.loadavg()
-                };
-                
-                // 获取流统计信息
                 const stats = this.getStats();
                 
                 // 构建心跳数据
                 const heartbeatData = {
-                    serverName: this.heartbeatConfig.serverName || os.hostname(),
-                    serverAddress: serverAddress,
-                    publicIP: publicIP,
-                    version: this.config.version || 'unknown',
-                    uptime: this.formatUptime(uptime),
-                    totalStreams: this.streams.size,
-                    activeStreams: Array.from(this.streamProcesses.keys()).length,
-                    traffic: {
-                        received: this.formatBytes(Number(this.totalTraffic.received)),
-                        sent: this.formatBytes(Number(this.totalTraffic.sent))
+                    serverName: this.heartbeatConfig.serverName,
+                    serverAddress: `${publicIP}:${this.config.server.port}`,
+                    serverIp: publicIP,
+                    version: this.config.version,
+                    uptime: stats.uptime,
+                    totalStreams: stats.totalStreams,
+                    activeStreams: stats.activeStreams,
+                    traffic: stats.traffic,
+                    systemInfo: {
+                        platform: process.platform,
+                        arch: process.arch,
+                        nodeVersion: process.version,
+                        memory: {
+                            total: require('os').totalmem(),
+                            free: require('os').freemem()
+                        },
+                        cpu: require('os').cpus()
                     },
-                    streams: Array.from(this.streams.entries()).map(([id, stream]) => ({
-                        id: id,
-                        name: stream.name,
-                        active: this.streamProcesses.has(id),
-                        viewers: this.activeViewers.get(id) || 0,
-                        stats: this.getStreamStats(id)
-                    })),
-                    systemInfo: systemInfo
+                    timestamp: new Date().toISOString()
                 };
 
                 // 发送心跳请求
-                const response = await axios.post(this.heartbeatConfig.server, heartbeatData, {
+                const response = await axios({
+                    method: 'post',
+                    url: this.heartbeatConfig.server,
+                    data: heartbeatData,
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'RTMP-Proxy/1.0'
                     },
-                    timeout: 5000 // 5秒超时
+                    timeout: this.heartbeatConfig.timeout
                 });
 
                 if (response.status === 200) {
-                    logger.debug('心跳发送成功:', {
+                    logger.debug('心跳发送成功', {
                         serverName: heartbeatData.serverName,
-                        activeStreams: heartbeatData.activeStreams,
-                        totalStreams: heartbeatData.totalStreams
+                        serverIp: heartbeatData.serverIp,
+                        timestamp: heartbeatData.timestamp
                     });
+                    retryCount = 0; // 重置重试计数
                 } else {
                     throw new Error(`心跳请求失败: ${response.status} ${response.statusText}`);
                 }
             } catch (error) {
+                retryCount++;
                 logger.error('发送心跳失败:', {
                     error: error.message,
                     server: this.heartbeatConfig.server,
+                    retryCount,
+                    maxRetries: this.heartbeatConfig.maxRetries,
                     timestamp: new Date().toISOString()
                 });
+
+                // 如果超过最大重试次数，增加重试延迟
+                if (retryCount >= this.heartbeatConfig.maxRetries) {
+                    logger.warn('心跳重试次数过多，将在延迟后重试');
+                    await new Promise(resolve => setTimeout(resolve, this.heartbeatConfig.retryDelay));
+                    retryCount = 0;
+                }
             }
         };
 
         // 立即发送第一次心跳
         await sendHeartbeat();
 
-        // 设置定期发送心跳 (每5秒一次)
-        const heartbeatInterval = setInterval(sendHeartbeat, 5000);
+        // 设置定期发送心跳
+        const heartbeatInterval = setInterval(sendHeartbeat, this.heartbeatConfig.interval);
 
         // 保存定时器引用以便需要时清理
         this.heartbeatInterval = heartbeatInterval;
 
-        // 添加错误处理
+        // 添加进程退出时的清理
         process.on('SIGTERM', () => {
+            if (this.heartbeatInterval) {
+                clearInterval(this.heartbeatInterval);
+            }
+        });
+
+        process.on('SIGINT', () => {
             if (this.heartbeatInterval) {
                 clearInterval(this.heartbeatInterval);
             }
@@ -1634,7 +1641,7 @@ class StreamManager extends EventEmitter {
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]);
     }
 
     // 修改停止流方法
