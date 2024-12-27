@@ -28,7 +28,7 @@ class StreamManager extends EventEmitter {
         
         // 修改配置加载逻辑
         try {
-            // 首先尝试从环境变量获���版本号
+            // 首先尝试从环境变量获�����版本号
             const envVersion = process.env.APP_VERSION;
             
             // 加载配置文件
@@ -396,7 +396,7 @@ class StreamManager extends EventEmitter {
                 throw new Error('Stream not found');
             }
 
-            // 如果是手动启动，记录到集合中
+            // 如果是手动启动，记录到集合��
             if (isManualStart) {
                 this.manuallyStartedStreams.add(streamId);
                 logger.info(`Stream ${streamId} marked as manually started`);
@@ -1092,7 +1092,7 @@ class StreamManager extends EventEmitter {
                 
                 // 检查新ID是否已存在
                 if (this.streams.has(newId)) {
-                    throw new Error('新ID已存在');
+                    throw new Error('��ID已存在');
                 }
 
                 // 先停止当前流
