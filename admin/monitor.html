@@ -160,18 +160,41 @@
                 }));
 
                 // 添加系统资源使用率计算
-                allServers = allServers.map(server => ({
-                    ...server,
-                    resourceUsage: {
-                        memoryUsage: server.systemInfo.memory ? 
-                            ((server.systemInfo.memory.total - server.systemInfo.memory.free) / server.systemInfo.memory.total * 100).toFixed(1) + '%' : 
-                            'N/A',
-                        cpuUsage: server.systemInfo.cpu?.length ? 
-                            (server.systemInfo.cpu.reduce((acc, cpu) => acc + cpu.times.user + cpu.times.nice + cpu.times.sys, 0) / 
-                            (server.systemInfo.cpu.length * (cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.idle)) * 100).toFixed(1) + '%' : 
-                            'N/A'
+                allServers = allServers.map(server => {
+                    // 计算内存使用率
+                    const memoryUsage = server.systemInfo.memory ? 
+                        ((server.systemInfo.memory.total - server.systemInfo.memory.free) / server.systemInfo.memory.total * 100).toFixed(1) + '%' : 
+                        'N/A';
+
+                    // 计算CPU使用率
+                    let cpuUsage = 'N/A';
+                    if (server.systemInfo.cpu && Array.isArray(server.systemInfo.cpu)) {
+                        try {
+                            const cpuTimes = server.systemInfo.cpu.map(cpu => ({
+                                total: Object.values(cpu.times).reduce((a, b) => a + b, 0),
+                                idle: cpu.times.idle
+                            }));
+                            
+                            const avgUsage = cpuTimes.reduce((acc, cpu) => {
+                                const used = cpu.total - cpu.idle;
+                                return acc + (used / cpu.total * 100);
+                            }, 0) / cpuTimes.length;
+                            
+                            cpuUsage = avgUsage.toFixed(1) + '%';
+                        } catch (error) {
+                            console.error('Error calculating CPU usage:', error);
+                            cpuUsage = 'Error';
+                        }
                     }
-                }));
+
+                    return {
+                        ...server,
+                        resourceUsage: {
+                            memoryUsage,
+                            cpuUsage
+                        }
+                    };
+                });
 
                 updateStats(allServers);
                 renderPage(currentPage);
@@ -238,10 +261,14 @@
                     <td>${server.traffic.sent}</td>
                     <td>
                         <div class="small">
-                            <div>${server.systemInfo.platform} / ${server.systemInfo.arch}</div>
+                            <div>${server.systemInfo?.platform || '未知'} / ${server.systemInfo?.arch || '未知'}</div>
                             <div class="text-muted">
-                                内存: ${server.resourceUsage.memoryUsage}
-                                CPU: ${server.resourceUsage.cpuUsage}
+                                <span title="内存使用率">
+                                    <i class="fa fa-memory"></i> ${server.resourceUsage?.memoryUsage || 'N/A'}
+                                </span>
+                                <span class="ms-2" title="CPU使用率">
+                                    <i class="fa fa-microchip"></i> ${server.resourceUsage?.cpuUsage || 'N/A'}
+                                </span>
                             </div>
                         </div>
                     </td>
