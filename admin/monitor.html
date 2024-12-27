@@ -249,8 +249,8 @@
                             </div>
                         </td>
                         <td>
-                            <a href="${adminUrl}" 
-                               onclick="window.open(this.href, '_blank', 'noopener,noreferrer'); return false;"
+                            <a href="javascript:void(0)" 
+                               onclick="openServerAdmin('${adminUrl}')"
                                class="text-decoration-none">
                                 ${server.serverIp || '未知IP'}:${serverPort}
                                 <i class="fa fa-external-link ms-1 small"></i>
@@ -472,6 +472,28 @@
                 }
             });
         });
+
+        // 添加新的函数来处理服务器管理页面的打开
+        function openServerAdmin(url) {
+            const windowFeatures = [
+                'noopener',
+                'noreferrer',
+                'width=1200',
+                'height=800',
+                'menubar=no',
+                'toolbar=no',
+                'location=yes',
+                'status=no'
+            ].join(',');
+            
+            const newWindow = window.open(url, '_blank', windowFeatures);
+            
+            if (newWindow) {
+                newWindow.focus();
+            } else {
+                alert('弹出窗口被阻止，请允许此网站的弹出窗口。');
+            }
+        }
     </script>
 </body>
 </html> 
