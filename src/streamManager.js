@@ -28,7 +28,7 @@ class StreamManager extends EventEmitter {
         
         // 修改配置加载逻辑
         try {
-            // 首先尝试从环境变量获版本号
+            // 首先尝试从环境变量获���本号
             const envVersion = process.env.APP_VERSION;
             
             // 加载配置文件
@@ -356,7 +356,7 @@ class StreamManager extends EventEmitter {
 
             const actualStreamId = stream.id;
 
-            // 检查流是否��经在运行
+            // 检查流是否经在运行
             if (!this.streamProcesses.has(actualStreamId)) {
                 logger.info(`Starting stream ${actualStreamId} on demand`);
                 try {
@@ -505,7 +505,7 @@ class StreamManager extends EventEmitter {
                 '-f', 'flv',
                 `${this.config.rtmp.pushServer}${streamId}`
             );
-            // 确保流被标记为手动启动
+            // 确保流被标记为手动��动
             this.manuallyStartedStreams.add(streamId);
             logger.info(`Adding RTMP output for manually started stream: ${streamId}`);
         }
@@ -996,7 +996,7 @@ class StreamManager extends EventEmitter {
         const count = this.activeViewers.get(streamId) || 0;
         this.activeViewers.set(streamId, count + 1);
         
-        // 清除自停止定时器
+        // 清除自停止��时器
         if (this.autoStopTimers.has(streamId)) {
             clearTimeout(this.autoStopTimers.get(streamId));
             this.autoStopTimers.delete(streamId);
@@ -1628,13 +1628,13 @@ class StreamManager extends EventEmitter {
         return parts.length > 0 ? parts.join('') : '刚刚启动';
     }
 
-    // 格���化字节数
+    // 格式化字节数
     formatBytes(bytes) {
         if (bytes === 0) return '0 B';
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]);
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
     // 修改停止流方法
