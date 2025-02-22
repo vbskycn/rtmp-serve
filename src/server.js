@@ -57,7 +57,13 @@ app.get('/play/:streamId', async (req, res) => {
         }
 
         // 检查播放列表文件是否存在
-        const actualStreamId = streamManager.getStreamById(streamId)?.id;
+        const stream = streamManager.getStreamById(streamId);
+        const actualStreamId = stream ? stream.id : null;
+        if (!actualStreamId) {
+            logger.error(`Stream not found: ${streamId}`);
+            return res.status(404).send('Stream not found');
+        }
+
         const playlistPath = path.join(__dirname, '../streams', actualStreamId, 'playlist.m3u8');
         
         if (!fs.existsSync(playlistPath)) {
