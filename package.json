@@ -1,7 +1,7 @@
 {
-  "name": "rtmp-serve",
+  "name": "rtmp-server",
   "version": "1.8.7",
-  "description": "Stream rtmp-serve",
+  "description": "Stream rtmp-server",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

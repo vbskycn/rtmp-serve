@@ -1,9 +1,9 @@
 version: '3'
 
 services:
-  rtmp-serve:
-    image: zhoujie218/rtmp-serve:latest
-    container_name: rtmp-serve
+  rtmp-server:
+    image: zhoujie218/rtmp-server:latest
+    container_name: rtmp-server
     restart: unless-stopped
     ports:
       - "3000:3000"
