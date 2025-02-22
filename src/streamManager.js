@@ -589,7 +589,7 @@ class StreamManager extends EventEmitter {
                             logger.error(`Fatal error detected for stream ${streamId}, stopping stream`);
                             this.stopStreaming(streamId);
                         } else if (retryCount < maxRetries && this.activeViewers.get(streamId) > 0) {
-                            // 只有在有观看���的情况下才重试
+                            // 只有在有观看者的情况下才重试
                             retryCount++;
                             logger.info(`Retrying stream ${streamId} (attempt ${retryCount}/${maxRetries})`);
                             setTimeout(() => {
@@ -1345,6 +1345,11 @@ class StreamManager extends EventEmitter {
 
     // 修改心跳方法
     async startHeartbeat() {
+        // 如果心跳配置被禁用，直接返回
+        if (!this.heartbeatConfig.enabled) {
+            return;
+        }
+
         let retryCount = 0;
         
         const sendHeartbeat = async () => {
@@ -1375,8 +1380,8 @@ class StreamManager extends EventEmitter {
                     timestamp: new Date().toISOString()
                 };
 
-                // 发送心跳请求
-                const response = await axios({
+                // 发送心跳请求，设置较短的超时时间
+                await axios({
                     method: 'post',
                     url: this.heartbeatConfig.server,
                     data: heartbeatData,
@@ -1384,59 +1389,73 @@ class StreamManager extends EventEmitter {
                         'Content-Type': 'application/json',
                         'User-Agent': 'RTMP-Proxy/1.0'
                     },
-                    timeout: this.heartbeatConfig.timeout
+                    timeout: 3000 // 缩短超时时间到3秒
                 });
 
-                if (response.status === 200) {
-                    logger.debug('心跳发送成功', {
-                        serverName: heartbeatData.serverName,
-                        serverIp: heartbeatData.serverIp,
-                        timestamp: heartbeatData.timestamp
-                    });
-                    retryCount = 0; // 重置重试计数
-                } else {
-                    throw new Error(`心跳请求失败: ${response.status} ${response.statusText}`);
+                // 心跳成功，重置重试计数
+                retryCount = 0;
+                
+                // 仅在调试模式下记录心跳成功
+                if (process.env.DEBUG) {
+                    logger.debug('Heartbeat sent successfully');
                 }
-            } catch (error) {
-                retryCount++;
-                logger.error('发送心跳失败:', {
-                    error: error.message,
-                    server: this.heartbeatConfig.server,
-                    retryCount,
-                    maxRetries: this.heartbeatConfig.maxRetries,
-                    timestamp: new Date().toISOString()
-                });
 
-                // 如果超过最大重试次数，增加重试延迟
+            } catch (error) {
+                // 心跳失败时不影响主程序，只在调试模式下记录错误
+                if (process.env.DEBUG) {
+                    logger.debug('Heartbeat failed:', {
+                        server: this.heartbeatConfig.server,
+                        retryCount,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+
+                // 增加重试延迟
+                retryCount++;
                 if (retryCount >= this.heartbeatConfig.maxRetries) {
-                    logger.warn('心跳重试次数过多，将在延迟后重试');
-                    await new Promise(resolve => setTimeout(resolve, this.heartbeatConfig.retryDelay));
-                    retryCount = 0;
+                    // 达到最大重试次数后，暂时禁用心跳一段时间
+                    if (this.heartbeatInterval) {
+                        clearInterval(this.heartbeatInterval);
+                        this.heartbeatInterval = null;
+                    }
+                    
+                    // 30分钟后重新尝试启动心跳
+                    setTimeout(() => {
+                        this.startHeartbeat();
+                    }, 30 * 60 * 1000);
+                    
+                    return;
                 }
             }
         };
 
-        // 立即发送第一次心跳
-        await sendHeartbeat();
+        try {
+            // 立即发送第一次心跳，但不等待结果
+            sendHeartbeat().catch(() => {});
 
-        // 设置定期发送心跳
-        const heartbeatInterval = setInterval(sendHeartbeat, this.heartbeatConfig.interval);
+            // 设置定期发送心跳
+            this.heartbeatInterval = setInterval(sendHeartbeat, this.heartbeatConfig.interval);
 
-        // 保存定时器引用以便需要时清理
-        this.heartbeatInterval = heartbeatInterval;
+            // 添加进程退出时的清理
+            process.once('SIGTERM', () => {
+                if (this.heartbeatInterval) {
+                    clearInterval(this.heartbeatInterval);
+                    this.heartbeatInterval = null;
+                }
+            });
 
-        // 添加进程退出时的清理
-        process.on('SIGTERM', () => {
-            if (this.heartbeatInterval) {
-                clearInterval(this.heartbeatInterval);
+            process.once('SIGINT', () => {
+                if (this.heartbeatInterval) {
+                    clearInterval(this.heartbeatInterval);
+                    this.heartbeatInterval = null;
+                }
+            });
+        } catch (error) {
+            // 心跳启动失败时不影响主程序
+            if (process.env.DEBUG) {
+                logger.debug('Failed to start heartbeat service:', error);
             }
-        });
-
-        process.on('SIGINT', () => {
-            if (this.heartbeatInterval) {
-                clearInterval(this.heartbeatInterval);
-            }
-        });
+        }
     }
 
     // 修改获取公网IP的方法

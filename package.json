@@ -1,7 +1,7 @@
 {
-  "name": "rtmp-proxy",
+  "name": "rtmp-serve",
   "version": "1.8.7",
-  "description": "Stream rtmp-server",
+  "description": "Stream rtmp-serve",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
