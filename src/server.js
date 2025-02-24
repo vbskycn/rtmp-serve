@@ -138,44 +138,30 @@ app.use((err, req, res, next) => {
     res.status(500).send('Internal Server Error');
 });
 
-// 修改获取IP的函数
+// 修改 getPublicIP 函数
 async function getPublicIP() {
     try {
-        // 尝试多个服务来确保可靠性
-        const services = [
-            'https://api.ipify.org?format=json',
-            'https://api.ip.sb/ip',
-            'https://api64.ipify.org?format=json'
-        ];
-
-        for (const service of services) {
-            try {
-                const response = await axios.get(service);
-                if (response.data) {
-                    // 根据返回格式处理
-                    const ip = typeof response.data === 'string' 
-                        ? response.data.trim() 
-                        : response.data.ip;
-                    if (ip && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
-                        return ip;
-                    }
-                }
-            } catch (err) {
-                continue; // 如果一个服务失败，尝试下一个
-            }
+        // 首先检查环境变量
+        if (process.env.SERVER_HOST) {
+            logger.info(`Using SERVER_HOST from environment: ${process.env.SERVER_HOST}`);
+            return process.env.SERVER_HOST;
         }
-        throw new Error('无法获取公网IP');
+
+        // 使用 StreamManager 的 getPublicIP 方法
+        const ip = await streamManager.getPublicIP();
+        logger.info(`Obtained public IP: ${ip}`);
+        return ip;
     } catch (error) {
-        logger.error('获取公网IP失败:', error);
-        return process.env.SERVER_HOST || '0.0.0.0'; // 失败时使用环境变量或默认值
+        logger.error('Failed to get public IP:', error);
+        return '0.0.0.0';
     }
 }
 
 // 修改 initializeServer 函数
 async function initializeServer() {
     try {
-        // 获取环境变量或公网IP
-        const serverHost = process.env.SERVER_HOST || await getPublicIP();
+        // 获取服务器IP和端口
+        const serverHost = await getPublicIP();
         const serverPort = parseInt(process.env.SERVER_PORT) || config.server.port;
 
         // 更新配置
@@ -183,18 +169,22 @@ async function initializeServer() {
         config.server.port = serverPort;
 
         // 保存更新后的配置
-        fs.writeFileSync(
-            path.join(__dirname, '../config/config.json'),
-            JSON.stringify(config, null, 2)
-        );
+        const configPath = path.join(__dirname, '../config/config.json');
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
         
         // 启动服务器
-        app.listen(serverPort, '0.0.0.0', () => { // 注意这里使用 0.0.0.0 来监听所有接口
-            logger.info(`Server running on http://${serverHost}:${serverPort}`);
-            logger.info(`Public IP: ${serverHost}`);
+        app.listen(serverPort, '0.0.0.0', () => {
+            logger.info(`Server running at http://${serverHost}:${serverPort}`);
+            logger.info(`Server IP: ${serverHost}`);
+            logger.info(`Server Port: ${serverPort}`);
         });
+
+        // 启动心跳服务
+        if (streamManager.heartbeatConfig?.enabled) {
+            streamManager.startHeartbeat();
+        }
     } catch (error) {
-        logger.error('Error initializing server:', error);
+        logger.error('Server initialization failed:', error);
         process.exit(1);
     }
 }

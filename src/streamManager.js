@@ -1463,51 +1463,75 @@ class StreamManager extends EventEmitter {
         try {
             // 按优先级尝试多个IP获取服务
             const services = [
-                'https://api.ipify.org?format=json',
-                'https://api.ip.sb/ip',
-                'https://api64.ipify.org?format=json',
-                'https://ifconfig.me/ip'
+                {
+                    url: 'https://api.ipify.org?format=json',
+                    parser: (data) => typeof data === 'string' ? data.trim() : data.ip
+                },
+                {
+                    url: 'https://api.ip.sb/ip',
+                    parser: (data) => data.trim()
+                },
+                {
+                    url: 'https://api64.ipify.org?format=json',
+                    parser: (data) => data.ip
+                },
+                {
+                    url: 'https://ifconfig.me/ip',
+                    parser: (data) => data.trim()
+                },
+                {
+                    url: 'https://ip.seeip.org/json',
+                    parser: (data) => data.ip
+                }
             ];
 
-            for (const service of services) {
-                try {
-                    const response = await axios.get(service, { 
-                        timeout: 3000,
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                        }
-                    });
-                    
-                    if (response.data) {
-                        const ip = typeof response.data === 'string' 
-                            ? response.data.trim() 
-                            : response.data.ip;
-                        
+            // 增加请求超时时间
+            const axiosConfig = {
+                timeout: 5000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                }
+            };
+
+            // 并发请求所有服务
+            const requests = services.map(service => 
+                axios.get(service.url, axiosConfig)
+                    .then(response => {
+                        const ip = service.parser(response.data);
                         if (ip && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
-                            logger.debug('成功获取公网IP:', ip);
                             return ip;
                         }
-                    }
-                } catch (err) {
-                    logger.debug(`IP服务 ${service} 获取失败:`, err.message);
-                    continue;
-                }
+                        throw new Error('Invalid IP format');
+                    })
+                    .catch(() => null)
+            );
+
+            // 使用 Promise.any 获取第一个成功的结果
+            const results = await Promise.all(requests);
+            const validIP = results.find(ip => ip !== null);
+
+            if (validIP) {
+                logger.info(`Successfully obtained public IP: ${validIP}`);
+                return validIP;
             }
 
-            // 如果所有服务都失败，使用本地IP
+            // 如果所有外部服务都失败，尝试获取本地IP
             const interfaces = require('os').networkInterfaces();
             for (const iface of Object.values(interfaces)) {
                 for (const alias of iface) {
                     if (alias.family === 'IPv4' && !alias.internal) {
-                        logger.warn('无法获取公网IP，使用本地IP:', alias.address);
+                        logger.warn(`Using local IP as fallback: ${alias.address}`);
                         return alias.address;
                     }
                 }
             }
 
-            throw new Error('无法获取IP地址');
+            // 如果还是失败，使用默认IP
+            logger.warn('Using default IP address');
+            return process.env.SERVER_HOST || '127.0.0.1';
+
         } catch (error) {
-            logger.error('获取IP地址失败:', error);
+            logger.error('Error getting public IP:', error);
             return process.env.SERVER_HOST || '127.0.0.1';
         }
     }
