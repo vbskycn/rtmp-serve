@@ -1460,8 +1460,19 @@ class StreamManager extends EventEmitter {
 
     // 修改获取公网IP的方法
     async getPublicIP() {
+        // 添加缓存
+        if (this._cachedIP && (Date.now() - this._lastIPCheck) < 300000) { // 5分钟缓存
+            return this._cachedIP;
+        }
+
         try {
-            // 按优先级尝试多个IP获取服务
+            // 首先检查环境变量
+            if (process.env.SERVER_HOST) {
+                this._cachedIP = process.env.SERVER_HOST;
+                this._lastIPCheck = Date.now();
+                return this._cachedIP;
+            }
+
             const services = [
                 {
                     url: 'https://api.ipify.org?format=json',
@@ -1474,26 +1485,17 @@ class StreamManager extends EventEmitter {
                 {
                     url: 'https://api64.ipify.org?format=json',
                     parser: (data) => data.ip
-                },
-                {
-                    url: 'https://ifconfig.me/ip',
-                    parser: (data) => data.trim()
-                },
-                {
-                    url: 'https://ip.seeip.org/json',
-                    parser: (data) => data.ip
                 }
             ];
 
-            // 增加请求超时时间
             const axiosConfig = {
-                timeout: 5000,
+                timeout: 3000,
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 }
             };
 
-            // 并发请求所有服务
+            // 使用 Promise.race 获取最快的响应
             const requests = services.map(service => 
                 axios.get(service.url, axiosConfig)
                     .then(response => {
@@ -1506,32 +1508,35 @@ class StreamManager extends EventEmitter {
                     .catch(() => null)
             );
 
-            // 使用 Promise.any 获取第一个成功的结果
-            const results = await Promise.all(requests);
-            const validIP = results.find(ip => ip !== null);
-
-            if (validIP) {
-                logger.info(`Successfully obtained public IP: ${validIP}`);
-                return validIP;
+            const ip = await Promise.race(requests);
+            
+            if (ip) {
+                this._cachedIP = ip;
+                this._lastIPCheck = Date.now();
+                logger.info(`Successfully obtained public IP: ${ip}`);
+                return ip;
             }
 
-            // 如果所有外部服务都失败，尝试获取本地IP
+            // 如果获取公网IP失败，使用本地IP
             const interfaces = require('os').networkInterfaces();
             for (const iface of Object.values(interfaces)) {
                 for (const alias of iface) {
                     if (alias.family === 'IPv4' && !alias.internal) {
-                        logger.warn(`Using local IP as fallback: ${alias.address}`);
+                        this._cachedIP = alias.address;
+                        this._lastIPCheck = Date.now();
+                        logger.info(`Using local IP: ${alias.address}`);
                         return alias.address;
                     }
                 }
             }
 
-            // 如果还是失败，使用默认IP
-            logger.warn('Using default IP address');
-            return process.env.SERVER_HOST || '127.0.0.1';
+            // 最后的后备方案
+            this._cachedIP = '127.0.0.1';
+            this._lastIPCheck = Date.now();
+            return this._cachedIP;
 
         } catch (error) {
-            logger.error('Error getting public IP:', error);
+            logger.error('Error getting IP:', error);
             return process.env.SERVER_HOST || '127.0.0.1';
         }
     }

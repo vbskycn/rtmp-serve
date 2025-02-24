@@ -436,7 +436,7 @@ router.get('/api/streams/:streamId', async (req, res) => {
 // 修改获取系统统计信息的路由
 router.get('/api/stats', async (req, res) => {
     try {
-        // 使用新的 getStats 方法替��� getTrafficStats
+        // 使用新的 getStats 方法代替 getTrafficStats
         const stats = streamManager.getStats();
         res.json(stats);
     } catch (error) {
@@ -608,21 +608,43 @@ router.post('/api/streams/autostart', async (req, res) => {
     }
 });
 
-// 修改重启服务器的路由 - 添加 /api 前缀
+// 修改重启服务器的路由
 router.post('/api/restart', async (req, res) => {
     try {
-        // 执行 PM2 重启命令
         const { exec } = require('child_process');
-        exec('pm2 restart rtmp-server', (error, stdout, stderr) => {
+        
+        // 获取当前进程的 PM2 名称
+        const pm2Name = process.env.name || 'rtmp-server';
+        
+        // 尝试使用多种方式重启
+        exec(`pm2 restart ${pm2Name} || pm2 reload ${pm2Name} || pm2 start ${pm2Name}`, (error, stdout, stderr) => {
             if (error) {
-                console.error(`执行错误: ${error}`);
-                return res.json({ success: false, error: '重启失败: ' + error.message });
+                logger.error('PM2 restart failed:', error);
+                // 如果 PM2 命令失败，尝试直接退出进程
+                res.json({ 
+                    success: true, 
+                    message: '服务器将在5秒后重启...',
+                    method: 'process-exit'
+                });
+                
+                setTimeout(() => {
+                    process.exit(0);  // 进程退出后由系统服务自动重启
+                }, 5000);
+                return;
             }
-            res.json({ success: true, message: '重启命令已发送' });
+            
+            res.json({ 
+                success: true, 
+                message: '重启命令已发送',
+                method: 'pm2'
+            });
         });
     } catch (error) {
-        console.error('重启服务器失败:', error);
-        res.json({ success: false, error: '重启失败: ' + error.message });
+        logger.error('重启服务器失败:', error);
+        res.json({ 
+            success: false, 
+            error: '重启失败: ' + error.message 
+        });
     }
 });
 
