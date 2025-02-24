@@ -648,7 +648,7 @@ router.post('/api/restart', async (req, res) => {
     }
 });
 
-// 添加 /api/servers 路由
+// 修改 /api/servers 路由，移除 verifyToken 中间件
 router.get('/api/servers', async (req, res) => {
     try {
         const streamManager = req.app.get('streamManager');
@@ -709,16 +709,6 @@ router.get('/api/servers', async (req, res) => {
                 stats: streamManager.getStreamStats(id)
             }))
         }];
-
-        // 添加调试日志
-        logger.debug('Server info response:', {
-            serverCount: serverInfo.length,
-            firstServer: {
-                name: serverInfo[0].serverName,
-                ip: serverInfo[0].serverIp,
-                streams: serverInfo[0].totalStreams
-            }
-        });
 
         res.json(serverInfo);
     } catch (error) {
