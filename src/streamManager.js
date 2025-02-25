@@ -1889,6 +1889,32 @@ class StreamManager extends EventEmitter {
             lastRetryTime: counter.lastRetryTime
         };
     }
+
+    // 添加 spawnFFmpeg 函数
+    spawnFFmpeg(streamId, inputUrl, outputUrl) {
+        const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+        const ffmpeg = spawn(ffmpegPath, [
+            '-i', inputUrl,
+            '-c', 'copy',
+            '-f', 'flv',
+            outputUrl
+        ]);
+
+        ffmpeg.stdout.on('data', (data) => {
+            logger.debug(`FFmpeg stdout [${streamId}]: ${data}`);
+        });
+
+        ffmpeg.stderr.on('data', (data) => {
+            logger.debug(`FFmpeg stderr [${streamId}]: ${data}`);
+        });
+
+        ffmpeg.on('close', (code) => {
+            logger.info(`FFmpeg process exited with code ${code} [${streamId}]`);
+            this.handleStreamExit(streamId, code);
+        });
+
+        return ffmpeg;
+    }
 }
 
 module.exports = { StreamManager }; 
