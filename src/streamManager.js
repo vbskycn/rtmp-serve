@@ -150,7 +150,7 @@ class StreamManager extends EventEmitter {
             errors: 0
         };
 
-        this.streamsDir = path.join(__dirname, '../streams');
+        this.streamsDir = path.join(this.rootDir, 'streams');
         this.ensureDirectories();
     }
 
@@ -436,65 +436,34 @@ class StreamManager extends EventEmitter {
             // 确保目录存在
             await this.prepareStreamDirectory(streamId);
             
-            // 检查流是否存在
             const stream = this.streams.get(streamId);
             if (!stream) {
                 throw new Error(`Stream ${streamId} not found`);
             }
 
-            // 添加更多错误检查
-            if (!stream.url) {
-                throw new Error(`Invalid stream URL for ${streamId}`);
+            // 初始化或更新统计信息
+            if (!stream.stats) {
+                stream.stats = {
+                    startTime: null,
+                    uptime: 0,
+                    errors: 0
+                };
             }
 
-            // 如果是手动启动，记录到集合中
-            if (manual) {
-                this.manuallyStartedStreams.add(streamId);
-                logger.info(`Stream ${streamId} marked as manually started`);
-            }
-
-            // 初始化统计信息
-            const stats = this.streamStats.get(streamId);
-            if (stats) {
-                stats.startTime = new Date();
-                stats.uptime = 0;
-                stats.errors = 0;
-            }
-
-            // 获取统计信息引用
-            const configStats = stream.stats;
-            
             // 更新统计信息
             const now = new Date();
-            if (stats) {
-                stats.startTime = now;
-                stats.errors = 0;
-            }
-            if (configStats) {
-                configStats.startTime = now;
-                configStats.errors = 0;
-            }
+            stream.stats.startTime = now;
+            stream.stats.errors = 0;
 
             // 使用 FFmpeg 处理流
             await this.startStreamingWithFFmpeg(streamId, stream, manual);
 
         } catch (error) {
-            logger.error(`Error starting stream: ${streamId}`, { 
-                error: error.message,
-                stack: error.stack 
-            });
-            
-            // 更新错误统计
-            const stats = this.streamStats.get(streamId);
-            if (stats) {
-                stats.errors++;
+            logger.error(`Error starting stream: ${streamId}`, error);
+            if (stream?.stats) {
+                stream.stats.errors++;
+                stream.stats.startTime = null;
             }
-            
-            if (configStats) {
-                configStats.errors++;
-                configStats.startTime = null;
-            }
-            
             throw error;
         }
     }
