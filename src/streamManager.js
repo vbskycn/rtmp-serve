@@ -132,10 +132,10 @@ class StreamManager extends EventEmitter {
 
         // 添加重试配置
         this.retryConfig = {
-            maxRetries: 3,           // 单次重试最大次数
-            retryDelay: 5000,        // 重试间隔(ms)
-            recoveryDelay: 600000,   // 恢复等待时间(10分钟)
-            maxRecoveryAttempts: 0   // 0表示无限重试恢复
+            maxRetries: 5,            // 增加重试次数
+            retryDelay: 10000,       // 增加重试间隔
+            recoveryDelay: 300000,   // 减少恢复等待时间(5分钟)
+            maxRecoveryAttempts: 10  // 限制最大恢复尝试次数
         };
         
         // 添加重试状态记录
@@ -164,9 +164,18 @@ class StreamManager extends EventEmitter {
     }
 
     async prepareStreamDirectory(streamId) {
+        if (!streamId) {
+            throw new Error('Stream ID is required');
+        }
+        
         const streamDir = path.join(this.streamsDir, streamId);
-        await fsPromises.mkdir(streamDir, { recursive: true });
-        return streamDir;
+        try {
+            await fsPromises.mkdir(streamDir, { recursive: true });
+            return streamDir;
+        } catch (error) {
+            logger.error(`Error creating directory for stream ${streamId}:`, error);
+            throw error;
+        }
     }
 
     // 加载保存的流配置
@@ -432,15 +441,16 @@ class StreamManager extends EventEmitter {
     }
 
     async startStreaming(streamId, manual = false) {
+        let stream = null;
         try {
-            // 确保目录存在
-            await this.prepareStreamDirectory(streamId);
-            
-            const stream = this.streams.get(streamId);
+            stream = this.streams.get(streamId);
             if (!stream) {
                 throw new Error(`Stream ${streamId} not found`);
             }
 
+            // 确保目录存在
+            const streamDir = await this.prepareStreamDirectory(streamId);
+            
             // 初始化或更新统计信息
             if (!stream.stats) {
                 stream.stats = {
@@ -487,15 +497,16 @@ class StreamManager extends EventEmitter {
             '-y',
             '-fflags', '+genpts+igndts+discardcorrupt',
             '-avoid_negative_ts', 'make_zero',
-            '-analyzeduration', '5000000',  // 增加分析时间
-            '-probesize', '5000000',       // 增加探测大小
-            '-rw_timeout', '10000000',     // 增加读写超时
-            '-timeout', '10000000',        // 增加连接超时
+            '-analyzeduration', '10000000',  // 增加分析时间
+            '-probesize', '10000000',       // 增加探测大小
+            '-rw_timeout', '30000000',      // 增加读写超时
+            '-timeout', '30000000',         // 增加连接超时
             '-reconnect', '1',
             '-reconnect_streamed', '1', 
-            '-reconnect_delay_max', '30',  // 增加最大重连延迟
-            '-reconnect_at_eof', '1',      // 文件结束时重连
+            '-reconnect_delay_max', '60',   // 增加最大重连延迟
+            '-reconnect_at_eof', '1',
             '-multiple_requests', '1',
+            '-http_persistent', '1',        // 保持 HTTP 连接
             '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             '-i', streamConfig.url
         ];
@@ -614,7 +625,6 @@ class StreamManager extends EventEmitter {
     // 添加新的辅助方法
     async ensureAndCleanDirectory(outputPath) {
         try {
-            // 确保目录存在
             await fsPromises.mkdir(outputPath, { recursive: true });
             
             // 清理旧文件
