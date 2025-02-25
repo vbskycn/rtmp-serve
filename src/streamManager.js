@@ -77,6 +77,9 @@ class StreamManager extends EventEmitter {
         // 加载保存的流配置
         this.loadStreams();
         
+        // 启动所有流
+        this.startAllStreams();
+        
         // 每小时运行一次清理
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
         // 每5分钟运行一次健康检查
@@ -192,273 +195,59 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 加载保存的流配置
-    loadStreams() {
+    // 修改加载流的方法
+    async loadStreams() {
+        logger.info('Starting to load streams...');
         try {
-            logger.info('Starting to load streams...');
             if (fs.existsSync(this.configPath)) {
                 logger.info(`Config file exists at: ${this.configPath}`);
                 const data = fs.readFileSync(this.configPath, 'utf8');
+                const streams = JSON.parse(data);
                 
-                // 检查文件内容
-                if (!data || !data.trim()) {
-                    logger.warn('Config file is empty');
-                    return;
-                }
+                // 加载所有流到 Map 中
+                streams.forEach(stream => {
+                    this.streams.set(stream.id, stream);
+                });
                 
-                try {
-                    const configs = JSON.parse(data);
-                    logger.info(`Successfully parsed config with ${Object.keys(configs).length} streams`);
-                    
-                    // 清空现有的流
-                    this.streams.clear();
-                    this.streamStats.clear();
-                    
-                    // 遍历并加载每个流
-                    for (const [id, config] of Object.entries(configs)) {
-                        logger.info(`Loading stream: ${id} - ${config.name}`);
-                        this.streams.set(id, {
-                            ...config,
-                            stats: {
-                                startTime: null,
-                                uptime: 0,
-                                errors: 0
-                            }
-                        });
-                        this.streamStats.set(id, {
-                            totalRequests: 0,
-                            lastAccessed: null,
-                            errors: 0,
-                            uptime: 0,
-                            startTime: null
-                        });
-                    }
-                    logger.info(`Successfully loaded ${this.streams.size} streams`);
-                    
-                    // 打印加载的流的ID列表
-                    const streamIds = Array.from(this.streams.keys());
-                    logger.info('Loaded stream IDs:', streamIds);
-                } catch (parseError) {
-                    logger.error('Error parsing config JSON:', parseError);
-                    logger.error('Raw config data:', data);
-                    throw parseError;
-                }
+                logger.info(`Successfully loaded ${streams.length} streams`);
             } else {
                 logger.warn(`Config file not found at: ${this.configPath}`);
-                // 创建空配置文件
-                const configDir = path.dirname(this.configPath);
-                if (!fs.existsSync(configDir)) {
-                    fs.mkdirSync(configDir, { recursive: true });
-                }
-                fs.writeFileSync(this.configPath, '{}');
                 logger.info('Created new empty config file');
+                fs.writeFileSync(this.configPath, JSON.stringify([], null, 2));
             }
         } catch (error) {
-            logger.error('Error in loadStreams:', error);
-            // 如果文件损坏，创建备份
+            logger.error('Error loading streams:', error);
+        }
+    }
+
+    // 添加启动所有流的方法
+    async startAllStreams() {
+        const streams = Array.from(this.streams.values());
+        logger.info(`Starting all ${streams.length} streams...`);
+
+        for (const stream of streams) {
             try {
-                if (fs.existsSync(this.configPath)) {
-                    const backupPath = `${this.configPath}.backup.${Date.now()}`;
-                    fs.copyFileSync(this.configPath, backupPath);
-                    logger.info(`Created backup at: ${backupPath}`);
-                    fs.writeFileSync(this.configPath, '{}');
-                    logger.info('Reset config file to empty object');
-                }
-            } catch (backupError) {
-                logger.error('Error creating backup:', backupError);
+                await this.startStreaming(stream.id);
+                logger.info(`Successfully started stream: ${stream.id}`);
+            } catch (error) {
+                logger.error(`Failed to start stream ${stream.id}:`, error);
+                // 继续启动其他流
             }
         }
     }
 
-    // 保存流配置
-    async saveStreams() {
-        try {
-            const configs = {};
-            for (const [id, config] of this.streams.entries()) {
-                // 确保保存完整的流配置
-                configs[id] = {
-                    id: config.id,
-                    name: config.name,
-                    url: config.url,
-                    category: config.category || '未分类',
-                    kodiprop: config.kodiprop || '',
-                    tvg: config.tvg || {
-                        id: '',
-                        name: config.name,
-                        logo: '',
-                        group: config.category || ''
-                    }
-                };
-            }
-            
-            const configDir = path.dirname(this.configPath);
-            if (!fs.existsSync(configDir)) {
-                fs.mkdirSync(configDir, { recursive: true });
-            }
-            
-            fs.writeFileSync(this.configPath, JSON.stringify(configs, null, 2));
-            logger.info(`Saved ${this.streams.size} streams to config`);
-            return true;
-        } catch (error) {
-            logger.error('Error saving streams config:', error);
-            throw error;
-        }
-    }
-
-    async addStream(streamData) {
-        try {
-            // 验证必要的字段
-            if (!streamData.name || !streamData.url) {
-                throw new Error('缺少必要的流信息');
-            }
-
-            // 生成或使用的streamId
-            let streamId;
-            if (streamData.id) {
-                streamId = streamData.id;
-            } else if (streamData.customId) {
-                streamId = `stream_${streamData.customId}`;
-            } else {
-                // 生成6位随机ID
-                const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-                let randomId = '';
-                for (let i = 0; i < 6; i++) {
-                    randomId += chars.charAt(Math.floor(Math.random() * chars.length));
-                }
-                streamId = `stream_${randomId}`;
-            }
-
-            // 检查是否已存在相同的流
-            if (this.streams.has(streamId)) {
-                // 如果存在，更新现有流的信息
-                const existingStream = this.streams.get(streamId);
-                existingStream.name = streamData.name;
-                existingStream.url = streamData.url;
-                existingStream.category = streamData.category || existingStream.category;
-                if (streamData.tvg) {
-                    existingStream.tvg = streamData.tvg;
-                }
-                logger.info(`Updated existing stream: ${streamId}`);
-            } else {
-                // 添加新流
-                const newStream = {
-                    id: streamId,
-                    name: streamData.name,
-                    url: streamData.url,
-                    category: streamData.category || '未分类',
-                    tvg: streamData.tvg || {
-                        id: '',
-                        name: streamData.name,
-                        logo: '',
-                        group: streamData.category || ''
-                    },
-                    stats: {
-                        startTime: null,
-                        uptime: 0,
-                        errors: 0
-                    }
-                };
-
-                // 保存到流集合
-                this.streams.set(streamId, newStream);
-
-                // 初始化统计信息
-                this.streamStats.set(streamId, {
-                    totalRequests: 0,
-                    lastAccessed: null,
-                    errors: 0,
-                    uptime: 0,
-                    startTime: null
-                });
-
-                logger.info(`Added new stream: ${streamId}`);
-            }
-
-            // 立即保存配置到文件
-            await this.saveStreams();
-
-            return {
-                success: true,
-                streamId: streamId
-            };
-        } catch (error) {
-            logger.error('添加流失败:', error);
-            throw error;
-        }
-    }
-
-    // 修改删除流的方法
-    async deleteStream(streamId) {
-        try {
-            await this.stopStreaming(streamId);
-            this.streams.delete(streamId);
-            this.streamStats.delete(streamId);
-            
-            // 保存配置
-            this.saveStreams();
-            
-            // 清理流文件
-            const streamPath = path.join(__dirname, '../streams', streamId);
-            if (fs.existsSync(streamPath)) {
-                fs.rmSync(streamPath, { recursive: true });
-            }
-            
-            logger.info(`Stream deleted: ${streamId}`);
-        } catch (error) {
-            logger.error(`Error deleting stream: ${streamId}`, { error });
-            throw error;
-        }
-    }
-
-    async getStreamUrl(streamId) {
-        try {
-            // 获取流配置
-            const stream = this.getStreamById(streamId);
-            if (!stream) {
-                logger.warn(`Stream not found: ${streamId}`);
-                return null;
-            }
-
-            const actualStreamId = stream.id;
-
-            // 检查流是否经在运行
-            if (!this.streamProcesses.has(actualStreamId)) {
-                logger.info(`Starting stream ${actualStreamId} on demand`);
-                try {
-                    // 尝试启动流
-                    await this.startStreaming(actualStreamId);
-                    
-                    // 等待playlist文件生成
-                    const playlistPath = path.join(this.rootDir, 'streams', actualStreamId, 'playlist.m3u8');
-                    let attempts = 0;
-                    while (!fs.existsSync(playlistPath) && attempts < 10) {
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                        attempts++;
-                    }
-                    
-                    if (!fs.existsSync(playlistPath)) {
-                        throw new Error('Playlist file not generated');
-                    }
-                } catch (error) {
-                    logger.error(`Failed to start stream ${actualStreamId}:`, error);
-                    return null;
-                }
-            }
-
-            // 添加观看者
-            this.addViewer(actualStreamId);
-            return `/streams/${actualStreamId}/playlist.m3u8`;
-        } catch (error) {
-            logger.error(`Error getting stream URL: ${streamId}`, error);
-            return null;
-        }
-    }
-
-    async startStreaming(streamId, manual = false) {
+    // 修改 startStreaming 方法
+    async startStreaming(streamId) {
         try {
             const stream = this.streams.get(streamId);
             if (!stream) {
                 throw new Error(`Stream ${streamId} not found`);
+            }
+
+            // 检查流是否已经在运行
+            if (this.streamProcesses.has(streamId)) {
+                logger.info(`Stream ${streamId} is already running`);
+                return { success: true };
             }
 
             // 初始化重试状态
@@ -478,6 +267,7 @@ class StreamManager extends EventEmitter {
                 });
             }
 
+            // 启动流进程
             const result = await this.startStreamProcess(streamId);
             if (!result.success) {
                 await this.handleStreamError(streamId, result.error);
@@ -485,6 +275,7 @@ class StreamManager extends EventEmitter {
 
             return result;
         } catch (error) {
+            logger.error(`Error starting stream ${streamId}:`, error);
             await this.handleStreamError(streamId, error);
             throw error;
         }
