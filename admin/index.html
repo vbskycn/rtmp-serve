@@ -187,12 +187,6 @@
                         <button onclick="exportTXT()" class="btn btn-light btn-sm">
                             <i class="fa fa-download"></i> 导出TXT
                         </button>
-                        <button onclick="exportRemoteM3U()" class="btn btn-light btn-sm">
-                            <i class="fa fa-download"></i> 导出远程推流M3U
-                        </button>
-                        <button onclick="exportRemoteTXT()" class="btn btn-light btn-sm">
-                            <i class="fa fa-download"></i> 导出远程推流TXT
-                        </button>
                         <button onclick="exportSourceUrls()" class="btn btn-light btn-sm">
                             <i class="fa fa-download"></i> 导出源地址
                         </button>
@@ -218,7 +212,6 @@
                                     <th class="retry-column">重试信息</th>
                                     <th class="source-column">源地址</th>
                                     <th class="play-column">播放地址</th>
-                                    <th class="auto-start-column">自启动</th>
                                     <th class="action-column">操作</th>
                                 </tr>
                             </thead>
@@ -355,8 +348,8 @@
             const tr = document.createElement('tr');
             tr.dataset.streamId = stream.id;
             
-            const playUrl = `http://${serverConfig.server.host}:${serverConfig.server.port}/play/${stream.id}`;
-            const isManuallyStarted = stream.manuallyStarted;
+            // 获取远程推流地址
+            const rtmpPlayUrl = `${serverConfig.rtmp.pullServer}${stream.id}.flv`;
             
             let statusClass = stream.invalid ? 'error' : 
                              (stream.processRunning || stream.stats?.startTime) ? 'active' : 'inactive';
@@ -367,13 +360,9 @@
             const statusStyle = stream.invalid ? 'background-color: #dc3545;' :
                                (statusClass === 'active' ? 'background-color: #28a745;' : 'background-color: #6c757d;');
             
-            const rtmpStatusStyle = isManuallyStarted ? 'background-color: #28a745;' : 'background-color: #6c757d;';
-            const rtmpStatusText = isManuallyStarted ? '推流中' : '未推流';
-            
-            const autoStartStyle = stream.autoStart ? 'background-color: #28a745;' : 'background-color: #6c757d;';
-            const autoStartText = stream.autoStart ? '已启用' : '未启用';
+            const rtmpStatusStyle = stream.manuallyStarted ? 'background-color: #28a745;' : 'background-color: #6c757d;';
+            const rtmpStatusText = stream.manuallyStarted ? '推流中' : '未推流';
 
-            // 设置行的HTML内容
             tr.innerHTML = `
                 <td>
                     <input type="checkbox" class="stream-checkbox" value="${stream.id}" onchange="updateBatchButtons()">
@@ -414,37 +403,21 @@
                 <td>
                     <div class="d-flex align-items-center">
                         <div class="input-group input-group-compact">
-                            <input type="text" class="form-control form-control-sm" value="${playUrl}" readonly 
+                            <input type="text" class="form-control form-control-sm" value="${rtmpPlayUrl}" readonly 
                                    style="font-family: monospace; background-color: #f8f9fa;">
-                            <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${playUrl}')">
+                            <button class="btn btn-outline-primary btn-sm" onclick="copyToClipboard('${rtmpPlayUrl}')">
                                 <i class="fa fa-copy"></i> 复制
                             </button>
-                            <button class="btn btn-outline-success btn-sm" onclick="window.open('player.html?id=${stream.id}', '_blank')">
+                            <button class="btn btn-outline-success btn-sm" onclick="window.open('${rtmpPlayUrl}', '_blank')">
                                 <i class="fa fa-play"></i> 播放
                             </button>
-                            ${isManuallyStarted ? `
-                                <button class="btn btn-outline-info btn-sm" onclick="copyRtmpInfo('${stream.id}')">
-                                    <i class="fa fa-external-link"></i> 推流
-                                </button>
-                            ` : ''}
                         </div>
                     </div>
-                </td>
-                <td>
-                    <span class="auto-start-status" style="${autoStartStyle}">
-                        ${autoStartText}
-                    </span>
                 </td>
                 <td class="stream-actions">
                     <div class="btn-group btn-group-sm">
                         <button onclick="editStream('${stream.id}')" class="btn btn-info btn-sm">
                             <i class="fa fa-edit"></i> 编辑
-                        </button>
-                        <button onclick="restartStream('${stream.id}', true)" class="btn btn-warning btn-sm">
-                            <i class="fa fa-refresh"></i> ${isManuallyStarted ? '重启' : '手动启动'}
-                        </button>
-                        <button onclick="stopStream('${stream.id}')" class="btn btn-secondary btn-sm">
-                            <i class="fa fa-stop"></i> 停止
                         </button>
                         <button onclick="deleteStream('${stream.id}')" class="btn btn-danger btn-sm">
                             <i class="fa fa-trash"></i> 删除

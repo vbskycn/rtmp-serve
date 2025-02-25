@@ -6,6 +6,7 @@ const axios = require('axios');
 const EventEmitter = require('events');
 const config = require('../config/config.json');
 const fsPromises = require('fs').promises;
+const { spawn } = require('child_process');
 
 class StreamManager extends EventEmitter {
     constructor() {
@@ -136,19 +137,24 @@ class StreamManager extends EventEmitter {
         // 启动时自动启动已配置的流
         this.startAutoStartStreams();
 
-        // 添加重试配置
-        this.retryConfig = {
-            maxRetries: 5,
-            retryDelay: 5000,
-            maxRetryDelay: 30000,
-            backoffFactor: 2
-        };
-        
-        // 添加重试状态记录
+        // 添加重试状态跟踪
         this.retryStatus = new Map();
-
-        // 添加重试计数器
         this.retryCounters = new Map();
+        
+        // 重试配置
+        this.retryConfig = {
+            immediate: {
+                attempts: 3,
+                interval: 20000 // 20秒
+            },
+            recovery: {
+                intervals: [
+                    5 * 60 * 1000,  // 5分钟
+                    20 * 60 * 1000, // 20分钟
+                    20 * 60 * 1000  // 之后每20分钟
+                ]
+            }
+        };
 
         this.configStats = {
             startTime: Date.now(),
@@ -449,69 +455,78 @@ class StreamManager extends EventEmitter {
     }
 
     async startStreaming(streamId, manual = false) {
-        const stream = this.streams.get(streamId);
-        if (!stream) {
-            throw new Error(`Stream ${streamId} not found`);
-        }
-
         try {
-            // 准备目录
-            const streamDir = await this.prepareStreamDirectory(streamId);
-            
-            // 设置 FFmpeg 参数
-            const ffmpegOptions = {
-                timeout: 60000,
-                playlistRetries: 3,
-                segmentTimeout: 10000,
-                ...stream.ffmpegOptions
-            };
+            const stream = this.streams.get(streamId);
+            if (!stream) {
+                throw new Error(`Stream ${streamId} not found`);
+            }
 
-            // 启动 FFmpeg
-            await this.startFFmpeg(stream, streamDir, ffmpegOptions);
-            
-            // 监控输出目录
-            this.monitorStreamDirectory(streamDir, streamId);
-            
-            return true;
+            // 初始化重试状态
+            if (!this.retryStatus.has(streamId)) {
+                this.retryStatus.set(streamId, {
+                    immediateRetries: 0,
+                    recoveryAttempts: 0,
+                    isInRecovery: false
+                });
+            }
+
+            // 初始化重试计数器
+            if (!this.retryCounters.has(streamId)) {
+                this.retryCounters.set(streamId, {
+                    total: 0,
+                    lastRetryTime: null
+                });
+            }
+
+            const result = await this.startStreamProcess(streamId);
+            if (!result.success) {
+                await this.handleStreamError(streamId, result.error);
+            }
+
+            return result;
         } catch (error) {
-            logger.error(`Failed to start stream ${streamId}:`, error);
+            await this.handleStreamError(streamId, error);
             throw error;
         }
     }
 
-    async startFFmpeg(stream, outputDir, options) {
-        const inputArgs = [
-            '-hide_banner',
-            '-nostats',
-            '-y',
-            '-fflags', '+genpts+igndts+discardcorrupt',
-            '-avoid_negative_ts', 'make_zero',
-            '-analyzeduration', '15000000',
-            '-probesize', '15000000',
-            '-rw_timeout', '60000000',
-            '-timeout', '60000000',
-            '-reconnect', '1',
-            '-reconnect_streamed', '1',
-            '-reconnect_delay_max', '120',
-            '-reconnect_at_eof', '1',
-            '-multiple_requests', '1',
-            '-http_persistent', '1',
-            '-user_agent', 'Mozilla/5.0',
-            '-i', stream.url
-        ];
+    async startStreamProcess(streamId) {
+        const stream = this.streams.get(streamId);
+        if (!stream) {
+            return { success: false, error: 'Stream not found' };
+        }
 
-        const outputArgs = [
-            '-c:v', 'copy',
-            '-c:a', 'copy',
-            '-f', 'hls',
-            '-hls_time', '6',
-            '-hls_list_size', '10',
-            '-hls_flags', 'delete_segments+append_list',
-            '-hls_segment_filename', path.join(outputDir, 'segment_%d.ts'),
-            path.join(outputDir, 'playlist.m3u8')
-        ];
+        try {
+            // 检查源是否可用
+            const sourceAvailable = await this.checkStreamSource(stream.url);
+            if (!sourceAvailable) {
+                throw new Error('Stream source not available');
+            }
 
-        return this.spawnFFmpeg([...inputArgs, ...outputArgs], stream);
+            // 准备输出目录
+            const outputDir = path.join(this.rootDir, 'streams', streamId);
+            await this.ensureAndCleanDirectory(outputDir);
+
+            // 设置 FFmpeg 参数
+            const ffmpegArgs = this.buildFFmpegArgs(stream, outputDir);
+            
+            // 启动 FFmpeg 进程
+            const ffmpeg = spawn('ffmpeg', ffmpegArgs);
+            
+            // 设置进程监控
+            this.setupProcessMonitoring(streamId, ffmpeg);
+            
+            // 保存进程引用
+            this.streamProcesses.set(streamId, {
+                ffmpeg,
+                startTime: Date.now(),
+                lastSegmentTime: Date.now()
+            });
+
+            return { success: true };
+        } catch (error) {
+            return { success: false, error };
+        }
     }
 
     // 添加新的辅助方法
@@ -603,27 +618,71 @@ class StreamManager extends EventEmitter {
     }
 
     async handleStreamError(streamId, error) {
-        const stream = this.streams.get(streamId);
-        if (!stream) return;
-
-        stream.retryCount = (stream.retryCount || 0) + 1;
+        const status = this.retryStatus.get(streamId);
+        const counter = this.retryCounters.get(streamId);
         
-        if (stream.retryCount <= this.retryConfig.maxRetries) {
-            const delay = Math.min(
-                this.retryConfig.retryDelay * Math.pow(this.retryConfig.backoffFactor, stream.retryCount - 1),
-                this.retryConfig.maxRetryDelay
-            );
+        logger.error(`Stream ${streamId} error:`, error);
 
-            logger.info(`Retrying stream ${streamId} in ${delay}ms (attempt ${stream.retryCount}/${this.retryConfig.maxRetries})`);
-            
-            setTimeout(() => {
-                this.startStreaming(streamId, stream.manual)
-                    .catch(err => logger.error(`Retry failed for stream ${streamId}:`, err));
-            }, delay);
-        } else {
-            logger.error(`Stream ${streamId} failed after ${this.retryConfig.maxRetries} retries`);
-            stream.retryCount = 0;
+        // 更新重试计数
+        counter.total++;
+        counter.lastRetryTime = Date.now();
+
+        if (!status.isInRecovery) {
+            // 处理即时重试
+            if (status.immediateRetries < this.retryConfig.immediate.attempts) {
+                status.immediateRetries++;
+                logger.info(`Immediate retry ${status.immediateRetries} for stream ${streamId}`);
+                
+                setTimeout(async () => {
+                    try {
+                        await this.startStreamProcess(streamId);
+                    } catch (error) {
+                        logger.error(`Immediate retry failed for stream ${streamId}:`, error);
+                    }
+                }, 2000); // 2秒后重试
+                
+                return;
+            }
+
+            // 进入恢复模式
+            status.isInRecovery = true;
+            status.immediateRetries = 0;
+            status.recoveryAttempts = 0;
         }
+
+        // 处理恢复重试
+        const interval = this.getRecoveryInterval(status.recoveryAttempts);
+        status.recoveryAttempts++;
+
+        logger.info(`Scheduling recovery attempt for stream ${streamId} in ${interval/1000} seconds`);
+        
+        setTimeout(async () => {
+            try {
+                const result = await this.startStreamProcess(streamId);
+                if (result.success) {
+                    // 重置重试状态
+                    this.resetRetryStatus(streamId);
+                }
+            } catch (error) {
+                logger.error(`Recovery attempt failed for stream ${streamId}:`, error);
+            }
+        }, interval);
+    }
+
+    getRecoveryInterval(attemptCount) {
+        const intervals = this.retryConfig.recovery.intervals;
+        if (attemptCount < intervals.length) {
+            return intervals[attemptCount];
+        }
+        return intervals[intervals.length - 1]; // 使用最后一个间隔
+    }
+
+    resetRetryStatus(streamId) {
+        this.retryStatus.set(streamId, {
+            immediateRetries: 0,
+            recoveryAttempts: 0,
+            isInRecovery: false
+        });
     }
 
     handleStreamExit(streamId, code, error, retryCount, maxRetries) {

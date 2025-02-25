@@ -125,48 +125,27 @@ router.get('/api/streams', async (req, res) => {
 router.post('/api/streams/batch', async (req, res) => {
     try {
         const { m3u } = req.body;
-        const lines = m3u.split('\n').filter(line => line.trim());
+        const streams = parseM3UContent(m3u);
         const results = [];
-        let currentCategory = '未分类';
         
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].trim();
-            
-            // 检查是否是分类行
-            if (line.endsWith('#genre#')) {
-                currentCategory = line.split(',')[0].trim();
-                continue;
-            }
-            
-            // 处理常规流行
-            const [name, url] = line.split(',').map(s => s.trim());
-            
-            if (!name || !url) {
-                continue;
-            }
-
+        for (const streamData of streams) {
             try {
-                const streamData = {
-                    name,
-                    url,
-                    category: currentCategory,
-                    tvg: {
-                        id: '',
-                        name: name,
-                        logo: '',
-                        group: currentCategory
-                    }
-                };
-
+                // 添加流并立即启动
                 const result = await streamManager.addStream(streamData);
-                results.push({
-                    name,
-                    success: true
-                });
+                if (result.success) {
+                    // 自动启动流
+                    await streamManager.startStreaming(result.stream.id);
+                    results.push({
+                        name: streamData.name,
+                        success: true
+                    });
+                } else {
+                    throw new Error(result.error);
+                }
             } catch (error) {
-                logger.error(`Error adding stream ${name}:`, error);
+                logger.error(`Error adding stream ${streamData.name}:`, error);
                 results.push({
-                    name,
+                    name: streamData.name,
                     success: false,
                     error: error.message
                 });
@@ -193,6 +172,50 @@ router.post('/api/streams/batch', async (req, res) => {
         });
     }
 });
+
+// 添加解析M3U内容的函数
+function parseM3UContent(content) {
+    const streams = [];
+    const lines = content.split('\n');
+    let currentCategory = '未分类';
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        // 检查是否是分类行
+        if (line.endsWith('#genre#')) {
+            currentCategory = line.split(',')[0].trim();
+            continue;
+        }
+
+        // 处理流行
+        if (!line.startsWith('#')) {
+            const parts = line.split(',');
+            if (parts.length >= 2) {
+                const name = parts[0].trim();
+                const url = parts[1].trim();
+
+                if (name && url) {
+                    streams.push({
+                        name,
+                        url,
+                        category: currentCategory,
+                        autoStart: true, // 设置自动启动
+                        tvg: {
+                            id: '',
+                            name,
+                            logo: '',
+                            group: currentCategory
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    return streams;
+}
 
 // 删除流
 router.delete('/api/streams/:id', async (req, res) => {
