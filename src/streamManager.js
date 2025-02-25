@@ -1706,6 +1706,88 @@ class StreamManager extends EventEmitter {
 
         return ffmpeg;
     }
+
+    // 添加新的流
+    async addStream(streamData) {
+        try {
+            // 生成唯一ID
+            const streamId = `stream_${Math.random().toString(36).substr(2, 6)}`;
+            
+            // 构建流对象
+            const stream = {
+                id: streamId,
+                name: streamData.name,
+                url: streamData.url,
+                category: streamData.category || '未分类',
+                tvg: streamData.tvg || {
+                    id: '',
+                    name: streamData.name,
+                    logo: '',
+                    group: streamData.category || '未分类'
+                },
+                processRunning: false,
+                manuallyStarted: false,
+                invalid: false,
+                retryInfo: {
+                    immediateRetries: 0,
+                    recoveryAttempts: 0,
+                    isInRecovery: false,
+                    totalRetries: 0,
+                    lastRetryTime: null
+                }
+            };
+
+            // 添加到流集合
+            this.streams.set(streamId, stream);
+            
+            // 初始化重试状态
+            this.retryStatus.set(streamId, {
+                immediateRetries: 0,
+                recoveryAttempts: 0,
+                isInRecovery: false
+            });
+
+            // 初始化重试计数器
+            this.retryCounters.set(streamId, {
+                total: 0,
+                lastRetryTime: null
+            });
+
+            // 保存配置
+            await this.saveStreams();
+
+            // 创建流目录
+            await this.prepareStreamDirectory(streamId);
+
+            logger.info(`Added new stream: ${streamId}`);
+
+            return {
+                success: true,
+                stream
+            };
+        } catch (error) {
+            logger.error('Error adding stream:', error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    // 保存流配置
+    async saveStreams() {
+        try {
+            const streams = Array.from(this.streams.values());
+            await fsPromises.writeFile(
+                this.configPath,
+                JSON.stringify(streams, null, 2)
+            );
+            logger.info(`Saved ${streams.length} streams to config`);
+        } catch (error) {
+            logger.error('Error saving streams:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = { StreamManager }; 
