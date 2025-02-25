@@ -45,11 +45,17 @@ class StreamManager extends EventEmitter {
         // 确保所有必要的目录存在
         this.ensureDirectories();
         
-        // 加载流配置并启动
+        // 加载流配置并立即启动所有流
         this.loadStreams();
         this.loadStats();
         this.loadAutoStartStreams();
-        this.startAllStreams();
+        
+        // 确保在所有配置加载完成后启动流
+        setImmediate(() => {
+            this.startAllStreams().catch(error => {
+                logger.error('Error starting all streams:', error);
+            });
+        });
 
         // 添加检查源可用性的方法
         this.checkStreamSource = async (url) => {
@@ -148,17 +154,17 @@ class StreamManager extends EventEmitter {
         // 启动时自动启动已配置的流
         this.startAutoStartStreams();
 
-        // 重试配置
+        // 修改重试配置
         this.retryConfig = {
             immediate: {
-                attempts: 3,
-                interval: 20000 // 20秒
+                attempts: 3,        // 立即重试3次
+                interval: 20000     // 20秒内
             },
             recovery: {
                 intervals: [
-                    5 * 60 * 1000,  // 5分钟
-                    20 * 60 * 1000, // 20分钟
-                    20 * 60 * 1000  // 之后每20分钟
+                    5 * 60 * 1000,   // 5分钟后
+                    20 * 60 * 1000,  // 20分钟后
+                    20 * 60 * 1000   // 之后每20分钟
                 ]
             }
         };
@@ -228,20 +234,23 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 添加启动所有流的方法
+    // 修改启动所有流的方法,移除失效流检查
     async startAllStreams() {
         const streams = Array.from(this.streams.values());
         logger.info(`Starting all ${streams.length} streams...`);
 
-        for (const stream of streams) {
+        const startPromises = streams.map(async (stream) => {
             try {
                 await this.startStreaming(stream.id);
                 logger.info(`Successfully started stream: ${stream.id}`);
             } catch (error) {
                 logger.error(`Failed to start stream ${stream.id}:`, error);
-                // 继续启动其他流
+                // 错误交给重试机制处理
             }
-        }
+        });
+
+        await Promise.all(startPromises);
+        logger.info(`Finished starting all streams`);
     }
 
     // 修改 startStreaming 方法
@@ -416,6 +425,7 @@ class StreamManager extends EventEmitter {
         }, 1000);
     }
 
+    // 修改错误处理方法
     async handleStreamError(streamId, error) {
         const status = this.retryStatus.get(streamId);
         const counter = this.retryCounters.get(streamId);
@@ -427,23 +437,27 @@ class StreamManager extends EventEmitter {
         counter.lastRetryTime = Date.now();
 
         if (!status.isInRecovery) {
-            // 处理即时重试
+            // 处理即时重试(20秒内3次)
             if (status.immediateRetries < this.retryConfig.immediate.attempts) {
                 status.immediateRetries++;
-                logger.info(`Immediate retry ${status.immediateRetries} for stream ${streamId}`);
+                logger.info(`Immediate retry ${status.immediateRetries}/3 for stream ${streamId}`);
                 
                 setTimeout(async () => {
                     try {
                         await this.startStreamProcess(streamId);
+                        logger.info(`Immediate retry ${status.immediateRetries} succeeded for stream ${streamId}`);
+                        // 重试成功,重置状态
+                        this.resetRetryStatus(streamId);
                     } catch (error) {
-                        logger.error(`Immediate retry failed for stream ${streamId}:`, error);
+                        logger.error(`Immediate retry ${status.immediateRetries} failed for stream ${streamId}:`, error);
+                        // 失败继续交给重试机制处理
                     }
                 }, 2000); // 2秒后重试
                 
                 return;
             }
 
-            // 进入恢复模式
+            // 立即重试全部失败,进入恢复模式
             status.isInRecovery = true;
             status.immediateRetries = 0;
             status.recoveryAttempts = 0;
@@ -453,35 +467,50 @@ class StreamManager extends EventEmitter {
         const interval = this.getRecoveryInterval(status.recoveryAttempts);
         status.recoveryAttempts++;
 
-        logger.info(`Scheduling recovery attempt for stream ${streamId} in ${interval/1000} seconds`);
+        logger.info(`Scheduling recovery attempt for stream ${streamId} in ${interval/1000/60} minutes`);
         
         setTimeout(async () => {
             try {
-                const result = await this.startStreamProcess(streamId);
-                if (result.success) {
-                    // 重置重试状态
-                    this.resetRetryStatus(streamId);
-                }
+                // 进入恢复重试时也使用立即重试机制
+                status.immediateRetries = 0;
+                status.isInRecovery = true;
+                
+                // 开始新一轮立即重试
+                await this.startStreamProcess(streamId);
+                logger.info(`Recovery attempt succeeded for stream ${streamId}`);
+                // 重试成功,重置状态
+                this.resetRetryStatus(streamId);
             } catch (error) {
                 logger.error(`Recovery attempt failed for stream ${streamId}:`, error);
+                // 失败继续交给重试机制处理
             }
         }, interval);
     }
 
+    // 修改获取恢复间隔的方法
     getRecoveryInterval(attemptCount) {
         const intervals = this.retryConfig.recovery.intervals;
         if (attemptCount < intervals.length) {
             return intervals[attemptCount];
         }
-        return intervals[intervals.length - 1]; // 使用最后一个间隔
+        return intervals[intervals.length - 1]; // 使用最后一个间隔(20分钟)持续重试
     }
 
+    // 修改重置重试状态的方法
     resetRetryStatus(streamId) {
         this.retryStatus.set(streamId, {
             immediateRetries: 0,
             recoveryAttempts: 0,
             isInRecovery: false
         });
+        
+        // 重置重试计数器
+        this.retryCounters.set(streamId, {
+            total: 0,
+            lastRetryTime: null
+        });
+
+        logger.info(`Reset retry status for stream ${streamId}`);
     }
 
     handleStreamExit(streamId, code, error, retryCount, maxRetries) {
@@ -1677,7 +1706,7 @@ class StreamManager extends EventEmitter {
         return ffmpeg;
     }
 
-    // 添加新的流
+    // 修改添加流的方法,添加后自动启动
     async addStream(streamData) {
         try {
             // 生成唯一ID
@@ -1730,6 +1759,14 @@ class StreamManager extends EventEmitter {
             await this.prepareStreamDirectory(streamId);
 
             logger.info(`Added new stream: ${streamId}`);
+
+            // 自动启动新添加的流
+            try {
+                await this.startStreaming(streamId);
+                logger.info(`Successfully started new stream: ${streamId}`);
+            } catch (error) {
+                logger.error(`Error starting new stream ${streamId}:`, error);
+            }
 
             return {
                 success: true,
