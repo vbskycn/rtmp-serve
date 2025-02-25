@@ -12,6 +12,10 @@ class StreamManager extends EventEmitter {
     constructor() {
         super();
         
+        // 使用配置中的名称和版本
+        this.appName = config.name;
+        this.version = config.version;
+        
         // 初始化所有必要的 Map 和 Set
         this.streams = new Map();
         this.streamProcesses = new Map();
@@ -110,12 +114,14 @@ class StreamManager extends EventEmitter {
         // 修改心跳配置
         this.heartbeatConfig = {
             enabled: true,
-            server: 'https://rtmp-serve.zhoujie218.top/api/heartbeat',
-            interval: 5000,  // 5秒
-            timeout: 10000,  // 增加超时时间到10秒
-            retryDelay: 5000,  // 添加重试延迟
-            maxRetries: 3,  // 添加最大重试次数
-            serverName: require('os').hostname()
+            server: `https://${config.name}.zhoujie218.top/api/heartbeat`,
+            interval: 5000,
+            timeout: 10000,
+            retryDelay: 5000,
+            maxRetries: 3,
+            serverName: require('os').hostname(),
+            appName: config.name,
+            version: config.version
         };
 
         // 启动心跳
@@ -124,8 +130,9 @@ class StreamManager extends EventEmitter {
         }
 
         // 在 constructor 中添加调试日志
+        logger.info(`Starting ${config.name} version ${config.version}`);
         logger.info('Environment version:', process.env.APP_VERSION);
-        logger.info('Config file version:', require('../config/config.json').version);
+        logger.info('Config file version:', config.version);
         logger.info('Final config version:', this.config.version);
 
         // 添加自启动流的集合
