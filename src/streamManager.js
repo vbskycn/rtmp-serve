@@ -11,75 +11,72 @@ const { spawn } = require('child_process');
 class StreamManager extends EventEmitter {
     constructor() {
         super();
-        this.baseDir = path.resolve(process.cwd(), 'streams');
+        
+        // 初始化所有必要的 Map 和 Set
         this.streams = new Map();
-        this.activeStreams = new Map();
         this.streamProcesses = new Map();
+        this.retryStatus = new Map();
+        this.retryCounters = new Map();
         this.streamStats = new Map();
         this.healthChecks = new Map();
-        this.configPath = path.join(__dirname, '../config/streams.json');
         this.serverPorts = new Map();
         this.failureCount = new Map();
         this.activeViewers = new Map();
         this.autoStopTimers = new Map();
         this.manuallyStartedStreams = new Set();
-        this.config = config;  // 保存配置引用
+        this.autoStartStreams = new Set();
         
-        // 确保使用绝对路径
-        this.rootDir = path.resolve(__dirname, '..');
-        this.configPath = path.join(this.rootDir, 'config/streams.json');
-        
-        // 确保基础目录存在
+        // 添加检查源可用性的方法
+        this.checkStreamSource = async (url) => {
+            try {
+                const response = await axios.head(url, { timeout: 5000 });
+                return response.status === 200;
+            } catch (error) {
+                logger.warn(`Stream source check failed for ${url}:`, error.message);
+                return true; // 暂时返回 true，避免因检查失败而阻止流启动
+            }
+        };
+
+        // 添加构建 FFmpeg 参数的方法
+        this.buildFFmpegArgs = (stream, outputDir) => {
+            return [
+                '-i', stream.url,
+                '-c', 'copy',
+                '-f', 'flv',
+                `${this.config.rtmp.pushServer}${stream.id}`
+            ];
+        };
+
+        // 添加进程监控设置方法
+        this.setupProcessMonitoring = (streamId, process) => {
+            process.stdout.on('data', (data) => {
+                logger.debug(`FFmpeg stdout [${streamId}]: ${data}`);
+            });
+
+            process.stderr.on('data', (data) => {
+                logger.debug(`FFmpeg stderr [${streamId}]: ${data}`);
+            });
+
+            process.on('close', (code) => {
+                logger.info(`FFmpeg process exited with code ${code} [${streamId}]`);
+                this.handleStreamExit(streamId, code);
+            });
+        };
+
+        // 其他初始化代码...
+        this.baseDir = path.resolve(process.cwd(), 'streams');
+        this.configPath = path.join(__dirname, '../config/streams.json');
+        this.config = config;
+
+        // 确保目录存在
         if (!fs.existsSync(this.baseDir)) {
             fs.mkdirSync(this.baseDir, { recursive: true });
         }
-        
-        // 修改配置加载逻辑
-        try {
-            // 首先尝试从环境变量获本号
-            const envVersion = process.env.APP_VERSION;
-            
-            // 加载配置文件
-            this.config = require('../config/config.json');
-            
-            // 如果环境变量中有版本号，优先使用环境变量的版本号
-            if (envVersion && envVersion !== 'latest') {
-                this.config.version = envVersion;
-            }
-            
-            // 确保版本号存在
-            if (!this.config.version) {
-                this.config.version = 'unknown';
-            }
-            
-            logger.info(`Loaded config with version: ${this.config.version}`);
-        } catch (error) {
-            logger.error('Error loading config:', error);
-            this.config = {
-                version: process.env.APP_VERSION || 'unknown',
-                server: {
-                    host: 'localhost',
-                    port: 3000
-                },
-                rtmp: {
-                    pushServer: 'rtmp://ali.push.yximgs.com/live/',
-                    pullServer: 'http://ali.hlspull.yximgs.com/live/'
-                }
-            };
-        }
-        
-        // 修改配置目录的创建
-        const configDir = path.dirname(this.configPath);
-        if (!fs.existsSync(configDir)) {
-            fs.mkdirSync(configDir, { recursive: true });
-        }
-        
-        // 加载保存的流配置
+
+        // 加载流配置并启动
         this.loadStreams();
-        
-        // 启动所有流
         this.startAllStreams();
-        
+
         // 每小时运行一次清理
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
         // 每5分钟运行一次健康检查
@@ -140,10 +137,6 @@ class StreamManager extends EventEmitter {
         // 启动时自动启动已配置的流
         this.startAutoStartStreams();
 
-        // 添加重试状态跟踪
-        this.retryStatus = new Map();
-        this.retryCounters = new Map();
-        
         // 重试配置
         this.retryConfig = {
             immediate: {
