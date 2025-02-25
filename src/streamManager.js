@@ -315,14 +315,11 @@ class StreamManager extends EventEmitter {
             const outputDir = path.join(this.streamsDir, streamId);
             await this.ensureAndCleanDirectory(outputDir);
 
-            // 设置 FFmpeg 参数
-            const ffmpegArgs = this.buildFFmpegArgs(stream, outputDir);
-            
+            // 获取推流地址
+            const outputUrl = `${this.config.rtmp.pushServer}${streamId}`;
+
             // 启动 FFmpeg 进程
-            const ffmpeg = spawn('ffmpeg', ffmpegArgs);
-            
-            // 设置进程监控
-            this.setupProcessMonitoring(streamId, ffmpeg);
+            const ffmpeg = this.spawnFFmpeg(streamId, stream.url, outputUrl);
             
             // 保存进程引用
             this.streamProcesses.set(streamId, {
@@ -331,8 +328,25 @@ class StreamManager extends EventEmitter {
                 lastSegmentTime: Date.now()
             });
 
+            // 更新流状态
+            stream.processRunning = true;
+            stream.manuallyStarted = true;
+            stream.lastStartTime = Date.now();
+
+            // 初始化或更新统计信息
+            if (!this.streamStats.has(streamId)) {
+                this.streamStats.set(streamId, {
+                    startTime: Date.now(),
+                    uptime: 0,
+                    errors: 0,
+                    restarts: 0
+                });
+            }
+
+            logger.info(`Started FFmpeg process for stream ${streamId}`);
             return { success: true };
         } catch (error) {
+            logger.error(`Failed to start stream ${streamId}:`, error);
             return { success: false, error };
         }
     }
