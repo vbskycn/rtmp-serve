@@ -215,6 +215,7 @@
                                     <th class="name-column">名称</th>
                                     <th class="status-column">状态</th>
                                     <th class="rtmp-status-column">推流状态</th>
+                                    <th class="retry-column">重试信息</th>
                                     <th class="source-column">源地址</th>
                                     <th class="play-column">播放地址</th>
                                     <th class="auto-start-column">自启动</th>
@@ -395,6 +396,9 @@
                     <span class="status" style="${rtmpStatusStyle}">
                         ${rtmpStatusText}
                     </span>
+                </td>
+                <td>
+                    ${formatRetryInfo(stream.retryInfo)}
                 </td>
                 <td>
                     <div class="d-flex align-items-center">
@@ -1753,6 +1757,29 @@
                 document.querySelector('.modal.show')?.remove();
             }
         }
+
+        // 添加格式化重试信息的函数
+        function formatRetryInfo(retryInfo) {
+            if (!retryInfo) return '无重试';
+            
+            let html = '';
+            
+            if (retryInfo.isInRecovery) {
+                html += `<span class="badge bg-warning">恢复模式</span><br>`;
+                html += `恢复尝试: ${retryInfo.recoveryAttempts}次<br>`;
+            } else if (retryInfo.totalRetries > 0) {
+                html += `<span class="badge bg-info">已重试</span><br>`;
+                html += `总计: ${retryInfo.totalRetries}次<br>`;
+                if (retryInfo.lastRetryTime) {
+                    const lastRetry = new Date(retryInfo.lastRetryTime);
+                    html += `最近: ${lastRetry.toLocaleTimeString()}`;
+                }
+            } else {
+                html += `<span class="badge bg-success">稳定</span>`;
+            }
+            
+            return html;
+        }
     </script>
 
     <!-- 在 body 标签束前添加编辑模态框 -->
@@ -1819,5 +1846,22 @@
             </div>
         </div>
     </div>
+
+    <!-- 添加相关样式 -->
+    <style>
+    .retry-column {
+        width: 120px;
+    }
+
+    .badge {
+        font-size: 0.8em;
+        padding: 0.3em 0.6em;
+    }
+
+    .retry-info {
+        font-size: 0.85em;
+        line-height: 1.2;
+    }
+    </style>
 </body>
 </html> 

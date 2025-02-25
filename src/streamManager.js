@@ -139,6 +139,9 @@ class StreamManager extends EventEmitter {
         
         // 添加重试状态记录
         this.retryStatus = new Map();
+
+        // 添加重试计数器
+        this.retryCounters = new Map();
     }
 
     // 加载保存的流配置
@@ -725,6 +728,15 @@ class StreamManager extends EventEmitter {
                 this.scheduleStreamRecovery(streamId);
             }
         }
+
+        // 更新重试计数
+        const counter = this.retryCounters.get(streamId) || {
+            total: 0,
+            lastRetryTime: null
+        };
+        counter.total++;
+        counter.lastRetryTime = new Date();
+        this.retryCounters.set(streamId, counter);
     }
 
     handleStreamExit(streamId, code, error, retryCount, maxRetries) {
@@ -909,6 +921,7 @@ class StreamManager extends EventEmitter {
     async stopStreaming(streamId) {
         try {
             // 清理重试状态
+            this.retryCounters.delete(streamId);
             this.retryStatus.delete(streamId);
             
             const wasManuallyStarted = this.manuallyStartedStreams.has(streamId);
@@ -1907,6 +1920,28 @@ class StreamManager extends EventEmitter {
             logger.error(`Error checking stream source ${url}:`, error);
             return false;
         }
+    }
+
+    // 添加获取重试信息的方法
+    getRetryInfo(streamId) {
+        const status = this.retryStatus.get(streamId) || {
+            immediateRetries: 0,
+            recoveryAttempts: 0,
+            isInRecovery: false
+        };
+        
+        const counter = this.retryCounters.get(streamId) || {
+            total: 0,
+            lastRetryTime: null
+        };
+
+        return {
+            immediateRetries: status.immediateRetries,
+            recoveryAttempts: status.recoveryAttempts,
+            isInRecovery: status.isInRecovery,
+            totalRetries: counter.total,
+            lastRetryTime: counter.lastRetryTime
+        };
     }
 }
 

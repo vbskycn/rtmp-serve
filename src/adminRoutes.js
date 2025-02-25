@@ -92,6 +92,7 @@ router.get('/api/streams', async (req, res) => {
             
             try {
                 const processRunning = await checkStreamStatus(id);
+                const retryInfo = streamManager.getRetryInfo(id);
                 const streamData = {
                     id,
                     ...streamConfig,
@@ -99,7 +100,8 @@ router.get('/api/streams', async (req, res) => {
                     stats: streamManager.streamStats.get(id),
                     processRunning,
                     manuallyStarted: streamManager.manuallyStartedStreams.has(id),
-                    autoStart: streamManager.isAutoStart(id)
+                    autoStart: streamManager.isAutoStart(id),
+                    retryInfo
                 };
                 streams.push(streamData);
                 logger.debug(`Successfully processed stream ${id}`);
