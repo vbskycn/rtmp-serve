@@ -5,6 +5,7 @@ const logger = require('./utils/logger');
 const axios = require('axios');
 const EventEmitter = require('events');
 const config = require('../config/config.json');
+const fsPromises = require('fs').promises;
 
 class StreamManager extends EventEmitter {
     constructor() {
@@ -142,6 +143,30 @@ class StreamManager extends EventEmitter {
 
         // 添加重试计数器
         this.retryCounters = new Map();
+
+        this.configStats = {
+            startTime: Date.now(),
+            uptime: 0,
+            errors: 0
+        };
+
+        this.streamsDir = path.join(__dirname, '../streams');
+        this.ensureDirectories();
+    }
+
+    async ensureDirectories() {
+        try {
+            await fsPromises.mkdir(this.streamsDir, { recursive: true });
+            logger.info('Streams directory created/verified');
+        } catch (error) {
+            logger.error('Error creating streams directory:', error);
+        }
+    }
+
+    async prepareStreamDirectory(streamId) {
+        const streamDir = path.join(this.streamsDir, streamId);
+        await fsPromises.mkdir(streamDir, { recursive: true });
+        return streamDir;
     }
 
     // 加载保存的流配置
@@ -406,15 +431,24 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    async startStreaming(streamId, isManualStart = false) {
+    async startStreaming(streamId, manual = false) {
         try {
+            // 确保目录存在
+            await this.prepareStreamDirectory(streamId);
+            
+            // 检查流是否存在
             const stream = this.streams.get(streamId);
             if (!stream) {
-                throw new Error('Stream not found');
+                throw new Error(`Stream ${streamId} not found`);
+            }
+
+            // 添加更多错误检查
+            if (!stream.url) {
+                throw new Error(`Invalid stream URL for ${streamId}`);
             }
 
             // 如果是手动启动，记录到集合中
-            if (isManualStart) {
+            if (manual) {
                 this.manuallyStartedStreams.add(streamId);
                 logger.info(`Stream ${streamId} marked as manually started`);
             }
@@ -442,7 +476,7 @@ class StreamManager extends EventEmitter {
             }
 
             // 使用 FFmpeg 处理流
-            await this.startStreamingWithFFmpeg(streamId, stream, isManualStart);
+            await this.startStreamingWithFFmpeg(streamId, stream, manual);
 
         } catch (error) {
             logger.error(`Error starting stream: ${streamId}`, { 
@@ -612,14 +646,14 @@ class StreamManager extends EventEmitter {
     async ensureAndCleanDirectory(outputPath) {
         try {
             // 确保目录存在
-            await fs.promises.mkdir(outputPath, { recursive: true });
+            await fsPromises.mkdir(outputPath, { recursive: true });
             
             // 清理旧文件
-            const files = await fs.promises.readdir(outputPath);
+            const files = await fsPromises.readdir(outputPath);
             for (const file of files) {
                 if (file.endsWith('.ts') || file.endsWith('.m3u8')) {
                     try {
-                        await fs.promises.unlink(path.join(outputPath, file));
+                        await fsPromises.unlink(path.join(outputPath, file));
                     } catch (err) {
                         logger.warn(`Failed to delete file ${file}: ${err.message}`);
                     }
@@ -1407,7 +1441,7 @@ class StreamManager extends EventEmitter {
                 };
             }
 
-            await fs.promises.writeFile(statsPath, JSON.stringify(stats, null, 2));
+            await fsPromises.writeFile(statsPath, JSON.stringify(stats, null, 2));
             logger.info('Stats saved successfully');
         } catch (error) {
             logger.error('Error saving stats:', error);
@@ -1419,7 +1453,7 @@ class StreamManager extends EventEmitter {
         try {
             const statsPath = path.join(this.rootDir, 'config/stats.json');
             if (fs.existsSync(statsPath)) {
-                const data = await fs.promises.readFile(statsPath, 'utf8');
+                const data = await fsPromises.readFile(statsPath, 'utf8');
                 if (data.trim()) {
                     const stats = JSON.parse(data);
                     
@@ -1703,7 +1737,7 @@ class StreamManager extends EventEmitter {
         try {
             const autoStartPath = path.join(this.rootDir, 'config/autostart.json');
             const autoStartList = Array.from(this.autoStartStreams);
-            await fs.promises.writeFile(autoStartPath, JSON.stringify(autoStartList, null, 2));
+            await fsPromises.writeFile(autoStartPath, JSON.stringify(autoStartList, null, 2));
             logger.info(`Saved ${autoStartList.length} auto-start streams`);
             return true;
         } catch (error) {
