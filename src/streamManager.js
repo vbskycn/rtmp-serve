@@ -532,12 +532,19 @@ class StreamManager extends EventEmitter {
         // 增加重启计数
         processInfo.restartCount = (processInfo.restartCount || 0) + 1;
         
-        // 如果重启次数过多，等待更长时间
-        const waitTime = processInfo.restartCount > 5 ? 30000 : 5000;
+        // 根据错误类型调整等待时间
+        let waitTime = 5000;  // 默认5秒
+        
+        if (error.message.includes('Operation not permitted') || 
+            error.message.includes('Failed to publish')) {
+            waitTime = 30000;  // 权限错误等待30秒
+        } else if (processInfo.restartCount > 5) {
+            waitTime = 60000;  // 多次重试失败等待60秒
+        }
 
         logger.error(`Stream ${streamId} error (attempt ${processInfo.restartCount}):`, error);
 
-        // 等待一段时间后重启
+        // 等待后重启
         setTimeout(async () => {
             try {
                 await this.startStreamProcess(streamId);
@@ -1768,7 +1775,7 @@ class StreamManager extends EventEmitter {
                 '-loglevel', 'warning',
                 
                 // 输入前参数
-                '-fflags', '+genpts+discardcorrupt+igndts',
+                '-fflags', '+genpts+discardcorrupt+igndts+nobuffer',
                 '-ignore_unknown',
                 '-thread_queue_size', this.ffmpegConfig.threadQueueSize,
                 '-probesize', this.ffmpegConfig.probesize,
@@ -1780,7 +1787,7 @@ class StreamManager extends EventEmitter {
                 '-reconnect_streamed', '1',
                 '-reconnect_delay_max', '3',
                 
-                // 超时参数 (移除不支持的 stimeout)
+                // 超时参数
                 '-rw_timeout', this.ffmpegConfig.timeout,
                 
                 // 输入
@@ -1792,20 +1799,19 @@ class StreamManager extends EventEmitter {
                 '-f', 'flv',
                 '-flvflags', 'no_duration_filesize',
                 
-                // 网络相关参数
-                '-max_muxing_queue_size', '1024',
+                // 网络和缓冲参数
+                '-max_muxing_queue_size', '2048',  // 增加队列大小
                 '-tune', 'zerolatency',
                 '-preset', 'veryfast',
-                
-                // 缓冲设置
                 '-bufsize', this.ffmpegConfig.bufferSize,
                 '-maxrate', this.ffmpegConfig.maxRate,
                 
+                // 错误处理
+                '-xerror',  // 遇到错误立即退出
+                '-max_error_rate', '0.0',  // 不允许错误
+                
                 outputUrl
             ];
-
-            logger.info(`Starting FFmpeg process for stream ${streamId}`);
-            logger.info(`FFmpeg command: ${ffmpegPath} ${ffmpegArgs.join(' ')}`);
 
             // 创建 FFmpeg 进程
             const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
@@ -1815,12 +1821,10 @@ class StreamManager extends EventEmitter {
                 logger.debug(`FFmpeg stdout [${streamId}]: ${data}`);
             });
 
-            // 捕获错误输出
+            // 捕获错误输出，过滤一些常见错误
             ffmpeg.stderr.on('data', (data) => {
                 const errorMsg = data.toString().trim();
-                if (!errorMsg.includes('Will reconnect') && 
-                    !errorMsg.includes('Connection reset by peer') &&
-                    !errorMsg.includes('Broken pipe')) {
+                if (!this.isCommonError(errorMsg)) {
                     logger.error(`FFmpeg stderr [${streamId}]: ${errorMsg}`);
                 }
             });
@@ -1837,7 +1841,6 @@ class StreamManager extends EventEmitter {
                 if (!processInfo) return;
 
                 if (signal === 'SIGTERM' || signal === 'SIGINT') {
-                    // 正常退出
                     logger.info(`FFmpeg process terminated [${streamId}]`);
                     return;
                 }
@@ -1850,21 +1853,29 @@ class StreamManager extends EventEmitter {
                 }
             });
 
-            // 保存进程信息
-            this.streamProcesses.set(streamId, {
-                process: ffmpeg,
-                startTime: Date.now(),
-                lastActivity: Date.now(),
-                errors: [],
-                restartCount: 0
-            });
-
             return ffmpeg;
 
         } catch (error) {
             logger.error(`Failed to spawn FFmpeg process [${streamId}]:`, error);
             throw error;
         }
+    }
+
+    // 添加错误过滤方法
+    isCommonError(errorMsg) {
+        const commonErrors = [
+            'Packet corrupt',
+            'DTS out of order',
+            'dropping it',
+            'Non-monotonous DTS',
+            'Invalid data found when processing input',
+            'Connection reset by peer',
+            'Broken pipe',
+            'Operation not permitted',
+            'Server error: Failed to publish'
+        ];
+
+        return commonErrors.some(err => errorMsg.includes(err));
     }
 
     // 修改添加流的方法,添加后自动启动
