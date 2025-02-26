@@ -61,30 +61,14 @@ class StreamManager extends EventEmitter {
         this.checkStreamSource = async (url) => {
             try {
                 if (url.startsWith('http')) {
-                    const response = await axios({
-                        method: 'HEAD',
-                        url: url,
-                        timeout: 10000,
-                        maxRedirects: 5,
-                        validateStatus: null,
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                        }
-                    });
-                    
-                    // 接受 2xx 和 3xx 的状态码
-                    return response.status >= 200 && response.status < 400;
-                }
-                
-                // 对于 RTMP 流，使用 ffprobe 检查
-                if (url.startsWith('rtmp')) {
+                    // 对于 HTTP 流，使用 ffprobe 检查而不是 HEAD 请求
                     return new Promise((resolve) => {
                         const ffprobe = spawn('ffprobe', [
                             '-v', 'quiet',
                             '-print_format', 'json',
                             '-show_format',
                             '-i', url,
-                            '-timeout', '10000000'
+                            '-timeout', '10000000'  // 10秒超时
                         ]);
 
                         let output = '';
@@ -96,9 +80,32 @@ class StreamManager extends EventEmitter {
                             resolve(code === 0);
                         });
 
+                        // 设置超时
                         setTimeout(() => {
                             ffprobe.kill();
-                            resolve(true); // 超时也返回 true，让重试机制处理
+                            resolve(true);  // 超时也返回 true，让重试机制处理
+                        }, 10000);
+                    });
+                }
+                
+                // 对于 RTMP 流，使用相同的 ffprobe 检查
+                if (url.startsWith('rtmp')) {
+                    return new Promise((resolve) => {
+                        const ffprobe = spawn('ffprobe', [
+                            '-v', 'quiet',
+                            '-print_format', 'json',
+                            '-show_format',
+                            '-i', url,
+                            '-timeout', '10000000'
+                        ]);
+
+                        ffprobe.on('exit', (code) => {
+                            resolve(code === 0);
+                        });
+
+                        setTimeout(() => {
+                            ffprobe.kill();
+                            resolve(true);
                         }, 10000);
                     });
                 }
@@ -349,12 +356,6 @@ class StreamManager extends EventEmitter {
         }
 
         try {
-            // 检查源是否可用
-            const sourceAvailable = await this.checkStreamSource(stream.url);
-            if (!sourceAvailable) {
-                throw new Error('Stream source not available');
-            }
-
             // 准备输出目录
             const outputDir = path.join(this.streamsDir, streamId);
             await this.ensureAndCleanDirectory(outputDir);
@@ -403,7 +404,7 @@ class StreamManager extends EventEmitter {
             
         } catch (error) {
             logger.error(`Failed to start stream ${streamId}:`, error);
-            throw error;
+            return { success: false, error };
         }
     }
 
@@ -1642,7 +1643,7 @@ class StreamManager extends EventEmitter {
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]);
     }
 
     // 在 StreamManager 类中添加这个方法
