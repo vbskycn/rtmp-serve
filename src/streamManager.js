@@ -230,8 +230,8 @@ class StreamManager extends EventEmitter {
         this.streamsDir = path.join(this.rootDir, 'streams');
         this.ensureDirectories();
 
-        this.maxConcurrentStreams = 3; // 降低并发数
-        this.streamStartInterval = 2000; // 增加启动间隔
+        this.maxConcurrentStreams = 2; // 降低并发数
+        this.streamStartInterval = 5000; // 增加启动间隔到5秒
 
         // 添加进程资源限制
         this.processLimits = {
@@ -251,7 +251,6 @@ class StreamManager extends EventEmitter {
 
         // 修改 FFmpeg 配置
         this.ffmpegConfig = {
-            maxMemory: '512M',
             probesize: '32M',
             analyzeduration: '5M',
             bufferSize: '8192k',
@@ -321,17 +320,17 @@ class StreamManager extends EventEmitter {
         const streams = Array.from(this.streams.values());
         logger.info(`Starting all ${streams.length} streams...`);
 
-        const startPromises = streams.map(async (stream) => {
+        // 按顺序启动流
+        for (const stream of streams) {
             try {
                 await this.startStreaming(stream.id);
-                logger.info(`Successfully started stream: ${stream.id}`);
+                // 添加启动间隔
+                await new Promise(resolve => setTimeout(resolve, this.streamStartInterval));
             } catch (error) {
                 logger.error(`Failed to start stream ${stream.id}:`, error);
-                // 错误交给重试机制处理
             }
-        });
+        }
 
-        await Promise.all(startPromises);
         logger.info(`Finished starting all streams`);
     }
 
@@ -1774,6 +1773,8 @@ class StreamManager extends EventEmitter {
                 '-loglevel', 'warning',
                 
                 // 输入前参数
+                '-fflags', '+genpts+discardcorrupt',
+                '-ignore_unknown',
                 '-thread_queue_size', this.ffmpegConfig.threadQueueSize,
                 '-probesize', this.ffmpegConfig.probesize,
                 '-analyzeduration', this.ffmpegConfig.analyzeduration,
@@ -1782,18 +1783,17 @@ class StreamManager extends EventEmitter {
                 '-reconnect', '1',
                 '-reconnect_at_eof', '1',
                 '-reconnect_streamed', '1',
-                '-reconnect_delay_max', '30',
+                '-reconnect_delay_max', '5', // 减少重连延迟
                 
                 // 超时参数
-                '-stimeout', this.ffmpegConfig.timeout,
-                '-timeout', this.ffmpegConfig.timeout,
+                '-rw_timeout', '5000000', // 减少读写超时
                 
                 // 输入
                 '-i', inputUrl,
                 
                 // 输出参数
-                '-c:v', 'copy',  // 视频直接复制
-                '-c:a', 'copy',  // 音频直接复制
+                '-c:v', 'copy',
+                '-c:a', 'copy',
                 '-f', 'flv',
                 '-flvflags', 'no_duration_filesize',
                 
@@ -1823,17 +1823,9 @@ class StreamManager extends EventEmitter {
             // 捕获错误输出
             ffmpeg.stderr.on('data', (data) => {
                 const errorMsg = data.toString().trim();
-                logger.error(`FFmpeg stderr [${streamId}]: ${errorMsg}`);
-                
-                // 存储错误信息
-                if (!this.streamProcesses.has(streamId)) {
-                    this.streamProcesses.set(streamId, {});
+                if (!errorMsg.includes('Will reconnect')) { // 忽略重连消息的日志
+                    logger.error(`FFmpeg stderr [${streamId}]: ${errorMsg}`);
                 }
-                const processInfo = this.streamProcesses.get(streamId);
-                if (!processInfo.errors) {
-                    processInfo.errors = [];
-                }
-                processInfo.errors.push(errorMsg);
             });
 
             // 进程错误处理
@@ -1844,16 +1836,14 @@ class StreamManager extends EventEmitter {
 
             // 进程退出处理
             ffmpeg.on('exit', (code, signal) => {
-                const processInfo = this.streamProcesses.get(streamId);
-                const errors = processInfo?.errors || [];
+                if (code === 1) {
+                    // 正常退出，不需要处理
+                    return;
+                }
                 
                 if (code !== 0) {
                     logger.error(`FFmpeg process exited with code ${code} [${streamId}]`);
-                    logger.error(`FFmpeg errors for stream ${streamId}:`, errors);
-                    
-                    // 根据错误信息决定重试策略
                     const error = new Error(`FFmpeg exited with code ${code}`);
-                    error.ffmpegErrors = errors;
                     this.handleStreamError(streamId, error);
                 }
             });
