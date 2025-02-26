@@ -248,6 +248,17 @@ class StreamManager extends EventEmitter {
         
         // 启动监控
         this.startMonitoring();
+
+        // 修改 FFmpeg 配置
+        this.ffmpegConfig = {
+            maxMemory: '512M',
+            probesize: '32M',
+            analyzeduration: '5M',
+            bufferSize: '8192k',
+            maxRate: '8192k',
+            threadQueueSize: '1024',
+            timeout: '30000000'
+        };
     }
 
     async ensureDirectories() {
@@ -521,29 +532,26 @@ class StreamManager extends EventEmitter {
 
         logger.error(`Stream ${streamId} error:`, error);
         
-        // 记录详细的错误信息
+        // 分析错误类型
         const errorInfo = {
             timestamp: new Date(),
             type: error.name,
             message: error.message,
-            stack: error.stack,
+            ffmpegErrors: error.ffmpegErrors || [],
             streamInfo: {
                 id: streamId,
                 url: stream.url,
                 retryCount: stream.retryCount || 0
-            },
-            systemInfo: {
-                freemem: os.freemem(),
-                loadavg: os.loadavg(),
-                uptime: os.uptime()
             }
         };
         
-        // 写入错误日志
-        fs.appendFileSync(
-            path.join(this.logsDir, 'stream-errors.log'),
-            JSON.stringify(errorInfo) + '\n'
-        );
+        // 记录错误信息
+        this.logError(errorInfo);
+        
+        // 根据错误类型决定重试策略
+        if (this.shouldRetryStream(errorInfo)) {
+            this.retryStream(streamId);
+        }
     }
 
     // 处理立即重试
@@ -1758,56 +1766,77 @@ class StreamManager extends EventEmitter {
     // 修改 spawnFFmpeg 函数
     spawnFFmpeg(streamId, inputUrl, outputUrl) {
         try {
-            // 使用系统 FFmpeg 而不是 node 模块
             const ffmpegPath = '/usr/bin/ffmpeg';
             
+            // 优化 FFmpeg 参数
             const ffmpegArgs = [
                 '-hide_banner',
                 '-loglevel', 'warning',
                 
-                // 添加内存和缓冲区限制
-                '-max_memory', '512M',
-                '-max_muxing_queue_size', '1024',
+                // 输入前参数
+                '-thread_queue_size', this.ffmpegConfig.threadQueueSize,
+                '-probesize', this.ffmpegConfig.probesize,
+                '-analyzeduration', this.ffmpegConfig.analyzeduration,
                 
-                // 输入选项
-                '-fflags', '+genpts+igndts',
-                '-avoid_negative_ts', 'make_zero',
+                // 重连参数
                 '-reconnect', '1',
+                '-reconnect_at_eof', '1',
                 '-reconnect_streamed', '1',
                 '-reconnect_delay_max', '30',
-                '-stimeout', '30000000',
+                
+                // 超时参数
+                '-stimeout', this.ffmpegConfig.timeout,
+                '-timeout', this.ffmpegConfig.timeout,
+                
+                // 输入
                 '-i', inputUrl,
-
-                // 输出选项
-                '-c', 'copy',
-                '-movflags', '+faststart',
+                
+                // 输出参数
+                '-c:v', 'copy',  // 视频直接复制
+                '-c:a', 'copy',  // 音频直接复制
                 '-f', 'flv',
                 '-flvflags', 'no_duration_filesize',
                 
-                // 降低缓冲区大小
-                '-bufsize', '4096k',
-                '-maxrate', '4096k',
+                // 缓冲设置
+                '-bufsize', this.ffmpegConfig.bufferSize,
+                '-maxrate', this.ffmpegConfig.maxRate,
                 
+                // 输出
                 outputUrl
             ];
 
             logger.info(`Starting FFmpeg process for stream ${streamId}`);
             logger.info(`FFmpeg command: ${ffmpegPath} ${ffmpegArgs.join(' ')}`);
 
+            // 添加错误输出捕获
             const ffmpeg = spawn(ffmpegPath, ffmpegArgs, {
                 stdio: ['ignore', 'pipe', 'pipe'],
                 detached: false,
-                windowsHide: true,
-                
-                // 添加资源限制
-                maxBuffer: this.processLimits.maxBuffer,
-                env: {
-                    ...process.env,
-                    FFMPEG_MEMORY_LIMIT: this.processLimits.maxMemory.toString()
-                }
+                windowsHide: true
             });
 
-            // 错误处理
+            // 捕获标准输出
+            ffmpeg.stdout.on('data', (data) => {
+                logger.debug(`FFmpeg stdout [${streamId}]: ${data}`);
+            });
+
+            // 捕获错误输出
+            ffmpeg.stderr.on('data', (data) => {
+                const errorMsg = data.toString().trim();
+                logger.error(`FFmpeg stderr [${streamId}]: ${errorMsg}`);
+                
+                // 存储错误信息
+                if (!this.streamProcesses.has(streamId)) {
+                    this.streamProcesses.set(streamId, {});
+                }
+                const processInfo = this.streamProcesses.get(streamId);
+                if (!processInfo.errors) {
+                    processInfo.errors = [];
+                }
+                processInfo.errors.push(errorMsg);
+            });
+
+            // 进程错误处理
             ffmpeg.on('error', (error) => {
                 logger.error(`FFmpeg process error [${streamId}]:`, error);
                 this.handleStreamError(streamId, error);
@@ -1815,18 +1844,26 @@ class StreamManager extends EventEmitter {
 
             // 进程退出处理
             ffmpeg.on('exit', (code, signal) => {
-                const exitInfo = signal ? `signal ${signal}` : `code ${code}`;
+                const processInfo = this.streamProcesses.get(streamId);
+                const errors = processInfo?.errors || [];
+                
                 if (code !== 0) {
-                    logger.error(`FFmpeg process exited with ${exitInfo} [${streamId}]`);
-                    this.handleStreamError(streamId, new Error(`FFmpeg exited with ${exitInfo}`));
+                    logger.error(`FFmpeg process exited with code ${code} [${streamId}]`);
+                    logger.error(`FFmpeg errors for stream ${streamId}:`, errors);
+                    
+                    // 根据错误信息决定重试策略
+                    const error = new Error(`FFmpeg exited with code ${code}`);
+                    error.ffmpegErrors = errors;
+                    this.handleStreamError(streamId, error);
                 }
             });
 
-            // 保存进程引用
+            // 保存进程信息
             this.streamProcesses.set(streamId, {
                 process: ffmpeg,
                 startTime: Date.now(),
-                lastActivity: Date.now()
+                lastActivity: Date.now(),
+                errors: []
             });
 
             return ffmpeg;
