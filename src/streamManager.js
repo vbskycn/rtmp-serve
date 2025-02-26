@@ -230,8 +230,8 @@ class StreamManager extends EventEmitter {
         this.streamsDir = path.join(this.rootDir, 'streams');
         this.ensureDirectories();
 
-        this.maxConcurrentStreams = 2; // 降低并发数
-        this.streamStartInterval = 5000; // 增加启动间隔到5秒
+        this.maxConcurrentStreams = 3; // 增加到3个并发
+        this.streamStartInterval = 3000; // 减少启动间隔到3秒
 
         // 添加进程资源限制
         this.processLimits = {
@@ -256,7 +256,9 @@ class StreamManager extends EventEmitter {
             bufferSize: '8192k',
             maxRate: '8192k',
             threadQueueSize: '1024',
-            timeout: '30000000'
+            timeout: '30000000',
+            reconnectDelay: '3', // 减少重连延迟
+            reconnectAttempts: '10' // 增加重连尝试次数
         };
     }
 
@@ -526,31 +528,26 @@ class StreamManager extends EventEmitter {
 
     // 修改错误处理方法
     async handleStreamError(streamId, error) {
-        const stream = this.streams.get(streamId);
-        if (!stream) return;
+        const processInfo = this.streamProcesses.get(streamId);
+        if (!processInfo) return;
 
-        logger.error(`Stream ${streamId} error:`, error);
+        // 增加重启计数
+        processInfo.restartCount = (processInfo.restartCount || 0) + 1;
         
-        // 分析错误类型
-        const errorInfo = {
-            timestamp: new Date(),
-            type: error.name,
-            message: error.message,
-            ffmpegErrors: error.ffmpegErrors || [],
-            streamInfo: {
-                id: streamId,
-                url: stream.url,
-                retryCount: stream.retryCount || 0
+        // 如果重启次数过多，等待更长时间
+        const waitTime = processInfo.restartCount > 5 ? 30000 : 5000;
+
+        logger.error(`Stream ${streamId} error (attempt ${processInfo.restartCount}):`, error);
+
+        // 等待一段时间后重启
+        setTimeout(async () => {
+            try {
+                await this.startStreamProcess(streamId);
+                processInfo.restartCount = 0; // 重置计数
+            } catch (restartError) {
+                logger.error(`Failed to restart stream ${streamId}:`, restartError);
             }
-        };
-        
-        // 记录错误信息
-        this.logError(errorInfo);
-        
-        // 根据错误类型决定重试策略
-        if (this.shouldRetryStream(errorInfo)) {
-            this.retryStream(streamId);
-        }
+        }, waitTime);
     }
 
     // 处理立即重试
@@ -1018,7 +1015,7 @@ class StreamManager extends EventEmitter {
         const hasRecentStats = stats?.startTime && 
             (Date.now() - new Date(stats.startTime).getTime()) < 30000;  // 30秒内有活动
         
-        // 检查是否有放列表文件
+        // 检查是否有播放列表文件
         const playlistPath = path.join(this.streamsDir, streamId, 'playlist.m3u8');
         const hasPlaylist = fs.existsSync(playlistPath);
         
@@ -1773,7 +1770,7 @@ class StreamManager extends EventEmitter {
                 '-loglevel', 'warning',
                 
                 // 输入前参数
-                '-fflags', '+genpts+discardcorrupt',
+                '-fflags', '+genpts+discardcorrupt+igndts',
                 '-ignore_unknown',
                 '-thread_queue_size', this.ffmpegConfig.threadQueueSize,
                 '-probesize', this.ffmpegConfig.probesize,
@@ -1783,10 +1780,12 @@ class StreamManager extends EventEmitter {
                 '-reconnect', '1',
                 '-reconnect_at_eof', '1',
                 '-reconnect_streamed', '1',
-                '-reconnect_delay_max', '5', // 减少重连延迟
+                '-reconnect_delay_max', this.ffmpegConfig.reconnectDelay,
+                '-reconnect_attempts', this.ffmpegConfig.reconnectAttempts,
                 
-                // 超时参数
-                '-rw_timeout', '5000000', // 减少读写超时
+                // 超时和缓冲参数
+                '-rw_timeout', '5000000',
+                '-stimeout', '5000000',
                 
                 // 输入
                 '-i', inputUrl,
@@ -1796,6 +1795,12 @@ class StreamManager extends EventEmitter {
                 '-c:a', 'copy',
                 '-f', 'flv',
                 '-flvflags', 'no_duration_filesize',
+                '-shortest',
+                
+                // 网络相关参数
+                '-max_muxing_queue_size', '1024',
+                '-tune', 'zerolatency',
+                '-preset', 'veryfast',
                 
                 // 缓冲设置
                 '-bufsize', this.ffmpegConfig.bufferSize,
@@ -1823,7 +1828,9 @@ class StreamManager extends EventEmitter {
             // 捕获错误输出
             ffmpeg.stderr.on('data', (data) => {
                 const errorMsg = data.toString().trim();
-                if (!errorMsg.includes('Will reconnect')) { // 忽略重连消息的日志
+                if (!errorMsg.includes('Will reconnect') && 
+                    !errorMsg.includes('Connection reset by peer') &&
+                    !errorMsg.includes('Broken pipe')) {
                     logger.error(`FFmpeg stderr [${streamId}]: ${errorMsg}`);
                 }
             });
@@ -1836,14 +1843,19 @@ class StreamManager extends EventEmitter {
 
             // 进程退出处理
             ffmpeg.on('exit', (code, signal) => {
-                if (code === 1) {
-                    // 正常退出，不需要处理
+                const processInfo = this.streamProcesses.get(streamId);
+                if (!processInfo) return;
+
+                if (signal === 'SIGTERM' || signal === 'SIGINT') {
+                    // 正常退出
+                    logger.info(`FFmpeg process terminated [${streamId}]`);
                     return;
                 }
-                
+
                 if (code !== 0) {
-                    logger.error(`FFmpeg process exited with code ${code} [${streamId}]`);
                     const error = new Error(`FFmpeg exited with code ${code}`);
+                    error.code = code;
+                    error.signal = signal;
                     this.handleStreamError(streamId, error);
                 }
             });
@@ -1853,7 +1865,8 @@ class StreamManager extends EventEmitter {
                 process: ffmpeg,
                 startTime: Date.now(),
                 lastActivity: Date.now(),
-                errors: []
+                errors: [],
+                restartCount: 0
             });
 
             return ffmpeg;
@@ -1988,33 +2001,22 @@ class StreamManager extends EventEmitter {
             }
 
             try {
-                const usage = await this.getProcessUsage(processInfo.process.pid);
-                
-                if (usage.memory > this.processLimits.maxMemory) {
-                    logger.warn(`Stream ${streamId} memory usage too high, restarting...`);
-                    await this.restartStream(streamId);
+                const pid = processInfo.process.pid;
+                if (!pid) continue;
+
+                const { stdout } = await exec(`ps -p ${pid} -o pid=`);
+                if (!stdout.trim()) {
+                    // 进程不存在，重启它
+                    logger.warn(`Process for stream ${streamId} not found, restarting...`);
+                    await this.startStreamProcess(streamId);
                 }
             } catch (error) {
-                logger.error(`Failed to check process health for stream ${streamId}:`, error);
+                // 忽略进程检查错误
+                if (!error.message.includes('No such process')) {
+                    logger.debug(`Process check error for stream ${streamId}:`, error);
+                }
             }
         }
-    }
-
-    async getProcessUsage(pid) {
-        return new Promise((resolve, reject) => {
-            exec(`ps -p ${pid} -o %mem,rss`, (error, stdout) => {
-                if (error) {
-                    reject(error);
-                    return;
-                }
-                
-                const [mem, rss] = stdout.trim().split('\n')[1].trim().split(/\s+/);
-                resolve({
-                    memory: parseInt(rss) * 1024, // 转换为字节
-                    memoryPercent: parseFloat(mem)
-                });
-            });
-        });
     }
 }
 
