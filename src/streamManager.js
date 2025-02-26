@@ -60,11 +60,53 @@ class StreamManager extends EventEmitter {
         // 添加检查源可用性的方法
         this.checkStreamSource = async (url) => {
             try {
-                const response = await axios.head(url, { timeout: 5000 });
-                return response.status === 200;
+                if (url.startsWith('http')) {
+                    const response = await axios({
+                        method: 'HEAD',
+                        url: url,
+                        timeout: 10000,
+                        maxRedirects: 5,
+                        validateStatus: null,
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        }
+                    });
+                    
+                    // 接受 2xx 和 3xx 的状态码
+                    return response.status >= 200 && response.status < 400;
+                }
+                
+                // 对于 RTMP 流，使用 ffprobe 检查
+                if (url.startsWith('rtmp')) {
+                    return new Promise((resolve) => {
+                        const ffprobe = spawn('ffprobe', [
+                            '-v', 'quiet',
+                            '-print_format', 'json',
+                            '-show_format',
+                            '-i', url,
+                            '-timeout', '10000000'
+                        ]);
+
+                        let output = '';
+                        ffprobe.stdout.on('data', (data) => {
+                            output += data.toString();
+                        });
+
+                        ffprobe.on('exit', (code) => {
+                            resolve(code === 0);
+                        });
+
+                        setTimeout(() => {
+                            ffprobe.kill();
+                            resolve(true); // 超时也返回 true，让重试机制处理
+                        }, 10000);
+                    });
+                }
+
+                return true; // 其他类型的流默认返回 true
             } catch (error) {
                 logger.warn(`Stream source check failed for ${url}:`, error.message);
-                return true; // 暂时返回 true，避免因检查失败而阻止流启动
+                return true; // 检查失败时返回 true，让重试机制处理
             }
         };
 
@@ -158,14 +200,15 @@ class StreamManager extends EventEmitter {
         this.retryConfig = {
             immediate: {
                 attempts: 3,        // 立即重试3次
-                interval: 20000     // 20秒内
+                interval: 2000      // 每次间隔2秒
             },
             recovery: {
                 intervals: [
-                    5 * 60 * 1000,   // 5分钟后
-                    20 * 60 * 1000,  // 20分钟后
-                    20 * 60 * 1000   // 之后每20分钟
-                ]
+                    5 * 60 * 1000,   // 5分钟后第一轮重试
+                    20 * 60 * 1000,  // 20分钟后第二轮重试
+                    20 * 60 * 1000   // 之后每20分钟重试一次
+                ],
+                attemptsPerRound: 3  // 每轮重试3次
             }
         };
 
@@ -272,7 +315,8 @@ class StreamManager extends EventEmitter {
                 this.retryStatus.set(streamId, {
                     immediateRetries: 0,
                     recoveryAttempts: 0,
-                    isInRecovery: false
+                    isInRecovery: false,
+                    currentRound: 0
                 });
             }
 
@@ -301,7 +345,7 @@ class StreamManager extends EventEmitter {
     async startStreamProcess(streamId) {
         const stream = this.streams.get(streamId);
         if (!stream) {
-            return { success: false, error: 'Stream not found' };
+            throw new Error('Stream not found');
         }
 
         try {
@@ -321,33 +365,45 @@ class StreamManager extends EventEmitter {
             // 启动 FFmpeg 进程
             const ffmpeg = this.spawnFFmpeg(streamId, stream.url, outputUrl);
             
-            // 保存进程引用
-            this.streamProcesses.set(streamId, {
-                ffmpeg,
-                startTime: Date.now(),
-                lastSegmentTime: Date.now()
+            // 等待进程启动
+            await new Promise((resolve, reject) => {
+                let resolved = false;
+                
+                // 检查进程是否成功启动
+                ffmpeg.once('spawn', () => {
+                    resolved = true;
+                    resolve();
+                });
+
+                // 处理启动失败
+                ffmpeg.once('error', (error) => {
+                    if (!resolved) {
+                        reject(error);
+                    }
+                });
+
+                // 设置启动超时
+                setTimeout(() => {
+                    if (!resolved) {
+                        ffmpeg.kill();
+                        reject(new Error('Process startup timeout'));
+                    }
+                }, 5000);
             });
 
-            // 更新流状态
-            stream.processRunning = true;
-            stream.manuallyStarted = true;
-            stream.lastStartTime = Date.now();
+            // 保存进程引用
+            this.streamProcesses.set(streamId, {
+                process: ffmpeg,
+                startTime: Date.now(),
+                lastActivity: Date.now()
+            });
 
-            // 初始化或更新统计信息
-            if (!this.streamStats.has(streamId)) {
-                this.streamStats.set(streamId, {
-                    startTime: Date.now(),
-                    uptime: 0,
-                    errors: 0,
-                    restarts: 0
-                });
-            }
-
-            logger.info(`Started FFmpeg process for stream ${streamId}`);
+            logger.info(`Successfully started FFmpeg process for stream ${streamId}`);
             return { success: true };
+            
         } catch (error) {
             logger.error(`Failed to start stream ${streamId}:`, error);
-            return { success: false, error };
+            throw error;
         }
     }
 
@@ -441,73 +497,111 @@ class StreamManager extends EventEmitter {
 
     // 修改错误处理方法
     async handleStreamError(streamId, error) {
-        const status = this.retryStatus.get(streamId);
-        const counter = this.retryCounters.get(streamId);
-        
-        logger.error(`Stream ${streamId} error:`, error);
+        try {
+            const status = this.retryStatus.get(streamId) || {
+                immediateRetries: 0,
+                recoveryAttempts: 0,
+                isInRecovery: false,
+                currentRound: 0
+            };
+            
+            const stream = this.streams.get(streamId);
+            if (!stream) return;
 
-        // 更新重试计数
-        counter.total++;
-        counter.lastRetryTime = Date.now();
+            logger.error(`Stream ${streamId} error:`, error);
 
-        if (!status.isInRecovery) {
-            // 处理即时重试(20秒内3次)
-            if (status.immediateRetries < this.retryConfig.immediate.attempts) {
-                status.immediateRetries++;
-                logger.info(`Immediate retry ${status.immediateRetries}/3 for stream ${streamId}`);
-                
-                setTimeout(async () => {
-                    try {
-                        await this.startStreamProcess(streamId);
-                        logger.info(`Immediate retry ${status.immediateRetries} succeeded for stream ${streamId}`);
-                        // 重试成功,重置状态
-                        this.resetRetryStatus(streamId);
-                    } catch (error) {
-                        logger.error(`Immediate retry ${status.immediateRetries} failed for stream ${streamId}:`, error);
-                        // 失败继续交给重试机制处理
-                    }
-                }, 2000); // 2秒后重试
-                
+            // 处理立即重试阶段
+            if (!status.isInRecovery && status.immediateRetries < this.retryConfig.immediate.attempts) {
+                await this.handleImmediateRetry(streamId, status);
                 return;
             }
 
-            // 立即重试全部失败,进入恢复模式
-            status.isInRecovery = true;
-            status.immediateRetries = 0;
-            status.recoveryAttempts = 0;
+            // 进入恢复重试阶段
+            await this.handleRecoveryRetry(streamId, status);
+
+        } catch (error) {
+            logger.error(`Error in handleStreamError for stream ${streamId}:`, error);
         }
-
-        // 处理恢复重试
-        const interval = this.getRecoveryInterval(status.recoveryAttempts);
-        status.recoveryAttempts++;
-
-        logger.info(`Scheduling recovery attempt for stream ${streamId} in ${interval/1000/60} minutes`);
-        
-        setTimeout(async () => {
-            try {
-                // 进入恢复重试时也使用立即重试机制
-                status.immediateRetries = 0;
-                status.isInRecovery = true;
-                
-                // 开始新一轮立即重试
-                await this.startStreamProcess(streamId);
-                logger.info(`Recovery attempt succeeded for stream ${streamId}`);
-                // 重试成功,重置状态
-                this.resetRetryStatus(streamId);
-            } catch (error) {
-                logger.error(`Recovery attempt failed for stream ${streamId}:`, error);
-                // 失败继续交给重试机制处理
-            }
-        }, interval);
     }
 
-    // 修改获取恢复间隔的方法
-    getRecoveryInterval(attemptCount) {
-        const intervals = this.retryConfig.recovery.intervals;
-        if (attemptCount < intervals.length) {
-            return intervals[attemptCount];
+    // 处理立即重试
+    async handleImmediateRetry(streamId, status) {
+        status.immediateRetries++;
+        logger.info(`Immediate retry ${status.immediateRetries}/3 for stream ${streamId}`);
+        
+        try {
+            await new Promise(resolve => setTimeout(resolve, this.retryConfig.immediate.interval));
+            await this.startStreamProcess(streamId);
+            
+            logger.info(`Immediate retry ${status.immediateRetries} succeeded for stream ${streamId}`);
+            this.resetRetryStatus(streamId);
+            
+        } catch (error) {
+            logger.error(`Immediate retry ${status.immediateRetries} failed for stream ${streamId}`);
+            
+            if (status.immediateRetries >= this.retryConfig.immediate.attempts) {
+                // 立即重试失败，进入恢复模式
+                status.isInRecovery = true;
+                status.currentRound = 0;
+                status.recoveryAttempts = 0;
+                this.retryStatus.set(streamId, status);
+                
+                // 开始第一轮恢复重试
+                await this.handleRecoveryRetry(streamId, status);
+            } else {
+                // 继续立即重试
+                await this.handleImmediateRetry(streamId, status);
+            }
         }
-        return intervals[intervals.length - 1]; // 使用最后一个间隔(20分钟)持续重试
+    }
+
+    // 处理恢复重试
+    async handleRecoveryRetry(streamId, status) {
+        const intervals = this.retryConfig.recovery.intervals;
+        const currentInterval = intervals[Math.min(status.currentRound, intervals.length - 1)];
+        
+        logger.info(`Scheduling recovery round ${status.currentRound + 1} for stream ${streamId} in ${currentInterval/1000} seconds`);
+        
+        // 设置恢复定时器
+        setTimeout(async () => {
+            try {
+                // 开始新一轮重试
+                status.recoveryAttempts = 0;
+                while (status.recoveryAttempts < this.retryConfig.recovery.attemptsPerRound) {
+                    try {
+                        status.recoveryAttempts++;
+                        logger.info(`Recovery attempt ${status.recoveryAttempts}/3 in round ${status.currentRound + 1} for stream ${streamId}`);
+                        
+                        await this.startStreamProcess(streamId);
+                        
+                        // 重试成功，重置状态
+                        logger.info(`Stream ${streamId} recovered successfully`);
+                        this.resetRetryStatus(streamId);
+                        return;
+                        
+                    } catch (error) {
+                        logger.error(`Recovery attempt ${status.recoveryAttempts} in round ${status.currentRound + 1} failed for stream ${streamId}`);
+                        
+                        if (status.recoveryAttempts < this.retryConfig.recovery.attemptsPerRound) {
+                            // 等待2秒后继续当前轮次的重试
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                        }
+                    }
+                }
+                
+                // 当前轮次的所有重试都失败
+                status.currentRound++;
+                this.retryStatus.set(streamId, status);
+                
+                // 继续下一轮重试
+                await this.handleRecoveryRetry(streamId, status);
+                
+            } catch (error) {
+                logger.error(`Error in recovery process for stream ${streamId}:`, error);
+                // 出错后继续重试
+                await this.handleRecoveryRetry(streamId, status);
+            }
+        }, currentInterval);
     }
 
     // 修改重置重试状态的方法
@@ -515,15 +609,10 @@ class StreamManager extends EventEmitter {
         this.retryStatus.set(streamId, {
             immediateRetries: 0,
             recoveryAttempts: 0,
-            isInRecovery: false
+            isInRecovery: false,
+            currentRound: 0
         });
         
-        // 重置重试计数器
-        this.retryCounters.set(streamId, {
-            total: 0,
-            lastRetryTime: null
-        });
-
         logger.info(`Reset retry status for stream ${streamId}`);
     }
 
@@ -1553,7 +1642,7 @@ class StreamManager extends EventEmitter {
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]);
     }
 
     // 在 StreamManager 类中添加这个方法
@@ -1622,56 +1711,6 @@ class StreamManager extends EventEmitter {
         }, this.retryConfig.recoveryDelay);
     }
 
-    // 添加源可用性检查方法
-    async checkStreamSource(url) {
-        try {
-            // 对于 HTTP/HTTPS 流
-            if (url.startsWith('http')) {
-                const response = await axios.head(url, {
-                    timeout: 5000,
-                    validateStatus: null
-                });
-                return response.status >= 200 && response.status < 400;
-            }
-            
-            // 对于 RTMP 流，可以尝试建立连接
-            if (url.startsWith('rtmp')) {
-                // 使用 ffprobe 检查
-                return new Promise((resolve) => {
-                    const ffprobe = spawn('ffprobe', [
-                        '-v', 'quiet',
-                        '-print_format', 'json',
-                        '-show_format',
-                        '-i', url,
-                        '-timeout', '5000000'  // 5秒超时
-                    ]);
-
-                    let output = '';
-                    ffprobe.stdout.on('data', (data) => {
-                        output += data.toString();
-                    });
-
-                    ffprobe.on('exit', (code) => {
-                        resolve(code === 0);
-                    });
-
-                    // 设置超时
-                    setTimeout(() => {
-                        ffprobe.kill();
-                        resolve(false);
-                    }, 5000);
-                });
-            }
-
-            // 其他类型的流
-            return true;  // 默认假设可用，让重试机制来验证
-
-        } catch (error) {
-            logger.error(`Error checking stream source ${url}:`, error);
-            return false;
-        }
-    }
-
     // 添加获取重试信息的方法
     getRetryInfo(streamId) {
         const status = this.retryStatus.get(streamId) || {
@@ -1704,22 +1743,20 @@ class StreamManager extends EventEmitter {
 
             // FFmpeg 参数
             const ffmpegArgs = [
-                '-hide_banner',          // 隐藏版本信息
-                '-loglevel', 'warning',  // 只显示警告和错误
-                '-re',                   // 使用原始帧率读取
-                '-i', inputUrl,          // 输入流
-                '-c', 'copy',           // 复制编码(不重新编码)
-                '-f', 'flv',            // 输出格式为 FLV
-                '-flvflags', 'no_duration_filesize',  // 避免 FLV 文件大小限制
-                '-bufsize', '5000k',     // 设置缓冲区大小
-                '-maxrate', '5000k',     // 设置最大码率
-                '-rtmp_buffer', '5000',  // RTMP 缓冲
-                '-rtmp_live', 'live',    // RTMP 直播模式
-                '-reconnect', '1',       // 自动重连
-                '-reconnect_streamed', '1', // 流重连
-                '-reconnect_delay_max', '10', // 最大重连延迟
-                '-stimeout', '5000000',  // 设置 TCP 超时
-                '-timeout', '5000000',   // 设置 HTTP 超时
+                '-hide_banner',
+                '-loglevel', 'warning',
+                '-reconnect', '1',
+                '-reconnect_streamed', '1', 
+                '-reconnect_delay_max', '30',
+                '-timeout', '30000000',
+                '-rw_timeout', '30000000',
+                '-re',
+                '-i', inputUrl,
+                '-c', 'copy',
+                '-f', 'flv',
+                '-flvflags', 'no_duration_filesize',
+                '-bufsize', '5000k',
+                '-maxrate', '5000k',
                 outputUrl
             ];
 
