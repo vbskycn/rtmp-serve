@@ -1627,7 +1627,7 @@ class StreamManager extends EventEmitter {
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]);
     }
 
     // 在 StreamManager 类中添加这个方法
@@ -1726,32 +1726,58 @@ class StreamManager extends EventEmitter {
             logger.info(`Input URL: ${inputUrl}`);
             logger.info(`Output URL: ${outputUrl}`);
 
-            // FFmpeg 参数
+            // 修改 FFmpeg 参数，增加稳定性
             const ffmpegArgs = [
                 '-hide_banner',
                 '-loglevel', 'warning',
+                
+                // 输入选项
+                '-fflags', '+genpts+igndts',           // 生成 PTS，忽略 DTS
+                '-avoid_negative_ts', 'make_zero',      // 避免负时间戳
                 '-reconnect', '1',
-                '-reconnect_streamed', '1', 
+                '-reconnect_streamed', '1',
                 '-reconnect_delay_max', '30',
+                '-stimeout', '30000000',               // 流连接超时
                 '-timeout', '30000000',
                 '-rw_timeout', '30000000',
-                '-re',
+                
+                // 输入
                 '-i', inputUrl,
-                '-c', 'copy',
+                
+                // 输出选项
+                '-c', 'copy',                          // 复制编解码器
+                '-movflags', '+faststart',             // 快速启动
+                '-max_muxing_queue_size', '1024',      // 增加复用队列大小
                 '-f', 'flv',
                 '-flvflags', 'no_duration_filesize',
-                '-bufsize', '5000k',
-                '-maxrate', '5000k',
+                
+                // 缓冲设置
+                '-bufsize', '8192k',
+                '-maxrate', '8192k',
+                
+                // 输出
                 outputUrl
             ];
 
             logger.info(`FFmpeg command: ${ffmpegPath} ${ffmpegArgs.join(' ')}`);
 
-            // 直接使用 child_process.spawn 而不是 fluent-ffmpeg
-            const ffmpeg = spawn(ffmpegPath, ffmpegArgs, {
+            // 设置进程选项
+            const processOptions = {
                 detached: false,
-                stdio: ['pipe', 'pipe', 'pipe']
-            });
+                stdio: ['pipe', 'pipe', 'pipe'],
+                windowsHide: true,
+                env: {
+                    ...process.env,
+                    FFREPORT: `file=/www/wwwroot/rtmp-serve/logs/ffmpeg-${streamId}.log:level=32`
+                }
+            };
+
+            // 启动进程
+            const ffmpeg = spawn(ffmpegPath, ffmpegArgs, processOptions);
+
+            // 错误处理
+            let hasError = false;
+            let errorBuffer = '';
 
             // 添加事件监听器
             ffmpeg.stdout.on('data', (data) => {
@@ -1764,7 +1790,9 @@ class StreamManager extends EventEmitter {
             ffmpeg.stderr.on('data', (data) => {
                 const message = data.toString().trim();
                 if (message) {
+                    errorBuffer += message + '\n';
                     if (message.includes('Error') || message.includes('Failed')) {
+                        hasError = true;
                         logger.error(`FFmpeg error [${streamId}]: ${message}`);
                     } else {
                         logger.debug(`FFmpeg stderr [${streamId}]: ${message}`);
@@ -1773,16 +1801,27 @@ class StreamManager extends EventEmitter {
             });
 
             ffmpeg.on('error', (error) => {
+                hasError = true;
                 logger.error(`FFmpeg process error [${streamId}]:`, error);
                 this.handleStreamError(streamId, error);
             });
 
             ffmpeg.on('close', (code, signal) => {
                 const exitInfo = `code=${code}, signal=${signal}`;
-                if (code === 0 || code === null) {
-                    logger.info(`FFmpeg process closed normally [${streamId}] with ${exitInfo}`);
+                if (signal === 'SIGSEGV') {
+                    hasError = true;
+                    logger.error(`FFmpeg process crashed with segmentation fault [${streamId}]`);
+                    this.handleStreamError(streamId, new Error('FFmpeg segmentation fault'));
+                } else if (code === 0 || code === null) {
+                    if (!hasError) {
+                        logger.info(`FFmpeg process closed normally [${streamId}] with ${exitInfo}`);
+                    }
                 } else {
+                    hasError = true;
                     logger.error(`FFmpeg process closed with error [${streamId}] with ${exitInfo}`);
+                    if (errorBuffer) {
+                        logger.error(`FFmpeg error buffer [${streamId}]: ${errorBuffer}`);
+                    }
                     this.handleStreamError(streamId, new Error(`FFmpeg exited with code ${code}`));
                 }
             });
@@ -1791,8 +1830,19 @@ class StreamManager extends EventEmitter {
             this.streamProcesses.set(streamId, {
                 process: ffmpeg,
                 startTime: Date.now(),
-                lastActivity: Date.now()
+                lastActivity: Date.now(),
+                hasError: false
             });
+
+            // 设置进程优先级
+            if (ffmpeg.pid) {
+                try {
+                    process.kill(ffmpeg.pid, 'SIGSTOP');
+                    process.kill(ffmpeg.pid, 'SIGCONT');
+                } catch (error) {
+                    logger.warn(`Failed to set process priority for stream ${streamId}:`, error);
+                }
+            }
 
             return ffmpeg;
         } catch (error) {
