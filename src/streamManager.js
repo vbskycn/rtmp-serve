@@ -7,6 +7,8 @@ const EventEmitter = require('events');
 const config = require('../config/config.json');
 const fsPromises = require('fs').promises;
 const { spawn } = require('child_process');
+const os = require('os');
+const { exec } = require('child_process');
 
 class StreamManager extends EventEmitter {
     constructor() {
@@ -227,6 +229,25 @@ class StreamManager extends EventEmitter {
 
         this.streamsDir = path.join(this.rootDir, 'streams');
         this.ensureDirectories();
+
+        this.maxConcurrentStreams = 3; // 降低并发数
+        this.streamStartInterval = 2000; // 增加启动间隔
+
+        // 添加进程资源限制
+        this.processLimits = {
+            maxMemory: 512 * 1024 * 1024, // 512MB
+            maxBuffer: 64 * 1024 * 1024   // 64MB
+        };
+
+        // 添加监控配置
+        this.monitoring = {
+            checkInterval: 30000,  // 30秒检查一次
+            memoryThreshold: 0.8,  // 80% 内存阈值
+            restartDelay: 5000     // 5秒重启延迟
+        };
+        
+        // 启动监控
+        this.startMonitoring();
     }
 
     async ensureDirectories() {
@@ -305,6 +326,19 @@ class StreamManager extends EventEmitter {
 
     // 修改 startStreaming 方法
     async startStreaming(streamId) {
+        await this.checkSystemResources();
+        
+        // 检查当前运行的流数量
+        const runningStreams = Array.from(this.streamProcesses.values())
+            .filter(p => p.process && !p.process.killed);
+            
+        if (runningStreams.length >= this.maxConcurrentStreams) {
+            throw new Error('Too many concurrent streams');
+        }
+        
+        // 添加启动延迟
+        await new Promise(resolve => setTimeout(resolve, this.streamStartInterval));
+        
         try {
             const stream = this.streams.get(streamId);
             if (!stream) {
@@ -482,31 +516,34 @@ class StreamManager extends EventEmitter {
 
     // 修改错误处理方法
     async handleStreamError(streamId, error) {
-        try {
-            const status = this.retryStatus.get(streamId) || {
-                immediateRetries: 0,
-                recoveryAttempts: 0,
-                isInRecovery: false,
-                currentRound: 0
-            };
-            
-            const stream = this.streams.get(streamId);
-            if (!stream) return;
+        const stream = this.streams.get(streamId);
+        if (!stream) return;
 
-            logger.error(`Stream ${streamId} error:`, error);
-
-            // 处理立即重试阶段
-            if (!status.isInRecovery && status.immediateRetries < this.retryConfig.immediate.attempts) {
-                await this.handleImmediateRetry(streamId, status);
-                return;
+        logger.error(`Stream ${streamId} error:`, error);
+        
+        // 记录详细的错误信息
+        const errorInfo = {
+            timestamp: new Date(),
+            type: error.name,
+            message: error.message,
+            stack: error.stack,
+            streamInfo: {
+                id: streamId,
+                url: stream.url,
+                retryCount: stream.retryCount || 0
+            },
+            systemInfo: {
+                freemem: os.freemem(),
+                loadavg: os.loadavg(),
+                uptime: os.uptime()
             }
-
-            // 进入恢复重试阶段
-            await this.handleRecoveryRetry(streamId, status);
-
-        } catch (error) {
-            logger.error(`Error in handleStreamError for stream ${streamId}:`, error);
-        }
+        };
+        
+        // 写入错误日志
+        fs.appendFileSync(
+            path.join(this.logsDir, 'stream-errors.log'),
+            JSON.stringify(errorInfo) + '\n'
+        );
     }
 
     // 处理立即重试
@@ -1721,108 +1758,67 @@ class StreamManager extends EventEmitter {
     // 修改 spawnFFmpeg 函数
     spawnFFmpeg(streamId, inputUrl, outputUrl) {
         try {
-            const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-            logger.info(`Starting FFmpeg process for stream ${streamId}`);
-            logger.info(`Input URL: ${inputUrl}`);
-            logger.info(`Output URL: ${outputUrl}`);
-
-            // 修改 FFmpeg 参数，增加稳定性
+            // 使用系统 FFmpeg 而不是 node 模块
+            const ffmpegPath = '/usr/bin/ffmpeg';
+            
             const ffmpegArgs = [
                 '-hide_banner',
                 '-loglevel', 'warning',
                 
+                // 添加内存和缓冲区限制
+                '-max_memory', '512M',
+                '-max_muxing_queue_size', '1024',
+                
                 // 输入选项
-                '-fflags', '+genpts+igndts',           // 生成 PTS，忽略 DTS
-                '-avoid_negative_ts', 'make_zero',      // 避免负时间戳
+                '-fflags', '+genpts+igndts',
+                '-avoid_negative_ts', 'make_zero',
                 '-reconnect', '1',
                 '-reconnect_streamed', '1',
                 '-reconnect_delay_max', '30',
-                '-stimeout', '30000000',               // 流连接超时
-                '-timeout', '30000000',
-                '-rw_timeout', '30000000',
-                
-                // 输入
+                '-stimeout', '30000000',
                 '-i', inputUrl,
-                
+
                 // 输出选项
-                '-c', 'copy',                          // 复制编解码器
-                '-movflags', '+faststart',             // 快速启动
-                '-max_muxing_queue_size', '1024',      // 增加复用队列大小
+                '-c', 'copy',
+                '-movflags', '+faststart',
                 '-f', 'flv',
                 '-flvflags', 'no_duration_filesize',
                 
-                // 缓冲设置
-                '-bufsize', '8192k',
-                '-maxrate', '8192k',
+                // 降低缓冲区大小
+                '-bufsize', '4096k',
+                '-maxrate', '4096k',
                 
-                // 输出
                 outputUrl
             ];
 
+            logger.info(`Starting FFmpeg process for stream ${streamId}`);
             logger.info(`FFmpeg command: ${ffmpegPath} ${ffmpegArgs.join(' ')}`);
 
-            // 设置进程选项
-            const processOptions = {
+            const ffmpeg = spawn(ffmpegPath, ffmpegArgs, {
+                stdio: ['ignore', 'pipe', 'pipe'],
                 detached: false,
-                stdio: ['pipe', 'pipe', 'pipe'],
                 windowsHide: true,
+                
+                // 添加资源限制
+                maxBuffer: this.processLimits.maxBuffer,
                 env: {
                     ...process.env,
-                    FFREPORT: `file=/www/wwwroot/rtmp-serve/logs/ffmpeg-${streamId}.log:level=32`
+                    FFMPEG_MEMORY_LIMIT: this.processLimits.maxMemory.toString()
                 }
-            };
-
-            // 启动进程
-            const ffmpeg = spawn(ffmpegPath, ffmpegArgs, processOptions);
+            });
 
             // 错误处理
-            let hasError = false;
-            let errorBuffer = '';
-
-            // 添加事件监听器
-            ffmpeg.stdout.on('data', (data) => {
-                const message = data.toString().trim();
-                if (message) {
-                    logger.debug(`FFmpeg stdout [${streamId}]: ${message}`);
-                }
-            });
-
-            ffmpeg.stderr.on('data', (data) => {
-                const message = data.toString().trim();
-                if (message) {
-                    errorBuffer += message + '\n';
-                    if (message.includes('Error') || message.includes('Failed')) {
-                        hasError = true;
-                        logger.error(`FFmpeg error [${streamId}]: ${message}`);
-                    } else {
-                        logger.debug(`FFmpeg stderr [${streamId}]: ${message}`);
-                    }
-                }
-            });
-
             ffmpeg.on('error', (error) => {
-                hasError = true;
                 logger.error(`FFmpeg process error [${streamId}]:`, error);
                 this.handleStreamError(streamId, error);
             });
 
-            ffmpeg.on('close', (code, signal) => {
-                const exitInfo = `code=${code}, signal=${signal}`;
-                if (signal === 'SIGSEGV') {
-                    hasError = true;
-                    logger.error(`FFmpeg process crashed with segmentation fault [${streamId}]`);
-                    this.handleStreamError(streamId, new Error('FFmpeg segmentation fault'));
-                } else if (code === 0 || code === null) {
-                    if (!hasError) {
-                        logger.info(`FFmpeg process closed normally [${streamId}] with ${exitInfo}`);
-                    }
-                } else {
-                    hasError = true;
-                    logger.error(`FFmpeg process closed with error [${streamId}] with ${exitInfo}`);
-                    if (errorBuffer) {
-                        logger.error(`FFmpeg error buffer [${streamId}]: ${errorBuffer}`);
-                    }
-                    this.handleStreamError(streamId, new Error(`FFmpeg exited with code ${code}`));
+            // 进程退出处理
+            ffmpeg.on('exit', (code, signal) => {
+                const exitInfo = signal ? `signal ${signal}` : `code ${code}`;
+                if (code !== 0) {
+                    logger.error(`FFmpeg process exited with ${exitInfo} [${streamId}]`);
+                    this.handleStreamError(streamId, new Error(`FFmpeg exited with ${exitInfo}`));
                 }
             });
 
@@ -1830,23 +1826,13 @@ class StreamManager extends EventEmitter {
             this.streamProcesses.set(streamId, {
                 process: ffmpeg,
                 startTime: Date.now(),
-                lastActivity: Date.now(),
-                hasError: false
+                lastActivity: Date.now()
             });
 
-            // 设置进程优先级
-            if (ffmpeg.pid) {
-                try {
-                    process.kill(ffmpeg.pid, 'SIGSTOP');
-                    process.kill(ffmpeg.pid, 'SIGCONT');
-                } catch (error) {
-                    logger.warn(`Failed to set process priority for stream ${streamId}:`, error);
-                }
-            }
-
             return ffmpeg;
+
         } catch (error) {
-            logger.error(`Error spawning FFmpeg process [${streamId}]:`, error);
+            logger.error(`Failed to spawn FFmpeg process [${streamId}]:`, error);
             throw error;
         }
     }
@@ -1939,6 +1925,69 @@ class StreamManager extends EventEmitter {
             logger.error('Error saving streams:', error);
             throw error;
         }
+    }
+
+    // 添加系统资源检查
+    async checkSystemResources() {
+        const freemem = os.freemem();
+        const totalMem = os.totalmem();
+        const memoryUsage = process.memoryUsage();
+        
+        if (freemem / totalMem < 0.1) {
+            throw new Error('System memory is too low');
+        }
+        
+        // 检查文件描述符
+        const { stdout } = await exec('ulimit -n');
+        if (parseInt(stdout) < 1024) {
+            logger.warn('File descriptor limit may be too low');
+        }
+    }
+
+    startMonitoring() {
+        setInterval(() => {
+            this.checkSystemResources()
+                .then(() => this.checkProcessesHealth())
+                .catch(error => {
+                    logger.error('Monitoring check failed:', error);
+                });
+        }, this.monitoring.checkInterval);
+    }
+
+    async checkProcessesHealth() {
+        for (const [streamId, processInfo] of this.streamProcesses) {
+            if (!processInfo.process || processInfo.process.killed) {
+                continue;
+            }
+
+            try {
+                const usage = await this.getProcessUsage(processInfo.process.pid);
+                
+                if (usage.memory > this.processLimits.maxMemory) {
+                    logger.warn(`Stream ${streamId} memory usage too high, restarting...`);
+                    await this.restartStream(streamId);
+                }
+            } catch (error) {
+                logger.error(`Failed to check process health for stream ${streamId}:`, error);
+            }
+        }
+    }
+
+    async getProcessUsage(pid) {
+        return new Promise((resolve, reject) => {
+            exec(`ps -p ${pid} -o %mem,rss`, (error, stdout) => {
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                
+                const [mem, rss] = stdout.trim().split('\n')[1].trim().split(/\s+/);
+                resolve({
+                    memory: parseInt(rss) * 1024, // 转换为字节
+                    memoryPercent: parseFloat(mem)
+                });
+            });
+        });
     }
 }
 
