@@ -316,7 +316,7 @@ class StreamManager extends EventEmitter {
             await this.ensureAndCleanDirectory(outputDir);
 
             // 获取推流地址
-            const outputUrl = `${this.config.rtmp.pushServer}${streamId}`;
+            const outputUrl = `${this.config.rtmp.pushServer}${stream.id}`;
 
             // 启动 FFmpeg 进程
             const ffmpeg = this.spawnFFmpeg(streamId, stream.url, outputUrl);
@@ -1696,28 +1696,92 @@ class StreamManager extends EventEmitter {
 
     // 添加 spawnFFmpeg 函数
     spawnFFmpeg(streamId, inputUrl, outputUrl) {
-        const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-        const ffmpeg = spawn(ffmpegPath, [
-            '-i', inputUrl,
-            '-c', 'copy',
-            '-f', 'flv',
-            outputUrl
-        ]);
+        try {
+            const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+            logger.info(`Starting FFmpeg process for stream ${streamId}`);
+            logger.info(`Input URL: ${inputUrl}`);
+            logger.info(`Output URL: ${outputUrl}`);
 
-        ffmpeg.stdout.on('data', (data) => {
-            logger.debug(`FFmpeg stdout [${streamId}]: ${data}`);
-        });
+            // FFmpeg 参数
+            const ffmpegArgs = [
+                '-hide_banner',          // 隐藏版本信息
+                '-loglevel', 'warning',  // 只显示警告和错误
+                '-re',                   // 使用原始帧率读取
+                '-i', inputUrl,          // 输入流
+                '-c', 'copy',           // 复制编码(不重新编码)
+                '-f', 'flv',            // 输出格式为 FLV
+                '-flvflags', 'no_duration_filesize',  // 避免 FLV 文件大小限制
+                '-bufsize', '5000k',     // 设置缓冲区大小
+                '-maxrate', '5000k',     // 设置最大码率
+                '-rtmp_buffer', '5000',  // RTMP 缓冲
+                '-rtmp_live', 'live',    // RTMP 直播模式
+                '-reconnect', '1',       // 自动重连
+                '-reconnect_streamed', '1', // 流重连
+                '-reconnect_delay_max', '10', // 最大重连延迟
+                '-stimeout', '5000000',  // 设置 TCP 超时
+                '-timeout', '5000000',   // 设置 HTTP 超时
+                outputUrl
+            ];
 
-        ffmpeg.stderr.on('data', (data) => {
-            logger.debug(`FFmpeg stderr [${streamId}]: ${data}`);
-        });
+            logger.info(`FFmpeg command: ${ffmpegPath} ${ffmpegArgs.join(' ')}`);
 
-        ffmpeg.on('close', (code) => {
-            logger.info(`FFmpeg process exited with code ${code} [${streamId}]`);
-            this.handleStreamExit(streamId, code);
-        });
+            const ffmpeg = spawn(ffmpegPath, ffmpegArgs, {
+                detached: false,
+                stdio: ['pipe', 'pipe', 'pipe']
+            });
 
-        return ffmpeg;
+            // 添加更详细的日志记录
+            ffmpeg.stdout.on('data', (data) => {
+                const message = data.toString().trim();
+                if (message) {
+                    logger.debug(`FFmpeg stdout [${streamId}]: ${message}`);
+                }
+            });
+
+            ffmpeg.stderr.on('data', (data) => {
+                const message = data.toString().trim();
+                if (message) {
+                    if (message.includes('Error') || message.includes('Failed')) {
+                        logger.error(`FFmpeg error [${streamId}]: ${message}`);
+                    } else {
+                        logger.debug(`FFmpeg stderr [${streamId}]: ${message}`);
+                    }
+                }
+            });
+
+            ffmpeg.on('error', (error) => {
+                logger.error(`FFmpeg process error [${streamId}]:`, error);
+                this.handleStreamError(streamId, error);
+            });
+
+            ffmpeg.on('close', (code, signal) => {
+                const exitInfo = `code=${code}, signal=${signal}`;
+                if (code === 0 || code === null) {
+                    logger.info(`FFmpeg process closed normally [${streamId}] with ${exitInfo}`);
+                } else {
+                    logger.error(`FFmpeg process closed with error [${streamId}] with ${exitInfo}`);
+                    this.handleStreamError(streamId, new Error(`FFmpeg exited with code ${code}`));
+                }
+            });
+
+            // 保存进程引用
+            this.streamProcesses.set(streamId, {
+                process: ffmpeg,
+                startTime: Date.now(),
+                lastActivity: Date.now()
+            });
+
+            // 设置进程错误处理
+            process.on('uncaughtException', (error) => {
+                logger.error(`Uncaught exception in FFmpeg process [${streamId}]:`, error);
+                this.handleStreamError(streamId, error);
+            });
+
+            return ffmpeg;
+        } catch (error) {
+            logger.error(`Error spawning FFmpeg process [${streamId}]:`, error);
+            throw error;
+        }
     }
 
     // 修改添加流的方法,添加后自动启动
