@@ -367,44 +367,28 @@ class StreamManager extends EventEmitter {
             const ffmpeg = this.spawnFFmpeg(streamId, stream.url, outputUrl);
             
             // 等待进程启动
-            await new Promise((resolve, reject) => {
-                let resolved = false;
-                
+            return new Promise((resolve, reject) => {
+                // 设置超时
+                const timeout = setTimeout(() => {
+                    reject(new Error('FFmpeg process startup timeout'));
+                }, 10000);
+
                 // 检查进程是否成功启动
                 ffmpeg.once('spawn', () => {
-                    resolved = true;
-                    resolve();
+                    clearTimeout(timeout);
+                    logger.info(`Successfully started FFmpeg process for stream ${streamId}`);
+                    resolve({ success: true });
                 });
 
                 // 处理启动失败
                 ffmpeg.once('error', (error) => {
-                    if (!resolved) {
-                        reject(error);
-                    }
+                    clearTimeout(timeout);
+                    reject(error);
                 });
-
-                // 设置启动超时
-                setTimeout(() => {
-                    if (!resolved) {
-                        ffmpeg.kill();
-                        reject(new Error('Process startup timeout'));
-                    }
-                }, 5000);
             });
-
-            // 保存进程引用
-            this.streamProcesses.set(streamId, {
-                process: ffmpeg,
-                startTime: Date.now(),
-                lastActivity: Date.now()
-            });
-
-            logger.info(`Successfully started FFmpeg process for stream ${streamId}`);
-            return { success: true };
-            
         } catch (error) {
-            logger.error(`Failed to start stream ${streamId}:`, error);
-            return { success: false, error };
+            logger.error(`Error starting stream process ${streamId}:`, error);
+            throw error;
         }
     }
 
@@ -1734,7 +1718,7 @@ class StreamManager extends EventEmitter {
         };
     }
 
-    // 添加 spawnFFmpeg 函数
+    // 修改 spawnFFmpeg 函数
     spawnFFmpeg(streamId, inputUrl, outputUrl) {
         try {
             const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
@@ -1763,12 +1747,13 @@ class StreamManager extends EventEmitter {
 
             logger.info(`FFmpeg command: ${ffmpegPath} ${ffmpegArgs.join(' ')}`);
 
+            // 直接使用 child_process.spawn 而不是 fluent-ffmpeg
             const ffmpeg = spawn(ffmpegPath, ffmpegArgs, {
                 detached: false,
                 stdio: ['pipe', 'pipe', 'pipe']
             });
 
-            // 添加更详细的日志记录
+            // 添加事件监听器
             ffmpeg.stdout.on('data', (data) => {
                 const message = data.toString().trim();
                 if (message) {
@@ -1807,12 +1792,6 @@ class StreamManager extends EventEmitter {
                 process: ffmpeg,
                 startTime: Date.now(),
                 lastActivity: Date.now()
-            });
-
-            // 设置进程错误处理
-            process.on('uncaughtException', (error) => {
-                logger.error(`Uncaught exception in FFmpeg process [${streamId}]:`, error);
-                this.handleStreamError(streamId, error);
             });
 
             return ffmpeg;
