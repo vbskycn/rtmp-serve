@@ -1774,15 +1774,14 @@ class StreamManager extends EventEmitter {
                 '-probesize', this.ffmpegConfig.probesize,
                 '-analyzeduration', this.ffmpegConfig.analyzeduration,
                 
-                // 重连参数 (移除不支持的参数)
+                // 重连参数
                 '-reconnect', '1',
                 '-reconnect_at_eof', '1',
                 '-reconnect_streamed', '1',
                 '-reconnect_delay_max', '3',
                 
-                // 超时和缓冲参数
+                // 超时参数 (移除不支持的 stimeout)
                 '-rw_timeout', this.ffmpegConfig.timeout,
-                '-stimeout', this.ffmpegConfig.timeout,
                 
                 // 输入
                 '-i', inputUrl,
@@ -1802,19 +1801,14 @@ class StreamManager extends EventEmitter {
                 '-bufsize', this.ffmpegConfig.bufferSize,
                 '-maxrate', this.ffmpegConfig.maxRate,
                 
-                // 输出
                 outputUrl
             ];
 
             logger.info(`Starting FFmpeg process for stream ${streamId}`);
             logger.info(`FFmpeg command: ${ffmpegPath} ${ffmpegArgs.join(' ')}`);
 
-            // 添加错误输出捕获
-            const ffmpeg = spawn(ffmpegPath, ffmpegArgs, {
-                stdio: ['ignore', 'pipe', 'pipe'],
-                detached: false,
-                windowsHide: true
-            });
+            // 创建 FFmpeg 进程
+            const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
 
             // 捕获标准输出
             ffmpeg.stdout.on('data', (data) => {
