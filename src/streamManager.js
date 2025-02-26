@@ -256,9 +256,7 @@ class StreamManager extends EventEmitter {
             bufferSize: '8192k',
             maxRate: '8192k',
             threadQueueSize: '1024',
-            timeout: '5000000',
-            reconnectDelay: 2,  // 增加重连延迟
-            maxReconnects: 10   // 最大重连次数
+            timeout: '5000000'
         };
     }
 
@@ -1787,13 +1785,13 @@ class StreamManager extends EventEmitter {
                 '-reconnect', '1',
                 '-reconnect_at_eof', '1',
                 '-reconnect_streamed', '1',
-                '-reconnect_delay_max', this.ffmpegConfig.reconnectDelay.toString(),
-                '-rw_timeout', this.ffmpegConfig.timeout,
+                '-reconnect_delay_max', '5',
+                '-timeout', '5000000',
                 
                 // HTTP 特定参数
-                '-http_persistent', '1',        // 保持 HTTP 连接
-                '-timeout', '5000000',          // HTTP 超时
+                '-user_agent', 'Mozilla/5.0',
                 '-headers', 'Connection: keep-alive\r\n',
+                '-multiple_requests', '1',
                 
                 // 输入
                 '-i', inputUrl,
@@ -1814,6 +1812,12 @@ class StreamManager extends EventEmitter {
                 // 错误处理
                 '-xerror',
                 '-max_error_rate', '0.0',
+                
+                // 添加更多的网络相关参数
+                '-fflags', '+autobuffer+fastseek+nobuffer+igndts',
+                '-flags', 'low_delay',
+                '-strict', 'experimental',
+                '-avioflags', 'direct',
                 
                 outputUrl
             ];
