@@ -256,7 +256,9 @@ class StreamManager extends EventEmitter {
             bufferSize: '8192k',
             maxRate: '8192k',
             threadQueueSize: '1024',
-            timeout: '5000000'
+            timeout: '5000000',
+            reconnectDelay: 2,  // 增加重连延迟
+            maxReconnects: 10   // 最大重连次数
         };
     }
 
@@ -1781,14 +1783,17 @@ class StreamManager extends EventEmitter {
                 '-probesize', this.ffmpegConfig.probesize,
                 '-analyzeduration', this.ffmpegConfig.analyzeduration,
                 
-                // 重连参数
+                // 重连和超时参数
                 '-reconnect', '1',
                 '-reconnect_at_eof', '1',
                 '-reconnect_streamed', '1',
-                '-reconnect_delay_max', '3',
-                
-                // 超时参数
+                '-reconnect_delay_max', this.ffmpegConfig.reconnectDelay.toString(),
                 '-rw_timeout', this.ffmpegConfig.timeout,
+                
+                // HTTP 特定参数
+                '-http_persistent', '1',        // 保持 HTTP 连接
+                '-timeout', '5000000',          // HTTP 超时
+                '-headers', 'Connection: keep-alive\r\n',
                 
                 // 输入
                 '-i', inputUrl,
@@ -1800,15 +1805,15 @@ class StreamManager extends EventEmitter {
                 '-flvflags', 'no_duration_filesize',
                 
                 // 网络和缓冲参数
-                '-max_muxing_queue_size', '2048',  // 增加队列大小
+                '-max_muxing_queue_size', '2048',
                 '-tune', 'zerolatency',
                 '-preset', 'veryfast',
                 '-bufsize', this.ffmpegConfig.bufferSize,
                 '-maxrate', this.ffmpegConfig.maxRate,
                 
                 // 错误处理
-                '-xerror',  // 遇到错误立即退出
-                '-max_error_rate', '0.0',  // 不允许错误
+                '-xerror',
+                '-max_error_rate', '0.0',
                 
                 outputUrl
             ];
@@ -1821,10 +1826,10 @@ class StreamManager extends EventEmitter {
                 logger.debug(`FFmpeg stdout [${streamId}]: ${data}`);
             });
 
-            // 捕获错误输出，过滤一些常见错误
+            // 捕获错误输出，过滤重连消息
             ffmpeg.stderr.on('data', (data) => {
                 const errorMsg = data.toString().trim();
-                if (!this.isCommonError(errorMsg)) {
+                if (!errorMsg.includes('Will reconnect') && !this.isCommonError(errorMsg)) {
                     logger.error(`FFmpeg stderr [${streamId}]: ${errorMsg}`);
                 }
             });
