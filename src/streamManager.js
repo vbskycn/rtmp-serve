@@ -1781,17 +1781,14 @@ class StreamManager extends EventEmitter {
                 '-probesize', this.ffmpegConfig.probesize,
                 '-analyzeduration', this.ffmpegConfig.analyzeduration,
                 
-                // 重连和超时参数
+                // 重连参数
                 '-reconnect', '1',
                 '-reconnect_at_eof', '1',
                 '-reconnect_streamed', '1',
-                '-reconnect_delay_max', '5',
-                '-timeout', '5000000',
+                '-reconnect_delay_max', '3',
                 
-                // HTTP 特定参数
-                '-user_agent', 'Mozilla/5.0',
-                '-headers', 'Connection: keep-alive\r\n',
-                '-multiple_requests', '1',
+                // 超时参数
+                '-rw_timeout', this.ffmpegConfig.timeout,
                 
                 // 输入
                 '-i', inputUrl,
@@ -1803,21 +1800,15 @@ class StreamManager extends EventEmitter {
                 '-flvflags', 'no_duration_filesize',
                 
                 // 网络和缓冲参数
-                '-max_muxing_queue_size', '2048',
+                '-max_muxing_queue_size', '2048',  // 增加队列大小
                 '-tune', 'zerolatency',
                 '-preset', 'veryfast',
                 '-bufsize', this.ffmpegConfig.bufferSize,
                 '-maxrate', this.ffmpegConfig.maxRate,
                 
                 // 错误处理
-                '-xerror',
-                '-max_error_rate', '0.0',
-                
-                // 添加更多的网络相关参数
-                '-fflags', '+autobuffer+fastseek+nobuffer+igndts',
-                '-flags', 'low_delay',
-                '-strict', 'experimental',
-                '-avioflags', 'direct',
+                '-xerror',  // 遇到错误立即退出
+                '-max_error_rate', '0.0',  // 不允许错误
                 
                 outputUrl
             ];
@@ -1830,10 +1821,10 @@ class StreamManager extends EventEmitter {
                 logger.debug(`FFmpeg stdout [${streamId}]: ${data}`);
             });
 
-            // 捕获错误输出，过滤重连消息
+            // 捕获错误输出，过滤一些常见错误
             ffmpeg.stderr.on('data', (data) => {
                 const errorMsg = data.toString().trim();
-                if (!errorMsg.includes('Will reconnect') && !this.isCommonError(errorMsg)) {
+                if (!this.isCommonError(errorMsg)) {
                     logger.error(`FFmpeg stderr [${streamId}]: ${errorMsg}`);
                 }
             });
