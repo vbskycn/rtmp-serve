@@ -256,9 +256,7 @@ class StreamManager extends EventEmitter {
             bufferSize: '8192k',
             maxRate: '8192k',
             threadQueueSize: '1024',
-            timeout: '30000000',
-            reconnectDelay: '3', // 减少重连延迟
-            reconnectAttempts: '10' // 增加重连尝试次数
+            timeout: '5000000'
         };
     }
 
@@ -1776,16 +1774,15 @@ class StreamManager extends EventEmitter {
                 '-probesize', this.ffmpegConfig.probesize,
                 '-analyzeduration', this.ffmpegConfig.analyzeduration,
                 
-                // 重连参数
+                // 重连参数 (移除不支持的参数)
                 '-reconnect', '1',
                 '-reconnect_at_eof', '1',
                 '-reconnect_streamed', '1',
-                '-reconnect_delay_max', this.ffmpegConfig.reconnectDelay,
-                '-reconnect_attempts', this.ffmpegConfig.reconnectAttempts,
+                '-reconnect_delay_max', '3',
                 
                 // 超时和缓冲参数
-                '-rw_timeout', '5000000',
-                '-stimeout', '5000000',
+                '-rw_timeout', this.ffmpegConfig.timeout,
+                '-stimeout', this.ffmpegConfig.timeout,
                 
                 // 输入
                 '-i', inputUrl,
@@ -1795,7 +1792,6 @@ class StreamManager extends EventEmitter {
                 '-c:a', 'copy',
                 '-f', 'flv',
                 '-flvflags', 'no_duration_filesize',
-                '-shortest',
                 
                 // 网络相关参数
                 '-max_muxing_queue_size', '1024',
