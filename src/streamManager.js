@@ -1791,39 +1791,37 @@ class StreamManager extends EventEmitter {
         try {
             const ffmpegPath = '/usr/bin/ffmpeg';
             
-            // 优化 FFmpeg 参数，增加更多容错和调试信息
+            // 修改FFmpeg参数
             const ffmpegArgs = [
                 '-hide_banner',
-                '-loglevel', 'warning',
+                '-loglevel', 'info',  // 改为 info 级别以获取更多信息
                 
-                // 输入前参数 - 优化网络和缓冲设置
-                '-fflags', '+genpts+discardcorrupt+igndts',
+                // 输入前参数
+                '-fflags', '+genpts+discardcorrupt+igndts+nobuffer',
                 '-avoid_negative_ts', 'make_zero',
                 '-correct_ts_overflow', '0',
-                '-analyzeduration', '5000000',
+                '-analyzeduration', '2000000',
                 '-probesize', '32M',
                 
-                // 重连和超时参数
+                // 重连参数
                 '-reconnect', '1',
                 '-reconnect_at_eof', '1',
                 '-reconnect_streamed', '1',
-                '-reconnect_delay_max', '30',
-                '-timeout', '15000000',
+                '-reconnect_delay_max', '2',
                 
                 // 输入
                 '-i', inputUrl,
                 
-                // 输出参数 - 优化推流设置
+                // 输出参数
                 '-c', 'copy',
-                '-movflags', '+faststart',
                 '-f', 'flv',
+                '-flvflags', 'no_duration_filesize',
                 
                 // 缓冲设置
                 '-bufsize', '5000k',
                 
                 // 网络优化
                 '-max_muxing_queue_size', '1024',
-                '-muxdelay', '0.1',
                 
                 // 输出
                 outputUrl
@@ -1838,40 +1836,75 @@ class StreamManager extends EventEmitter {
             // 创建 FFmpeg 进程
             const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
             
-            // 设置更详细的日志记录
+            // 标准输出
+            ffmpeg.stdout.on('data', (data) => {
+                logger.info(`FFmpeg stdout [${streamId}]: ${data}`);
+            });
+
+            // 错误输出
             ffmpeg.stderr.on('data', (data) => {
                 const msg = data.toString().trim();
                 
-                // 记录关键信息
+                // 更新最后活动时间
+                const processInfo = this.streamProcesses.get(streamId);
+                if (processInfo) {
+                    processInfo.lastActivity = Date.now();
+                }
+                
+                // 记录所有输出用于调试
+                logger.debug(`FFmpeg [${streamId}]: ${msg}`);
+                
+                // 特别关注的信息
                 if (msg.includes('Opening') || 
                     msg.includes('Stream mapping') ||
                     msg.includes('frame=') ||
-                    msg.includes('fps=')) {
+                    msg.includes('fps=') ||
+                    msg.includes('speed=')) {
                     logger.info(`FFmpeg [${streamId}]: ${msg}`);
                 }
                 
-                // 记录错误信息
+                // 错误信息处理
                 if (msg.includes('Error') || 
                     msg.includes('error') || 
                     msg.includes('failed') ||
                     msg.includes('Invalid')) {
                     logger.error(`FFmpeg error [${streamId}]: ${msg}`);
-                    // 触发错误处理
-                    if (!msg.includes('Connection reset by peer')) {  // 忽略常见的网络重置错误
+                    
+                    // 只对严重错误进行重试
+                    if (!msg.includes('Connection reset by peer') && 
+                        !msg.includes('Resource temporarily unavailable')) {
                         this.handleStreamError(streamId, new Error(msg));
                     }
                 }
             });
 
+            // 进程错误处理
+            ffmpeg.on('error', (error) => {
+                logger.error(`FFmpeg process error [${streamId}]:`, error);
+                this.handleStreamError(streamId, error);
+            });
+
             // 进程退出处理
             ffmpeg.on('exit', (code, signal) => {
-                const processInfo = this.streamProcesses.get(streamId);
                 logger.info(`FFmpeg process exited [${streamId}] with code ${code}, signal: ${signal}`);
                 
                 if (code !== 0 && signal !== 'SIGTERM') {
-                    // 非正常退出，触发重试
                     this.handleStreamError(streamId, new Error(`FFmpeg exited with code ${code}`));
                 }
+            });
+
+            // 设置进程启动超时
+            const startupTimeout = setTimeout(() => {
+                if (!this.checkStreamActive(streamId)) {
+                    logger.error(`Stream ${streamId} failed to start within timeout`);
+                    ffmpeg.kill();
+                    this.handleStreamError(streamId, new Error('Stream startup timeout'));
+                }
+            }, 10000);
+
+            ffmpeg.once('spawn', () => {
+                clearTimeout(startupTimeout);
+                logger.info(`FFmpeg process spawned for stream ${streamId}`);
             });
 
             return ffmpeg;
