@@ -407,27 +407,41 @@ class StreamManager extends EventEmitter {
             // 获取推流地址
             const outputUrl = `${this.config.rtmp.pushServer}${stream.id}`;
 
+            logger.info(`Starting stream process for ${streamId}`, {
+                inputUrl: stream.url,
+                outputUrl: outputUrl
+            });
+
             // 启动 FFmpeg 进程
             const ffmpeg = this.spawnFFmpeg(streamId, stream.url, outputUrl);
             
-            // 等待进程启动
+            // 保存进程信息
+            this.streamProcesses.set(streamId, {
+                process: ffmpeg,
+                startTime: new Date(),
+                restartCount: 0
+            });
+
+            // 等待进程启动并验证流是否正常
             return new Promise((resolve, reject) => {
-                // 设置超时
                 const timeout = setTimeout(() => {
-                    reject(new Error('FFmpeg process startup timeout'));
-                }, 10000);
+                    reject(new Error('Stream startup timeout'));
+                }, 30000);
 
-                // 检查进程是否成功启动
-                ffmpeg.once('spawn', () => {
-                    clearTimeout(timeout);
-                    logger.info(`Successfully started FFmpeg process for stream ${streamId}`);
-                    resolve({ success: true });
-                });
+                const checkInterval = setInterval(async () => {
+                    if (await this.checkStreamActive(streamId)) {
+                        clearTimeout(timeout);
+                        clearInterval(checkInterval);
+                        resolve({ success: true });
+                    }
+                }, 1000);
 
-                // 处理启动失败
-                ffmpeg.once('error', (error) => {
+                ffmpeg.once('exit', (code) => {
                     clearTimeout(timeout);
-                    reject(error);
+                    clearInterval(checkInterval);
+                    if (code !== 0) {
+                        reject(new Error(`FFmpeg process exited with code ${code}`));
+                    }
                 });
             });
         } catch (error) {
@@ -1777,7 +1791,7 @@ class StreamManager extends EventEmitter {
             // 优化 FFmpeg 参数
             const ffmpegArgs = [
                 '-hide_banner',
-                '-loglevel', 'warning',
+                '-loglevel', 'info',  // 修改为 info 级别以获取更多信息
                 
                 // 输入前参数
                 '-fflags', '+genpts+discardcorrupt+igndts+nobuffer',
@@ -1805,36 +1819,32 @@ class StreamManager extends EventEmitter {
                 '-flvflags', 'no_duration_filesize',
                 
                 // 网络和缓冲参数
-                '-max_muxing_queue_size', '2048',  // 增加队列大小
+                '-max_muxing_queue_size', '2048',
                 '-tune', 'zerolatency',
                 '-preset', 'veryfast',
                 '-bufsize', this.ffmpegConfig.bufferSize,
                 '-maxrate', this.ffmpegConfig.maxRate,
                 
-                // 错误处理
-                '-xerror',  // 遇到错误立即退出
-                '-max_error_rate', '0.0',  // 不允许错误
-                
                 outputUrl
             ];
+
+            logger.info(`Starting FFmpeg for stream ${streamId} with args:`, ffmpegArgs);
 
             // 创建 FFmpeg 进程
             const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
 
             // 捕获标准输出
             ffmpeg.stdout.on('data', (data) => {
-                logger.debug(`FFmpeg stdout [${streamId}]: ${data}`);
+                logger.info(`FFmpeg stdout [${streamId}]: ${data}`);
             });
 
-            // 捕获错误输出，过滤一些常见错误
+            // 捕获错误输出
             ffmpeg.stderr.on('data', (data) => {
-                const errorMsg = data.toString().trim();
-                if (!this.isCommonError(errorMsg)) {
-                    logger.error(`FFmpeg stderr [${streamId}]: ${errorMsg}`, {
-                        streamId,
-                        inputUrl,
-                        error: errorMsg
-                    });
+                const msg = data.toString();
+                if (msg.includes('Error') || msg.includes('error')) {
+                    logger.error(`FFmpeg stderr [${streamId}]: ${msg}`);
+                } else {
+                    logger.debug(`FFmpeg stderr [${streamId}]: ${msg}`);
                 }
             });
 
@@ -1846,20 +1856,25 @@ class StreamManager extends EventEmitter {
 
             // 进程退出处理
             ffmpeg.on('exit', (code, signal) => {
-                const processInfo = this.streamProcesses.get(streamId);
-                if (!processInfo) return;
-
-                if (signal === 'SIGTERM' || signal === 'SIGINT') {
-                    logger.info(`FFmpeg process terminated [${streamId}]`);
-                    return;
-                }
-
-                if (code !== 0) {
+                logger.info(`FFmpeg process exited [${streamId}] with code ${code}, signal: ${signal}`);
+                
+                if (code !== 0 && signal !== 'SIGTERM') {
                     const error = new Error(`FFmpeg exited with code ${code}`);
-                    error.code = code;
-                    error.signal = signal;
                     this.handleStreamError(streamId, error);
                 }
+            });
+
+            // 设置进程超时检查
+            const timeout = setTimeout(() => {
+                if (!this.checkStreamActive(streamId)) {
+                    logger.error(`Stream ${streamId} failed to start within timeout`);
+                    ffmpeg.kill();
+                    this.handleStreamError(streamId, new Error('Stream startup timeout'));
+                }
+            }, 30000); // 30秒超时
+
+            ffmpeg.once('spawn', () => {
+                clearTimeout(timeout);
             });
 
             return ffmpeg;
@@ -1870,21 +1885,24 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 添加错误过滤方法
-    isCommonError(errorMsg) {
-        const commonErrors = [
-            'Packet corrupt',
-            'DTS out of order',
-            'dropping it',
-            'Non-monotonous DTS',
-            'Invalid data found when processing input',
-            'Connection reset by peer',
-            'Broken pipe',
-            'Operation not permitted',
-            'Server error: Failed to publish'
-        ];
+    // 添加检查流是否活跃的方法
+    async checkStreamActive(streamId) {
+        try {
+            const outputPath = path.join(this.streamsDir, streamId);
+            const files = await fsPromises.readdir(outputPath);
+            const tsFiles = files.filter(f => f.endsWith('.ts'));
+            
+            if (tsFiles.length === 0) {
+                return false;
+            }
 
-        return commonErrors.some(err => errorMsg.includes(err));
+            // 检查最新的ts文件是否在最近30秒内更新
+            const latestTs = tsFiles.sort().pop();
+            const stats = await fsPromises.stat(path.join(outputPath, latestTs));
+            return (Date.now() - stats.mtimeMs) < 30000;
+        } catch (error) {
+            return false;
+        }
     }
 
     // 修改添加流的方法,添加后自动启动
