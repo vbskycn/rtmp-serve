@@ -249,7 +249,9 @@ class StreamManager extends EventEmitter {
             bufferSize: '8192k',
             maxRate: '8192k',
             threadQueueSize: '1024',
-            timeout: '5000000'
+            timeout: '15000000',  // 增加超时时间
+            reconnectDelay: '3',  // 增加重连延迟
+            retryCount: '10'      // 增加重试次数
         };
     }
 
@@ -523,47 +525,51 @@ class StreamManager extends EventEmitter {
 
     // 修改错误处理方法
     async handleStreamError(streamId, error) {
-        const retryStatus = this.retryStatus.get(streamId) || {
+        const status = this.retryStatus.get(streamId) || {
             immediateRetries: 0,
             recoveryAttempts: 0,
-            lastRetryTime: null
+            lastError: null,
+            lastErrorTime: 0
         };
 
-        try {
-            if (retryStatus.immediateRetries < this.retryConfig.maxImmediateRetries) {
-                // 增加重试延迟
-                await new Promise(resolve => setTimeout(resolve, this.retryConfig.immediateRetryDelay));
-                
-                logger.info(`Attempting immediate retry ${retryStatus.immediateRetries + 1}/${this.retryConfig.maxImmediateRetries} for stream ${streamId}`);
-                
-                // 检查源可用性
-                const sourceAvailable = await this.checkStreamSource(this.streams.get(streamId).url);
-                if (!sourceAvailable) {
-                    throw new Error('Stream source not available');
-                }
+        const now = Date.now();
+        const timeSinceLastError = now - status.lastErrorTime;
 
+        // 如果是同样的错误且间隔小于30秒，增加等待时间
+        if (status.lastError && 
+            status.lastError.message === error.message && 
+            timeSinceLastError < 30000) {
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+
+        status.lastError = error;
+        status.lastErrorTime = now;
+
+        if (status.immediateRetries < this.retryConfig.maxImmediateRetries) {
+            logger.info(`Attempting immediate retry ${status.immediateRetries + 1}/${this.retryConfig.maxImmediateRetries} for stream ${streamId}`);
+            status.immediateRetries++;
+            this.retryStatus.set(streamId, status);
+            
+            try {
                 await this.startStreamProcess(streamId);
-                retryStatus.immediateRetries++;
-                this.retryStatus.set(streamId, retryStatus);
-            } else {
-                // 进入恢复模式
-                const recoveryDelay = this.retryConfig.recoveryRetryDelay * 
-                    Math.pow(this.retryConfig.backoffMultiplier, retryStatus.recoveryAttempts);
-                    
-                logger.info(`Scheduling recovery attempt for stream ${streamId} in ${recoveryDelay/1000} seconds`);
-                
-                setTimeout(() => {
-                    this.startStreamProcess(streamId).catch(err => {
-                        logger.error(`Recovery attempt failed for stream ${streamId}:`, err);
-                    });
-                }, recoveryDelay);
-
-                retryStatus.recoveryAttempts++;
-                this.retryStatus.set(streamId, retryStatus);
+            } catch (retryError) {
+                logger.error(`Immediate retry ${status.immediateRetries} failed for stream ${streamId}`, retryError);
             }
-        } catch (err) {
-            logger.error(`Error in retry handler for stream ${streamId}:`, err);
-            throw err;
+        } else {
+            // 进入恢复模式
+            const recoveryDelay = this.retryConfig.recoveryRetryDelay * 
+                Math.pow(this.retryConfig.backoffMultiplier, status.recoveryAttempts);
+            
+            logger.info(`Scheduling recovery round ${status.recoveryAttempts + 1} for stream ${streamId} in ${recoveryDelay/1000} seconds`);
+            
+            status.recoveryAttempts++;
+            this.retryStatus.set(streamId, status);
+            
+            setTimeout(() => {
+                this.startStreamProcess(streamId).catch(err => {
+                    logger.error(`Recovery attempt failed for stream ${streamId}:`, err);
+                });
+            }, recoveryDelay);
         }
     }
 
@@ -1679,23 +1685,24 @@ class StreamManager extends EventEmitter {
         try {
             const ffmpegPath = '/usr/bin/ffmpeg';
             
-            // 修改FFmpeg参数
+            // 优化 FFmpeg 参数
             const ffmpegArgs = [
                 '-hide_banner',
-                '-loglevel', 'info',  // 改为 info 级别以获取更多信息
+                '-loglevel', 'info',
                 
                 // 输入前参数
                 '-fflags', '+genpts+discardcorrupt+igndts+nobuffer',
                 '-avoid_negative_ts', 'make_zero',
                 '-correct_ts_overflow', '0',
-                '-analyzeduration', '2000000',
-                '-probesize', '32M',
+                '-analyzeduration', this.ffmpegConfig.analyzeduration,
+                '-probesize', this.ffmpegConfig.probesize,
                 
                 // 重连参数
                 '-reconnect', '1',
                 '-reconnect_at_eof', '1',
                 '-reconnect_streamed', '1',
-                '-reconnect_delay_max', '2',
+                '-reconnect_delay_max', this.ffmpegConfig.reconnectDelay,
+                '-stimeout', this.ffmpegConfig.timeout,
                 
                 // 输入
                 '-i', inputUrl,
@@ -1704,12 +1711,10 @@ class StreamManager extends EventEmitter {
                 '-c', 'copy',
                 '-f', 'flv',
                 '-flvflags', 'no_duration_filesize',
-                
-                // 缓冲设置
-                '-bufsize', '5000k',
-                
-                // 网络优化
-                '-max_muxing_queue_size', '1024',
+                '-bufsize', this.ffmpegConfig.bufferSize,
+                '-maxrate', this.ffmpegConfig.maxRate,
+                '-preset', 'veryfast',        // 使用快速编码
+                '-tune', 'zerolatency',       // 优化低延迟
                 
                 // 输出
                 outputUrl
@@ -1721,15 +1726,9 @@ class StreamManager extends EventEmitter {
                 args: ffmpegArgs.join(' ')
             });
 
-            // 创建 FFmpeg 进程
             const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
             
-            // 标准输出
-            ffmpeg.stdout.on('data', (data) => {
-                logger.info(`FFmpeg stdout [${streamId}]: ${data}`);
-            });
-
-            // 错误输出
+            // 添加更详细的错误处理
             ffmpeg.stderr.on('data', (data) => {
                 const msg = data.toString().trim();
                 
@@ -1740,29 +1739,17 @@ class StreamManager extends EventEmitter {
                 }
                 
                 // 记录所有输出用于调试
-                logger.debug(`FFmpeg [${streamId}]: ${msg}`);
-                
-                // 特别关注的信息
-                if (msg.includes('Opening') || 
-                    msg.includes('Stream mapping') ||
-                    msg.includes('frame=') ||
-                    msg.includes('fps=') ||
-                    msg.includes('speed=')) {
+                if (msg.includes('fps=') || msg.includes('speed=')) {
+                    logger.debug(`FFmpeg [${streamId}]: ${msg}`);
+                } else {
                     logger.info(`FFmpeg [${streamId}]: ${msg}`);
                 }
                 
-                // 错误信息处理
+                // 错误处理
                 if (msg.includes('Error') || 
                     msg.includes('error') || 
-                    msg.includes('failed') ||
-                    msg.includes('Invalid')) {
+                    msg.includes('failed')) {
                     logger.error(`FFmpeg error [${streamId}]: ${msg}`);
-                    
-                    // 只对严重错误进行重试
-                    if (!msg.includes('Connection reset by peer') && 
-                        !msg.includes('Resource temporarily unavailable')) {
-                        this.handleStreamError(streamId, new Error(msg));
-                    }
                 }
             });
 
@@ -1777,22 +1764,17 @@ class StreamManager extends EventEmitter {
                 logger.info(`FFmpeg process exited [${streamId}] with code ${code}, signal: ${signal}`);
                 
                 if (code !== 0 && signal !== 'SIGTERM') {
-                    this.handleStreamError(streamId, new Error(`FFmpeg exited with code ${code}`));
+                    const error = new Error(`FFmpeg exited with code ${code}`);
+                    error.code = code;
+                    error.signal = signal;
+                    this.handleStreamError(streamId, error);
                 }
             });
 
-            // 设置进程启动超时
-            const startupTimeout = setTimeout(() => {
-                if (!this.checkStreamActive(streamId)) {
-                    logger.error(`Stream ${streamId} failed to start within timeout`);
-                    ffmpeg.kill();
-                    this.handleStreamError(streamId, new Error('Stream startup timeout'));
-                }
-            }, 10000);
-
+            // 进程启动成功处理
             ffmpeg.once('spawn', () => {
-                clearTimeout(startupTimeout);
                 logger.info(`FFmpeg process spawned for stream ${streamId}`);
+                this.emit('streamStarted', streamId);
             });
 
             return ffmpeg;
