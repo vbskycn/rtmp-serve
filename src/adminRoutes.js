@@ -94,7 +94,6 @@ router.get('/api/streams', async (req, res) => {
         const streams = [];
         logger.info(`Current streams in manager: ${streamManager.streams.size}`);
         
-        // 打印所有流的ID
         const streamIds = Array.from(streamManager.streams.keys());
         logger.info('Available stream IDs:', streamIds);
         
@@ -103,7 +102,7 @@ router.get('/api/streams', async (req, res) => {
             const playUrl = `${streamManager.getServerUrl()}/play/${id}`;
             
             try {
-                const processRunning = await checkStreamStatus(id);
+                const processRunning = await streamManager.checkStreamStatus(id);  // 使用 StreamManager 的方法
                 const retryInfo = streamManager.getRetryInfo(id);
                 const streamData = {
                     id,
@@ -378,44 +377,6 @@ function parseM3U(content) {
     }
 
     return streams;
-}
-
-// 添加检查流状态的函数
-async function checkStreamStatus(streamId) {
-    try {
-        // 检查进程是否存在
-        const hasProcess = getStreamManager(req.app).streamProcesses.has(streamId);
-        if (hasProcess) return true;
-
-        // 检查播放列表文件是否存在且最近有更新
-        const playlistPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
-        if (fs.existsSync(playlistPath)) {
-            const stats = fs.statSync(playlistPath);
-            const fileAge = Date.now() - stats.mtimeMs;
-            // 如果文件在最近30秒内有更新，认为流是活跃的
-            if (fileAge < 30000) return true;
-        }
-
-        // 检查是否有 .ts 分片文件且最近有更新
-        const streamDir = path.join(__dirname, '../streams', streamId);
-        if (fs.existsSync(streamDir)) {
-            const files = fs.readdirSync(streamDir);
-            const tsFiles = files.filter(f => f.endsWith('.ts'));
-            if (tsFiles.length > 0) {
-                // 检查最新的分片文件
-                const latestTs = tsFiles.sort().pop();
-                const tsStats = fs.statSync(path.join(streamDir, latestTs));
-                const fileAge = Date.now() - tsStats.mtimeMs;
-                // 如果最新的分片文件在最近30秒内有更新，认为流是活跃的
-                if (fileAge < 30000) return true;
-            }
-        }
-
-        return false;
-    } catch (error) {
-        logger.error(`Error checking stream status: ${streamId}`, error);
-        return false;
-    }
 }
 
 // 添加获取服务器配置的路由

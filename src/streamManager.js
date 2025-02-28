@@ -1011,20 +1011,41 @@ class StreamManager extends EventEmitter {
     }
 
     // 添加检查流状态的方法
-    isStreamActive(streamId) {
-        // 检查是否有进程在运行
-        const hasProcess = this.streamProcesses.has(streamId);
-        
-        // 检查是否有最近的统计信息
-        const stats = this.streamStats.get(streamId);
-        const hasRecentStats = stats?.startTime && 
-            (Date.now() - new Date(stats.startTime).getTime()) < 30000;  // 30秒内有活动
-        
-        // 检查是否有播放列表文件
-        const playlistPath = path.join(this.streamsDir, streamId, 'playlist.m3u8');
-        const hasPlaylist = fs.existsSync(playlistPath);
-        
-        return hasProcess || hasRecentStats || hasPlaylist;
+    async checkStreamStatus(streamId) {
+        try {
+            // 检查进程是否存在
+            if (this.streamProcesses.has(streamId)) {
+                return true;
+            }
+
+            // 检查播放列表文件
+            const playlistPath = path.join(this.streamsDir, streamId, 'playlist.m3u8');
+            if (fs.existsSync(playlistPath)) {
+                const stats = fs.statSync(playlistPath);
+                if (Date.now() - stats.mtimeMs < 30000) {
+                    return true;
+                }
+            }
+
+            // 检查分片文件
+            const streamDir = path.join(this.streamsDir, streamId);
+            if (fs.existsSync(streamDir)) {
+                const files = fs.readdirSync(streamDir);
+                const tsFiles = files.filter(f => f.endsWith('.ts'));
+                if (tsFiles.length > 0) {
+                    const latestTs = tsFiles.sort().pop();
+                    const tsStats = fs.statSync(path.join(streamDir, latestTs));
+                    if (Date.now() - tsStats.mtimeMs < 30000) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        } catch (error) {
+            logger.error(`Error checking stream status: ${streamId}`, error);
+            return false;
+        }
     }
 
     // 添加观看者
