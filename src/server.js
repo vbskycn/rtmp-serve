@@ -19,6 +19,7 @@ const port = config.server.port;
 
 // 创建 StreamManager 实例
 const streamManager = new StreamManager();
+app.set('streamManager', streamManager);
 
 // 中间件设置
 app.use(cors());

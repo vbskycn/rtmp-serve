@@ -9,8 +9,19 @@ const { verifyUser, updatePassword, JWT_SECRET, verifyToken } = require('./middl
 const config = require('../config/config.json');
 const os = require('os');
 
-// 创建 StreamManager 实例
-const streamManager = new StreamManager();
+let streamManager;
+
+// 使用函数来获取单例
+function getStreamManager(app) {
+    if (!streamManager) {
+        streamManager = app.get('streamManager');
+        if (!streamManager) {
+            streamManager = new StreamManager();
+            app.set('streamManager', streamManager);
+        }
+    }
+    return streamManager;
+}
 
 // 修改生成流ID的函数
 function generateStreamId(name, url, customId = '') {
@@ -56,7 +67,7 @@ router.post('/api/streams', async (req, res) => {
             }
         };
 
-        const result = await streamManager.addStream(streamData);
+        const result = await getStreamManager(req.app).addStream(streamData);
         
         if (!result || !result.success) {
             throw new Error(result?.error || '添加流失败');
@@ -78,6 +89,7 @@ router.post('/api/streams', async (req, res) => {
 // 获取所有流列表
 router.get('/api/streams', async (req, res) => {
     try {
+        const streamManager = getStreamManager(req.app);
         logger.info('Handling GET /api/streams request');
         const streams = [];
         logger.info(`Current streams in manager: ${streamManager.streams.size}`);
@@ -131,10 +143,10 @@ router.post('/api/streams/batch', async (req, res) => {
         for (const streamData of streams) {
             try {
                 // 添加流并立即启动
-                const result = await streamManager.addStream(streamData);
+                const result = await getStreamManager(req.app).addStream(streamData);
                 if (result.success) {
                     // 自动启动流
-                    await streamManager.startStreaming(result.stream.id);
+                    await getStreamManager(req.app).startStreaming(result.stream.id);
                     results.push({
                         name: streamData.name,
                         success: true
@@ -221,7 +233,7 @@ function parseM3UContent(content) {
 router.delete('/api/streams/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        await streamManager.deleteStream(id);
+        await getStreamManager(req.app).deleteStream(id);
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -233,7 +245,7 @@ router.post('/api/streams/:id/restart', async (req, res) => {
     try {
         const { id } = req.params;
         const { manual } = req.body;
-        await streamManager.restartStream(id, manual === true);
+        await getStreamManager(req.app).restartStream(id, manual === true);
         res.json({ success: true });
     } catch (error) {
         logger.error(`Error restarting stream: ${id}`, error);
@@ -248,7 +260,7 @@ router.post('/api/streams/:id/restart', async (req, res) => {
 router.post('/api/streams/:id/stop', async (req, res) => {
     try {
         const { id } = req.params;
-        await streamManager.stopStreaming(id);
+        await getStreamManager(req.app).stopStreaming(id);
         res.json({ success: true });
     } catch (error) {
         logger.error(`Error stopping stream: ${id}`, error);
@@ -266,7 +278,7 @@ router.post('/api/streams/:id/updateId', async (req, res) => {
         const { newId } = req.body;
         
         // 检查新ID是否已存在
-        if (streamManager.streams.has(newId)) {
+        if (getStreamManager(req.app).streams.has(newId)) {
             return res.json({
                 success: false,
                 error: '流ID已存在'
@@ -274,7 +286,7 @@ router.post('/api/streams/:id/updateId', async (req, res) => {
         }
 
         // 更新流ID
-        const stream = streamManager.streams.get(id);
+        const stream = getStreamManager(req.app).streams.get(id);
         if (!stream) {
             return res.json({
                 success: false,
@@ -283,25 +295,25 @@ router.post('/api/streams/:id/updateId', async (req, res) => {
         }
 
         // 复制流配置到新ID
-        streamManager.streams.set(newId, stream);
-        streamManager.streams.delete(id);
+        getStreamManager(req.app).streams.set(newId, stream);
+        getStreamManager(req.app).streams.delete(id);
 
         // 更新统计信息
-        const stats = streamManager.streamStats.get(id);
+        const stats = getStreamManager(req.app).streamStats.get(id);
         if (stats) {
-            streamManager.streamStats.set(newId, stats);
-            streamManager.streamStats.delete(id);
+            getStreamManager(req.app).streamStats.set(newId, stats);
+            getStreamManager(req.app).streamStats.delete(id);
         }
 
         // 更新进程信息
-        const processes = streamManager.streamProcesses.get(id);
+        const processes = getStreamManager(req.app).streamProcesses.get(id);
         if (processes) {
-            streamManager.streamProcesses.set(newId, processes);
-            streamManager.streamProcesses.delete(id);
+            getStreamManager(req.app).streamProcesses.set(newId, processes);
+            getStreamManager(req.app).streamProcesses.delete(id);
         }
 
         // 保存配置
-        await streamManager.saveStreams();
+        await getStreamManager(req.app).saveStreams();
 
         res.json({ success: true });
     } catch (error) {
@@ -372,7 +384,7 @@ function parseM3U(content) {
 async function checkStreamStatus(streamId) {
     try {
         // 检查进程是否存在
-        const hasProcess = streamManager.streamProcesses.has(streamId);
+        const hasProcess = getStreamManager(req.app).streamProcesses.has(streamId);
         if (hasProcess) return true;
 
         // 检查播放列表文件是否存在且最近有更新
@@ -427,7 +439,7 @@ router.get('/api/config', (req, res) => {
 router.put('/api/streams/:streamId', async (req, res) => {
     try {
         const { streamId } = req.params;
-        const result = await streamManager.updateStream(streamId, req.body);
+        const result = await getStreamManager(req.app).updateStream(streamId, req.body);
         res.json(result);
     } catch (error) {
         res.status(500).json({
@@ -441,7 +453,7 @@ router.put('/api/streams/:streamId', async (req, res) => {
 router.get('/api/streams/:streamId', async (req, res) => {
     try {
         const { streamId } = req.params;
-        const stream = streamManager.streams.get(streamId);
+        const stream = getStreamManager(req.app).streams.get(streamId);
         if (!stream) {
             res.status(404).json({
                 success: false,
@@ -462,7 +474,7 @@ router.get('/api/streams/:streamId', async (req, res) => {
 router.get('/api/stats', async (req, res) => {
     try {
         // 使用新的 getStats 方法代替 getTrafficStats
-        const stats = streamManager.getStats();
+        const stats = getStreamManager(req.app).getStats();
         res.json(stats);
     } catch (error) {
         logger.error('Error getting system stats:', error);
@@ -604,7 +616,7 @@ router.get('/api/servers', verifyToken, (req, res) => {
 // 获取自启动状态
 router.get('/api/streams/:id/autostart', (req, res) => {
     const { id } = req.params;
-    const isAutoStart = streamManager.isAutoStart(id);
+    const isAutoStart = getStreamManager(req.app).isAutoStart(id);
     res.json({ autoStart: isAutoStart });
 });
 
@@ -619,7 +631,7 @@ router.post('/api/streams/autostart', async (req, res) => {
             });
         }
 
-        const updated = await streamManager.setAutoStart(streamIds, autoStart);
+        const updated = await getStreamManager(req.app).setAutoStart(streamIds, autoStart);
         res.json({
             success: true,
             message: `已${autoStart ? '启用' : '禁用'}${streamIds.length}个流的自启动`
@@ -676,7 +688,7 @@ router.post('/api/restart', async (req, res) => {
 // 修改 /api/servers 路由，移除 verifyToken 中间件
 router.get('/api/servers', async (req, res) => {
     try {
-        const streamManager = req.app.get('streamManager');
+        const streamManager = getStreamManager(req.app);
         
         // 获取系统信息
         const systemInfo = {

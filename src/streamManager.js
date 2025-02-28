@@ -1825,7 +1825,11 @@ class StreamManager extends EventEmitter {
             ffmpeg.stderr.on('data', (data) => {
                 const errorMsg = data.toString().trim();
                 if (!this.isCommonError(errorMsg)) {
-                    logger.error(`FFmpeg stderr [${streamId}]: ${errorMsg}`);
+                    logger.error(`FFmpeg stderr [${streamId}]: ${errorMsg}`, {
+                        streamId,
+                        inputUrl,
+                        error: errorMsg
+                    });
                 }
             });
 
