@@ -526,36 +526,22 @@ class StreamManager extends EventEmitter {
 
     // 修改错误处理方法
     async handleStreamError(streamId, error) {
-        const processInfo = this.streamProcesses.get(streamId);
-        if (!processInfo) return;
+        const status = this.retryStatus.get(streamId) || {
+            immediateRetries: 0,
+            recoveryAttempts: 0,
+            isInRecovery: false,
+            currentRound: 0
+        };
 
-        // 增加重启计数
-        processInfo.restartCount = (processInfo.restartCount || 0) + 1;
-        
-        // 根据错误类型调整等待时间
-        let waitTime = 5000;  // 默认5秒
-        
-        if (error.message.includes('Operation not permitted') || 
-            error.message.includes('Failed to publish')) {
-            waitTime = 30000;  // 权限错误等待30秒
-        } else if (processInfo.restartCount > 5) {
-            waitTime = 60000;  // 多次重试失败等待60秒
+        if (!status.isInRecovery) {
+            // 立即重试阶段
+            await this.handleImmediateRetry(streamId, status);
+        } else {
+            // 恢复重试阶段
+            await this.handleRecoveryRetry(streamId, status);
         }
-
-        logger.error(`Stream ${streamId} error (attempt ${processInfo.restartCount}):`, error);
-
-        // 等待后重启
-        setTimeout(async () => {
-            try {
-                await this.startStreamProcess(streamId);
-                processInfo.restartCount = 0; // 重置计数
-            } catch (restartError) {
-                logger.error(`Failed to restart stream ${streamId}:`, restartError);
-            }
-        }, waitTime);
     }
 
-    // 处理立即重试
     async handleImmediateRetry(streamId, status) {
         status.immediateRetries++;
         logger.info(`Immediate retry ${status.immediateRetries}/3 for stream ${streamId}`);
@@ -586,7 +572,6 @@ class StreamManager extends EventEmitter {
         }
     }
 
-    // 处理恢复重试
     async handleRecoveryRetry(streamId, status) {
         const intervals = this.retryConfig.recovery.intervals;
         const currentInterval = intervals[Math.min(status.currentRound, intervals.length - 1)];
@@ -635,7 +620,6 @@ class StreamManager extends EventEmitter {
         }, currentInterval);
     }
 
-    // 修改重置重试状态的方法
     resetRetryStatus(streamId) {
         this.retryStatus.set(streamId, {
             immediateRetries: 0,
@@ -1920,16 +1904,6 @@ class StreamManager extends EventEmitter {
                     name: streamData.name,
                     logo: '',
                     group: streamData.category || '未分类'
-                },
-                processRunning: false,
-                manuallyStarted: false,
-                invalid: false,
-                retryInfo: {
-                    immediateRetries: 0,
-                    recoveryAttempts: 0,
-                    isInRecovery: false,
-                    totalRetries: 0,
-                    lastRetryTime: null
                 }
             };
 
