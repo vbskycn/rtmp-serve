@@ -9,19 +9,8 @@ const { verifyUser, updatePassword, JWT_SECRET, verifyToken } = require('./middl
 const config = require('../config/config.json');
 const os = require('os');
 
-let streamManager;
-
-// 使用函数来获取单例
-function getStreamManager(app) {
-    if (!streamManager) {
-        streamManager = app.get('streamManager');
-        if (!streamManager) {
-            streamManager = new StreamManager();
-            app.set('streamManager', streamManager);
-        }
-    }
-    return streamManager;
-}
+// 创建 StreamManager 实例
+const streamManager = new StreamManager();
 
 // 修改生成流ID的函数
 function generateStreamId(name, url, customId = '') {
@@ -67,7 +56,7 @@ router.post('/api/streams', async (req, res) => {
             }
         };
 
-        const result = await getStreamManager(req.app).addStream(streamData);
+        const result = await streamManager.addStream(streamData);
         
         if (!result || !result.success) {
             throw new Error(result?.error || '添加流失败');
@@ -89,11 +78,11 @@ router.post('/api/streams', async (req, res) => {
 // 获取所有流列表
 router.get('/api/streams', async (req, res) => {
     try {
-        const streamManager = getStreamManager(req.app);
         logger.info('Handling GET /api/streams request');
         const streams = [];
         logger.info(`Current streams in manager: ${streamManager.streams.size}`);
         
+        // 打印所有流的ID
         const streamIds = Array.from(streamManager.streams.keys());
         logger.info('Available stream IDs:', streamIds);
         
@@ -102,8 +91,7 @@ router.get('/api/streams', async (req, res) => {
             const playUrl = `${streamManager.getServerUrl()}/play/${id}`;
             
             try {
-                const processRunning = await streamManager.checkStreamStatus(id);  // 使用 StreamManager 的方法
-                const retryInfo = streamManager.getRetryInfo(id);
+                const processRunning = await checkStreamStatus(id);
                 const streamData = {
                     id,
                     ...streamConfig,
@@ -111,8 +99,7 @@ router.get('/api/streams', async (req, res) => {
                     stats: streamManager.streamStats.get(id),
                     processRunning,
                     manuallyStarted: streamManager.manuallyStartedStreams.has(id),
-                    autoStart: streamManager.isAutoStart(id),
-                    retryInfo
+                    autoStart: streamManager.isAutoStart(id)
                 };
                 streams.push(streamData);
                 logger.debug(`Successfully processed stream ${id}`);
@@ -136,27 +123,48 @@ router.get('/api/streams', async (req, res) => {
 router.post('/api/streams/batch', async (req, res) => {
     try {
         const { m3u } = req.body;
-        const streams = parseM3UContent(m3u);
+        const lines = m3u.split('\n').filter(line => line.trim());
         const results = [];
+        let currentCategory = '未分类';
         
-        for (const streamData of streams) {
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            
+            // 检查是否是分类行
+            if (line.endsWith('#genre#')) {
+                currentCategory = line.split(',')[0].trim();
+                continue;
+            }
+            
+            // 处理常规流行
+            const [name, url] = line.split(',').map(s => s.trim());
+            
+            if (!name || !url) {
+                continue;
+            }
+
             try {
-                // 添加流并立即启动
-                const result = await getStreamManager(req.app).addStream(streamData);
-                if (result.success) {
-                    // 自动启动流
-                    await getStreamManager(req.app).startStreaming(result.stream.id);
-                    results.push({
-                        name: streamData.name,
-                        success: true
-                    });
-                } else {
-                    throw new Error(result.error);
-                }
-            } catch (error) {
-                logger.error(`Error adding stream ${streamData.name}:`, error);
+                const streamData = {
+                    name,
+                    url,
+                    category: currentCategory,
+                    tvg: {
+                        id: '',
+                        name: name,
+                        logo: '',
+                        group: currentCategory
+                    }
+                };
+
+                const result = await streamManager.addStream(streamData);
                 results.push({
-                    name: streamData.name,
+                    name,
+                    success: true
+                });
+            } catch (error) {
+                logger.error(`Error adding stream ${name}:`, error);
+                results.push({
+                    name,
                     success: false,
                     error: error.message
                 });
@@ -184,55 +192,11 @@ router.post('/api/streams/batch', async (req, res) => {
     }
 });
 
-// 添加解析M3U内容的函数
-function parseM3UContent(content) {
-    const streams = [];
-    const lines = content.split('\n');
-    let currentCategory = '未分类';
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-
-        // 检查是否是分类行
-        if (line.endsWith('#genre#')) {
-            currentCategory = line.split(',')[0].trim();
-            continue;
-        }
-
-        // 处理流行
-        if (!line.startsWith('#')) {
-            const parts = line.split(',');
-            if (parts.length >= 2) {
-                const name = parts[0].trim();
-                const url = parts[1].trim();
-
-                if (name && url) {
-                    streams.push({
-                        name,
-                        url,
-                        category: currentCategory,
-                        autoStart: true, // 设置自动启动
-                        tvg: {
-                            id: '',
-                            name,
-                            logo: '',
-                            group: currentCategory
-                        }
-                    });
-                }
-            }
-        }
-    }
-
-    return streams;
-}
-
 // 删除流
 router.delete('/api/streams/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        await getStreamManager(req.app).deleteStream(id);
+        await streamManager.deleteStream(id);
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -244,7 +208,7 @@ router.post('/api/streams/:id/restart', async (req, res) => {
     try {
         const { id } = req.params;
         const { manual } = req.body;
-        await getStreamManager(req.app).restartStream(id, manual === true);
+        await streamManager.restartStream(id, manual === true);
         res.json({ success: true });
     } catch (error) {
         logger.error(`Error restarting stream: ${id}`, error);
@@ -259,7 +223,7 @@ router.post('/api/streams/:id/restart', async (req, res) => {
 router.post('/api/streams/:id/stop', async (req, res) => {
     try {
         const { id } = req.params;
-        await getStreamManager(req.app).stopStreaming(id);
+        await streamManager.stopStreaming(id);
         res.json({ success: true });
     } catch (error) {
         logger.error(`Error stopping stream: ${id}`, error);
@@ -277,7 +241,7 @@ router.post('/api/streams/:id/updateId', async (req, res) => {
         const { newId } = req.body;
         
         // 检查新ID是否已存在
-        if (getStreamManager(req.app).streams.has(newId)) {
+        if (streamManager.streams.has(newId)) {
             return res.json({
                 success: false,
                 error: '流ID已存在'
@@ -285,7 +249,7 @@ router.post('/api/streams/:id/updateId', async (req, res) => {
         }
 
         // 更新流ID
-        const stream = getStreamManager(req.app).streams.get(id);
+        const stream = streamManager.streams.get(id);
         if (!stream) {
             return res.json({
                 success: false,
@@ -294,25 +258,25 @@ router.post('/api/streams/:id/updateId', async (req, res) => {
         }
 
         // 复制流配置到新ID
-        getStreamManager(req.app).streams.set(newId, stream);
-        getStreamManager(req.app).streams.delete(id);
+        streamManager.streams.set(newId, stream);
+        streamManager.streams.delete(id);
 
         // 更新统计信息
-        const stats = getStreamManager(req.app).streamStats.get(id);
+        const stats = streamManager.streamStats.get(id);
         if (stats) {
-            getStreamManager(req.app).streamStats.set(newId, stats);
-            getStreamManager(req.app).streamStats.delete(id);
+            streamManager.streamStats.set(newId, stats);
+            streamManager.streamStats.delete(id);
         }
 
         // 更新进程信息
-        const processes = getStreamManager(req.app).streamProcesses.get(id);
+        const processes = streamManager.streamProcesses.get(id);
         if (processes) {
-            getStreamManager(req.app).streamProcesses.set(newId, processes);
-            getStreamManager(req.app).streamProcesses.delete(id);
+            streamManager.streamProcesses.set(newId, processes);
+            streamManager.streamProcesses.delete(id);
         }
 
         // 保存配置
-        await getStreamManager(req.app).saveStreams();
+        await streamManager.saveStreams();
 
         res.json({ success: true });
     } catch (error) {
@@ -379,6 +343,44 @@ function parseM3U(content) {
     return streams;
 }
 
+// 添加检查流状态的函数
+async function checkStreamStatus(streamId) {
+    try {
+        // 检查进程是否存在
+        const hasProcess = streamManager.streamProcesses.has(streamId);
+        if (hasProcess) return true;
+
+        // 检查播放列表文件是否存在且最近有更新
+        const playlistPath = path.join(__dirname, '../streams', streamId, 'playlist.m3u8');
+        if (fs.existsSync(playlistPath)) {
+            const stats = fs.statSync(playlistPath);
+            const fileAge = Date.now() - stats.mtimeMs;
+            // 如果文件在最近30秒内有更新，认为流是活跃的
+            if (fileAge < 30000) return true;
+        }
+
+        // 检查是否有 .ts 分片文件且最近有更新
+        const streamDir = path.join(__dirname, '../streams', streamId);
+        if (fs.existsSync(streamDir)) {
+            const files = fs.readdirSync(streamDir);
+            const tsFiles = files.filter(f => f.endsWith('.ts'));
+            if (tsFiles.length > 0) {
+                // 检查最新的分片文件
+                const latestTs = tsFiles.sort().pop();
+                const tsStats = fs.statSync(path.join(streamDir, latestTs));
+                const fileAge = Date.now() - tsStats.mtimeMs;
+                // 如果最新的分片文件在最近30秒内有更新，认为流是活跃的
+                if (fileAge < 30000) return true;
+            }
+        }
+
+        return false;
+    } catch (error) {
+        logger.error(`Error checking stream status: ${streamId}`, error);
+        return false;
+    }
+}
+
 // 添加获取服务器配置的路由
 router.get('/api/config', (req, res) => {
     try {
@@ -400,7 +402,7 @@ router.get('/api/config', (req, res) => {
 router.put('/api/streams/:streamId', async (req, res) => {
     try {
         const { streamId } = req.params;
-        const result = await getStreamManager(req.app).updateStream(streamId, req.body);
+        const result = await streamManager.updateStream(streamId, req.body);
         res.json(result);
     } catch (error) {
         res.status(500).json({
@@ -414,7 +416,7 @@ router.put('/api/streams/:streamId', async (req, res) => {
 router.get('/api/streams/:streamId', async (req, res) => {
     try {
         const { streamId } = req.params;
-        const stream = getStreamManager(req.app).streams.get(streamId);
+        const stream = streamManager.streams.get(streamId);
         if (!stream) {
             res.status(404).json({
                 success: false,
@@ -435,7 +437,7 @@ router.get('/api/streams/:streamId', async (req, res) => {
 router.get('/api/stats', async (req, res) => {
     try {
         // 使用新的 getStats 方法代替 getTrafficStats
-        const stats = getStreamManager(req.app).getStats();
+        const stats = streamManager.getStats();
         res.json(stats);
     } catch (error) {
         logger.error('Error getting system stats:', error);
@@ -577,7 +579,7 @@ router.get('/api/servers', verifyToken, (req, res) => {
 // 获取自启动状态
 router.get('/api/streams/:id/autostart', (req, res) => {
     const { id } = req.params;
-    const isAutoStart = getStreamManager(req.app).isAutoStart(id);
+    const isAutoStart = streamManager.isAutoStart(id);
     res.json({ autoStart: isAutoStart });
 });
 
@@ -592,7 +594,7 @@ router.post('/api/streams/autostart', async (req, res) => {
             });
         }
 
-        const updated = await getStreamManager(req.app).setAutoStart(streamIds, autoStart);
+        const updated = await streamManager.setAutoStart(streamIds, autoStart);
         res.json({
             success: true,
             message: `已${autoStart ? '启用' : '禁用'}${streamIds.length}个流的自启动`
@@ -649,7 +651,7 @@ router.post('/api/restart', async (req, res) => {
 // 修改 /api/servers 路由，移除 verifyToken 中间件
 router.get('/api/servers', async (req, res) => {
     try {
-        const streamManager = getStreamManager(req.app);
+        const streamManager = req.app.get('streamManager');
         
         // 获取系统信息
         const systemInfo = {

@@ -1,6 +1,6 @@
 module.exports = {
   apps: [{
-    name: 'rtmp-serve',
+    name: 'rtmp-server',
     script: './src/server.js',
     watch: false,
     instances: 1,

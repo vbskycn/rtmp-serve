@@ -14,13 +14,11 @@ const axios = require('axios');
 process.chdir(path.join(__dirname, '..'));
 
 const app = express();
-global.app = app;
 // 使用配置文件中的端口
 const port = config.server.port;
 
 // 创建 StreamManager 实例
 const streamManager = new StreamManager();
-app.set('streamManager', streamManager);
 
 // 中间件设置
 app.use(cors());

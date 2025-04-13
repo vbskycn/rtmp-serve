@@ -5,146 +5,70 @@ const logger = require('./utils/logger');
 const axios = require('axios');
 const EventEmitter = require('events');
 const config = require('../config/config.json');
-const fsPromises = require('fs').promises;
-const { spawn } = require('child_process');
-const os = require('os');
-const { exec } = require('child_process');
 
 class StreamManager extends EventEmitter {
     constructor() {
         super();
-        
-        // 初始化根目录和其他目录
-        this.rootDir = process.cwd();
-        this.configDir = path.join(this.rootDir, 'config');
-        this.streamsDir = path.join(this.rootDir, 'streams');
-        this.logsDir = path.join(this.rootDir, 'logs');
-        
-        // 初始化配置文件路径
-        this.configPath = path.join(this.configDir, 'streams.json');
-        this.statsPath = path.join(this.configDir, 'stats.json');
-        this.autoStartPath = path.join(this.configDir, 'autostart.json');
-        
-        // 使用配置中的名称和版本
-        this.appName = config.name;
-        this.version = config.version;
-        this.config = config;
-        
-        // 初始化所有必要的 Map 和 Set
         this.streams = new Map();
+        this.activeStreams = new Map();
         this.streamProcesses = new Map();
-        this.retryStatus = new Map();
-        this.retryCounters = new Map();
         this.streamStats = new Map();
         this.healthChecks = new Map();
+        this.configPath = path.join(__dirname, '../config/streams.json');
         this.serverPorts = new Map();
         this.failureCount = new Map();
         this.activeViewers = new Map();
         this.autoStopTimers = new Map();
         this.manuallyStartedStreams = new Set();
-        this.autoStartStreams = new Set();
-
-        // 确保所有必要的目录存在
-        this.ensureDirectories();
+        this.config = config;  // 保存配置引用
         
-        // 加载流配置并立即启动所有流
-        this.loadStreams();
-        this.loadStats();
-        this.loadAutoStartStreams();
+        // 确保使用绝对路径
+        this.rootDir = path.resolve(__dirname, '..');
+        this.configPath = path.join(this.rootDir, 'config/streams.json');
         
-        // 确保在所有配置加载完成后启动流
-        setImmediate(() => {
-            this.startAllStreams().catch(error => {
-                logger.error('Error starting all streams:', error);
-            });
-        });
-
-        // 添加检查源可用性的方法
-        this.checkStreamSource = async (url) => {
-            try {
-                if (url.startsWith('http')) {
-                    // 对于 HTTP 流，使用 ffprobe 检查而不是 HEAD 请求
-                    return new Promise((resolve) => {
-                        const ffprobe = spawn('ffprobe', [
-                            '-v', 'quiet',
-                            '-print_format', 'json',
-                            '-show_format',
-                            '-i', url,
-                            '-timeout', '10000000'  // 10秒超时
-                        ]);
-
-                        let output = '';
-                        ffprobe.stdout.on('data', (data) => {
-                            output += data.toString();
-                        });
-
-                        ffprobe.on('exit', (code) => {
-                            resolve(code === 0);
-                        });
-
-                        // 设置超时
-                        setTimeout(() => {
-                            ffprobe.kill();
-                            resolve(true);  // 超时也返回 true，让重试机制处理
-                        }, 10000);
-                    });
-                }
-                
-                // 对于 RTMP 流，使用相同的 ffprobe 检查
-                if (url.startsWith('rtmp')) {
-                    return new Promise((resolve) => {
-                        const ffprobe = spawn('ffprobe', [
-                            '-v', 'quiet',
-                            '-print_format', 'json',
-                            '-show_format',
-                            '-i', url,
-                            '-timeout', '10000000'
-                        ]);
-
-                        ffprobe.on('exit', (code) => {
-                            resolve(code === 0);
-                        });
-
-                        setTimeout(() => {
-                            ffprobe.kill();
-                            resolve(true);
-                        }, 10000);
-                    });
-                }
-
-                return true; // 其他类型的流默认返回 true
-            } catch (error) {
-                logger.warn(`Stream source check failed for ${url}:`, error.message);
-                return true; // 检查失败时返回 true，让重试机制处理
+        // 修改配置加载逻辑
+        try {
+            // 首先尝试从环境变量获本号
+            const envVersion = process.env.APP_VERSION;
+            
+            // 加载配置文件
+            this.config = require('../config/config.json');
+            
+            // 如果环境变量中有版本号，优先使用环境变量的版本号
+            if (envVersion && envVersion !== 'latest') {
+                this.config.version = envVersion;
             }
-        };
-
-        // 添加构建 FFmpeg 参数的方法
-        this.buildFFmpegArgs = (stream, outputDir) => {
-            return [
-                '-i', stream.url,
-                '-c', 'copy',
-                '-f', 'flv',
-                `${this.config.rtmp.pushServer}${stream.id}`
-            ];
-        };
-
-        // 添加进程监控设置方法
-        this.setupProcessMonitoring = (streamId, process) => {
-            process.stdout.on('data', (data) => {
-                logger.debug(`FFmpeg stdout [${streamId}]: ${data}`);
-            });
-
-            process.stderr.on('data', (data) => {
-                logger.debug(`FFmpeg stderr [${streamId}]: ${data}`);
-            });
-
-            process.on('close', (code) => {
-                logger.info(`FFmpeg process exited with code ${code} [${streamId}]`);
-                this.handleStreamExit(streamId, code);
-            });
-        };
-
+            
+            // 确保版本号存在
+            if (!this.config.version) {
+                this.config.version = 'unknown';
+            }
+            
+            logger.info(`Loaded config with version: ${this.config.version}`);
+        } catch (error) {
+            logger.error('Error loading config:', error);
+            this.config = {
+                version: process.env.APP_VERSION || 'unknown',
+                server: {
+                    host: 'localhost',
+                    port: 3000
+                },
+                rtmp: {
+                    pushServer: 'rtmp://ali.push.yximgs.com/live/',
+                    pullServer: 'http://ali.hlspull.yximgs.com/live/'
+                }
+            };
+        }
+        
+        // 修改配置目录的创建
+        const configDir = path.dirname(this.configPath);
+        if (!fs.existsSync(configDir)) {
+            fs.mkdirSync(configDir, { recursive: true });
+        }
+        
+        // 加载保存的流配置
+        this.loadStreams();
+        
         // 每小时运行一次清理
         setInterval(() => this.cleanupUnusedFiles(), 60 * 60 * 1000);
         // 每5分钟运行一次健康检查
@@ -172,17 +96,18 @@ class StreamManager extends EventEmitter {
             this.saveStats();
         }, 60000);
         
+        // 加载保存的统计数据
+        this.loadStats();
+        
         // 修改心跳配置
         this.heartbeatConfig = {
             enabled: true,
-            server: `https://${config.name}.zhoujie218.top/api/heartbeat`,
-            interval: 5000,
-            timeout: 10000,
-            retryDelay: 5000,
-            maxRetries: 3,
-            serverName: require('os').hostname(),
-            appName: config.name,
-            version: config.version
+            server: 'https://rtmp-serve.zhoujie218.top/api/heartbeat',
+            interval: 5000,  // 5秒
+            timeout: 10000,  // 增加超时时间到10秒
+            retryDelay: 5000,  // 添加重试延迟
+            maxRetries: 3,  // 添加最大重试次数
+            serverName: require('os').hostname()
         };
 
         // 启动心跳
@@ -191,9 +116,8 @@ class StreamManager extends EventEmitter {
         }
 
         // 在 constructor 中添加调试日志
-        logger.info(`Starting ${config.name} version ${config.version}`);
         logger.info('Environment version:', process.env.APP_VERSION);
-        logger.info('Config file version:', config.version);
+        logger.info('Config file version:', require('../config/config.json').version);
         logger.info('Final config version:', this.config.version);
 
         // 添加自启动流的集合
@@ -204,401 +128,511 @@ class StreamManager extends EventEmitter {
         
         // 启动时自动启动已配置的流
         this.startAutoStartStreams();
-
-        // 修改重试配置
-        this.retryConfig = {
-            maxImmediateRetries: 5,          // 增加立即重试次数
-            immediateRetryDelay: 10000,      // 增加重试间隔
-            recoveryRetryDelay: 300000,      // 恢复重试间隔(5分钟)
-            maxRecoveryAttempts: 10,         // 最大恢复尝试次数
-            backoffMultiplier: 1.5,          // 退避乘数
-            maxBackoffDelay: 900000          // 最大退避延迟(15分钟)
-        };
-
-        this.configStats = {
-            startTime: Date.now(),
-            uptime: 0,
-            errors: 0
-        };
-
-        this.streamsDir = path.join(this.rootDir, 'streams');
-        this.ensureDirectories();
-
-        this.maxConcurrentStreams = 3; // 增加到3个并发
-        this.streamStartInterval = 3000; // 减少启动间隔到3秒
-
-        // 添加进程资源限制
-        this.processLimits = {
-            maxMemory: 512 * 1024 * 1024, // 512MB
-            maxBuffer: 64 * 1024 * 1024   // 64MB
-        };
-
-        // 添加监控配置
-        this.monitoring = {
-            checkInterval: 30000,  // 30秒检查一次
-            memoryThreshold: 0.8,  // 80% 内存阈值
-            restartDelay: 5000     // 5秒重启延迟
-        };
-        
-        // 启动监控
-        this.startMonitoring();
-
-        // 修改 FFmpeg 配置
-        this.ffmpegConfig = {
-            probesize: '32M',
-            analyzeduration: '10M',      // 增加分析时长
-            bufferSize: '16384k',        // 增加缓冲区大小
-            maxRate: '16384k',           // 增加最大码率
-            threadQueueSize: '2048',     // 增加线程队列大小
-            timeout: '30000000',         // 增加超时时间到30秒
-            reconnectDelay: '5',         // 增加重连延迟
-            retryCount: '10',            // 增加重试次数
-            httpTimeout: '15',           // HTTP超时时间
-            httpKeepalive: '1'           // 启用HTTP keepalive
-        };
     }
 
-    async ensureDirectories() {
-        const dirs = [this.configDir, this.streamsDir, this.logsDir];
-        
-        for (const dir of dirs) {
-            try {
-                await fsPromises.mkdir(dir, { recursive: true });
-                logger.info(`Directory created/verified: ${dir}`);
-            } catch (error) {
-                logger.error(`Error creating directory ${dir}:`, error);
-            }
-        }
-    }
-
-    async prepareStreamDirectory(streamId) {
-        if (!streamId || typeof streamId !== 'string') {
-            throw new Error('Invalid stream ID');
-        }
-
-        const streamDir = path.join(this.streamsDir, streamId);
-        
+    // 加载保存的流配置
+    loadStreams() {
         try {
-            await fsPromises.mkdir(streamDir, { recursive: true });
-            logger.info(`Created stream directory: ${streamDir}`);
-            return streamDir;
-        } catch (error) {
-            logger.error(`Failed to create stream directory: ${streamDir}`, error);
-            throw error;
-        }
-    }
-
-    // 修改加载流的方法
-    async loadStreams() {
-        logger.info('Starting to load streams...');
-        try {
+            logger.info('Starting to load streams...');
             if (fs.existsSync(this.configPath)) {
                 logger.info(`Config file exists at: ${this.configPath}`);
                 const data = fs.readFileSync(this.configPath, 'utf8');
-                const streams = JSON.parse(data);
                 
-                // 加载所有流到 Map 中
-                streams.forEach(stream => {
-                    this.streams.set(stream.id, stream);
-                });
+                // 检查文件内容
+                if (!data || !data.trim()) {
+                    logger.warn('Config file is empty');
+                    return;
+                }
                 
-                logger.info(`Successfully loaded ${streams.length} streams`);
+                try {
+                    const configs = JSON.parse(data);
+                    logger.info(`Successfully parsed config with ${Object.keys(configs).length} streams`);
+                    
+                    // 清空现有的流
+                    this.streams.clear();
+                    this.streamStats.clear();
+                    
+                    // 遍历并加载每个流
+                    for (const [id, config] of Object.entries(configs)) {
+                        logger.info(`Loading stream: ${id} - ${config.name}`);
+                        this.streams.set(id, {
+                            ...config,
+                            stats: {
+                                startTime: null,
+                                uptime: 0,
+                                errors: 0
+                            }
+                        });
+                        this.streamStats.set(id, {
+                            totalRequests: 0,
+                            lastAccessed: null,
+                            errors: 0,
+                            uptime: 0,
+                            startTime: null
+                        });
+                    }
+                    logger.info(`Successfully loaded ${this.streams.size} streams`);
+                    
+                    // 打印加载的流的ID列表
+                    const streamIds = Array.from(this.streams.keys());
+                    logger.info('Loaded stream IDs:', streamIds);
+                } catch (parseError) {
+                    logger.error('Error parsing config JSON:', parseError);
+                    logger.error('Raw config data:', data);
+                    throw parseError;
+                }
             } else {
                 logger.warn(`Config file not found at: ${this.configPath}`);
+                // 创建空配置文件
+                const configDir = path.dirname(this.configPath);
+                if (!fs.existsSync(configDir)) {
+                    fs.mkdirSync(configDir, { recursive: true });
+                }
+                fs.writeFileSync(this.configPath, '{}');
                 logger.info('Created new empty config file');
-                fs.writeFileSync(this.configPath, JSON.stringify([], null, 2));
             }
         } catch (error) {
-            logger.error('Error loading streams:', error);
-        }
-    }
-
-    // 修改启动所有流的方法,移除失效流检查
-    async startAllStreams() {
-        const streams = Array.from(this.streams.values());
-        logger.info(`Starting all ${streams.length} streams...`);
-
-        // 按顺序启动流
-        for (const stream of streams) {
+            logger.error('Error in loadStreams:', error);
+            // 如果文件损坏，创建备份
             try {
-                await this.startStreaming(stream.id);
-                // 添加启动间隔
-                await new Promise(resolve => setTimeout(resolve, this.streamStartInterval));
-            } catch (error) {
-                logger.error(`Failed to start stream ${stream.id}:`, error);
+                if (fs.existsSync(this.configPath)) {
+                    const backupPath = `${this.configPath}.backup.${Date.now()}`;
+                    fs.copyFileSync(this.configPath, backupPath);
+                    logger.info(`Created backup at: ${backupPath}`);
+                    fs.writeFileSync(this.configPath, '{}');
+                    logger.info('Reset config file to empty object');
+                }
+            } catch (backupError) {
+                logger.error('Error creating backup:', backupError);
             }
         }
-
-        logger.info(`Finished starting all streams`);
     }
 
-    // 修改 startStreaming 方法
-    async startStreaming(streamId) {
-        await this.checkSystemResources();
-        
-        // 检查当前运行的流数量
-        const runningStreams = Array.from(this.streamProcesses.values())
-            .filter(p => p.process && !p.process.killed);
+    // 保存流配置
+    async saveStreams() {
+        try {
+            const configs = {};
+            for (const [id, config] of this.streams.entries()) {
+                // 确保保存完整的流配置
+                configs[id] = {
+                    id: config.id,
+                    name: config.name,
+                    url: config.url,
+                    category: config.category || '未分类',
+                    kodiprop: config.kodiprop || '',
+                    tvg: config.tvg || {
+                        id: '',
+                        name: config.name,
+                        logo: '',
+                        group: config.category || ''
+                    }
+                };
+            }
             
-        if (runningStreams.length >= this.maxConcurrentStreams) {
-            throw new Error('Too many concurrent streams');
+            const configDir = path.dirname(this.configPath);
+            if (!fs.existsSync(configDir)) {
+                fs.mkdirSync(configDir, { recursive: true });
+            }
+            
+            fs.writeFileSync(this.configPath, JSON.stringify(configs, null, 2));
+            logger.info(`Saved ${this.streams.size} streams to config`);
+            return true;
+        } catch (error) {
+            logger.error('Error saving streams config:', error);
+            throw error;
         }
-        
-        // 添加启动延迟
-        await new Promise(resolve => setTimeout(resolve, this.streamStartInterval));
-        
+    }
+
+    async addStream(streamData) {
+        try {
+            // 验证必要的字段
+            if (!streamData.name || !streamData.url) {
+                throw new Error('缺少必要的流信息');
+            }
+
+            // 生成或使用的streamId
+            let streamId;
+            if (streamData.id) {
+                streamId = streamData.id;
+            } else if (streamData.customId) {
+                streamId = `stream_${streamData.customId}`;
+            } else {
+                // 生成6位随机ID
+                const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+                let randomId = '';
+                for (let i = 0; i < 6; i++) {
+                    randomId += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                streamId = `stream_${randomId}`;
+            }
+
+            // 检查是否已存在相同的流
+            if (this.streams.has(streamId)) {
+                // 如果存在，更新现有流的信息
+                const existingStream = this.streams.get(streamId);
+                existingStream.name = streamData.name;
+                existingStream.url = streamData.url;
+                existingStream.category = streamData.category || existingStream.category;
+                if (streamData.tvg) {
+                    existingStream.tvg = streamData.tvg;
+                }
+                logger.info(`Updated existing stream: ${streamId}`);
+            } else {
+                // 添加新流
+                const newStream = {
+                    id: streamId,
+                    name: streamData.name,
+                    url: streamData.url,
+                    category: streamData.category || '未分类',
+                    tvg: streamData.tvg || {
+                        id: '',
+                        name: streamData.name,
+                        logo: '',
+                        group: streamData.category || ''
+                    },
+                    stats: {
+                        startTime: null,
+                        uptime: 0,
+                        errors: 0
+                    }
+                };
+
+                // 保存到流集合
+                this.streams.set(streamId, newStream);
+
+                // 初始化统计信息
+                this.streamStats.set(streamId, {
+                    totalRequests: 0,
+                    lastAccessed: null,
+                    errors: 0,
+                    uptime: 0,
+                    startTime: null
+                });
+
+                logger.info(`Added new stream: ${streamId}`);
+            }
+
+            // 立即保存配置到文件
+            await this.saveStreams();
+
+            return {
+                success: true,
+                streamId: streamId
+            };
+        } catch (error) {
+            logger.error('添加流失败:', error);
+            throw error;
+        }
+    }
+
+    // 修改删除流的方法
+    async deleteStream(streamId) {
+        try {
+            await this.stopStreaming(streamId);
+            this.streams.delete(streamId);
+            this.streamStats.delete(streamId);
+            
+            // 保存配置
+            this.saveStreams();
+            
+            // 清理流文件
+            const streamPath = path.join(__dirname, '../streams', streamId);
+            if (fs.existsSync(streamPath)) {
+                fs.rmSync(streamPath, { recursive: true });
+            }
+            
+            logger.info(`Stream deleted: ${streamId}`);
+        } catch (error) {
+            logger.error(`Error deleting stream: ${streamId}`, { error });
+            throw error;
+        }
+    }
+
+    async getStreamUrl(streamId) {
+        try {
+            // 获取流配置
+            const stream = this.getStreamById(streamId);
+            if (!stream) {
+                logger.warn(`Stream not found: ${streamId}`);
+                return null;
+            }
+
+            const actualStreamId = stream.id;
+
+            // 检查流是否经在运行
+            if (!this.streamProcesses.has(actualStreamId)) {
+                logger.info(`Starting stream ${actualStreamId} on demand`);
+                try {
+                    // 尝试启动流
+                    await this.startStreaming(actualStreamId);
+                    
+                    // 等待playlist文件生成
+                    const playlistPath = path.join(this.rootDir, 'streams', actualStreamId, 'playlist.m3u8');
+                    let attempts = 0;
+                    while (!fs.existsSync(playlistPath) && attempts < 10) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        attempts++;
+                    }
+                    
+                    if (!fs.existsSync(playlistPath)) {
+                        throw new Error('Playlist file not generated');
+                    }
+                } catch (error) {
+                    logger.error(`Failed to start stream ${actualStreamId}:`, error);
+                    return null;
+                }
+            }
+
+            // 添加观看者
+            this.addViewer(actualStreamId);
+            return `/streams/${actualStreamId}/playlist.m3u8`;
+        } catch (error) {
+            logger.error(`Error getting stream URL: ${streamId}`, error);
+            return null;
+        }
+    }
+
+    async startStreaming(streamId, isManualStart = false) {
         try {
             const stream = this.streams.get(streamId);
             if (!stream) {
-                throw new Error(`Stream ${streamId} not found`);
+                throw new Error('Stream not found');
             }
 
-            // 检查流是否已经在运行
-            if (this.streamProcesses.has(streamId)) {
-                logger.info(`Stream ${streamId} is already running`);
-                return { success: true };
+            // 如果是手动启动，记录到集合中
+            if (isManualStart) {
+                this.manuallyStartedStreams.add(streamId);
+                logger.info(`Stream ${streamId} marked as manually started`);
             }
 
-            // 初始化重试状态
-            if (!this.retryStatus.has(streamId)) {
-                this.retryStatus.set(streamId, {
-                    immediateRetries: 0,
-                    recoveryAttempts: 0,
-                    isInRecovery: false,
-                    currentRound: 0
-                });
+            // 初始化统计信息
+            const stats = this.streamStats.get(streamId);
+            if (stats) {
+                stats.startTime = new Date();
+                stats.uptime = 0;
+                stats.errors = 0;
             }
 
-            // 初始化重试计数器
-            if (!this.retryCounters.has(streamId)) {
-                this.retryCounters.set(streamId, {
-                    total: 0,
-                    lastRetryTime: null
-                });
-            }
-
-            // 启动流进程
-            const result = await this.startStreamProcess(streamId);
-            if (!result.success) {
-                await this.handleStreamError(streamId, result.error);
-            }
-
-            return result;
-        } catch (error) {
-            logger.error(`Error starting stream ${streamId}:`, error);
-            await this.handleStreamError(streamId, error);
-            throw error;
-        }
-    }
-
-    async startStreamProcess(streamId) {
-        const stream = this.streams.get(streamId);
-        if (!stream) {
-            throw new Error('Stream not found');
-        }
-
-        try {
-            // 准备输出目录
-            const outputDir = path.join(this.streamsDir, streamId);
-            await this.ensureAndCleanDirectory(outputDir);
-
-            // 获取推流地址
-            const outputUrl = `${this.config.rtmp.pushServer}${stream.id}`;
-
-            logger.info(`Starting stream process for ${streamId}`, {
-                inputUrl: stream.url,
-                outputUrl: outputUrl
-            });
-
-            // 检查源地址可访问性
-            const sourceAvailable = await this.checkStreamSource(stream.url);
-            if (!sourceAvailable) {
-                throw new Error('Stream source not available');
-            }
-
-            // 启动 FFmpeg 进程
-            const ffmpeg = this.spawnFFmpeg(streamId, stream.url, outputUrl);
+            // 获取统计信息引用
+            const configStats = stream.stats;
             
-            // 保存进程信息
-            this.streamProcesses.set(streamId, {
-                process: ffmpeg,
-                startTime: new Date(),
-                lastActivity: Date.now(),
-                restartCount: 0
-            });
+            // 更新统计信息
+            const now = new Date();
+            if (stats) {
+                stats.startTime = now;
+                stats.errors = 0;
+            }
+            if (configStats) {
+                configStats.startTime = now;
+                configStats.errors = 0;
+            }
 
-            // 设置活动监控
-            this.setupActivityMonitoring(streamId);
-
-            return { success: true };
+            // 使用 FFmpeg 处理流
+            await this.startStreamingWithFFmpeg(streamId, stream, isManualStart);
 
         } catch (error) {
-            logger.error(`Error starting stream process ${streamId}:`, error);
-            throw error;
-        }
-    }
-
-    // 添加新的辅助方法
-    async ensureAndCleanDirectory(outputPath) {
-        try {
-            await fsPromises.mkdir(outputPath, { recursive: true });
+            logger.error(`Error starting stream: ${streamId}`, { 
+                error: error.message,
+                stack: error.stack 
+            });
             
-            // 清理旧文件
-            const files = await fsPromises.readdir(outputPath);
-            for (const file of files) {
-                if (file.endsWith('.ts') || file.endsWith('.m3u8')) {
-                    try {
-                        await fsPromises.unlink(path.join(outputPath, file));
-                    } catch (err) {
-                        logger.warn(`Failed to delete file ${file}: ${err.message}`);
-                    }
-                }
+            // 更新错误统计
+            const stats = this.streamStats.get(streamId);
+            if (stats) {
+                stats.errors++;
             }
-        } catch (error) {
-            logger.error(`Error preparing directory ${outputPath}:`, error);
+            
+            if (configStats) {
+                configStats.errors++;
+                configStats.startTime = null;
+            }
+            
             throw error;
         }
     }
 
-    monitorOutputDirectory(outputPath, streamId) {
-        const checkInterval = setInterval(() => {
-            fs.readdir(outputPath, (err, files) => {
-                if (err) {
-                    logger.error(`Error reading directory ${outputPath}:`, err);
-                    return;
-                }
-
-                // 检查分片文件数量
-                const segments = files.filter(f => f.endsWith('.ts'));
-                if (segments.length > 10) {
-                    // 删除旧的分片文件
-                    segments.slice(0, -10).forEach(segment => {
-                        fs.unlink(path.join(outputPath, segment), err => {
-                            if (err) logger.warn(`Failed to delete old segment ${segment}:`, err);
-                        });
-                    });
-                }
-            });
-        }, 5000); // 每5秒检查一次
-
-        // 保存检查间隔引用
-        this.healthChecks.set(streamId, checkInterval);
-    }
-
-    setupProcessMonitoring(streamId, ffmpeg, lastSegmentTime) {
-        const monitor = setInterval(() => {
-            const process = this.streamProcesses.get(streamId);
-            if (!process || !process.ffmpeg) {
-                clearInterval(monitor);
-                return;
-            }
-
-            // 检查进程是否还活着
-            if (process.ffmpeg.killed || !process.ffmpeg.pid) {
-                clearInterval(monitor);
-                this.handleStreamError(streamId, new Error('Process died'));
-                return;
-            }
-
-            // 检查最后分片时间
-            const now = Date.now();
-            if (now - process.lastSegmentTime > 30000) { // 30秒没有新分片
-                logger.warn(`No new segments for stream ${streamId} in 30s, restarting...`);
-                this.restartStream(streamId, process.isManualStart);
-                clearInterval(monitor);
-            }
-        }, 5000); // 每5秒检查一次
-    }
-
-    waitForPlaylist(outputPath, resolve, reject) {
-        const playlistPath = path.join(outputPath, 'playlist.m3u8');
-        let attempts = 0;
-        const maxAttempts = 30; // 30秒超时
+    async startStreamingWithFFmpeg(streamId, streamConfig, isManualStart = false) {
+        const { spawn } = require('child_process');
+        const outputPath = path.join(this.rootDir, 'streams', streamId);
         
-        const checkPlaylist = setInterval(() => {
-            if (fs.existsSync(playlistPath)) {
-                clearInterval(checkPlaylist);
-                resolve();
-            } else if (++attempts >= maxAttempts) {
-                clearInterval(checkPlaylist);
-                reject(new Error('Playlist creation timeout'));
-            }
-        }, 1000);
-    }
-
-    // 修改错误处理方法
-    async handleStreamError(streamId, error) {
-        const status = this.retryStatus.get(streamId) || {
-            immediateRetries: 0,
-            recoveryAttempts: 0,
-            lastError: null,
-            lastErrorTime: 0
-        };
-
-        const now = Date.now();
-        const timeSinceLastError = now - status.lastErrorTime;
-
-        // 如果是同样的错误且间隔小于30秒，增加等待时间
-        if (status.lastError && 
-            status.lastError.message === error.message && 
-            timeSinceLastError < 30000) {
-            await new Promise(resolve => setTimeout(resolve, 10000));
+        if (!fs.existsSync(outputPath)) {
+            fs.mkdirSync(outputPath, { recursive: true });
         }
 
-        status.lastError = error;
-        status.lastErrorTime = now;
+        // 如果已经有进程在运行，先停止它
+        if (this.streamProcesses.has(streamId)) {
+            await this.stopStreaming(streamId);
+        }
 
-        if (status.immediateRetries < this.retryConfig.maxImmediateRetries) {
-            const delay = this.retryConfig.immediateRetryDelay * 
-                Math.pow(this.retryConfig.backoffMultiplier, status.immediateRetries);
-                
-            logger.info(`Attempting immediate retry ${status.immediateRetries + 1}/${this.retryConfig.maxImmediateRetries} for stream ${streamId} after ${delay}ms`);
-            
-            await new Promise(resolve => setTimeout(resolve, delay));
-            
-            status.immediateRetries++;
-            this.retryStatus.set(streamId, status);
-            
-            try {
-                await this.startStreamProcess(streamId);
-            } catch (retryError) {
-                logger.error(`Immediate retry ${status.immediateRetries} failed for stream ${streamId}`, retryError);
-            }
-        } else {
-            // 进入恢复模式
-            const recoveryDelay = Math.min(
-                this.retryConfig.recoveryRetryDelay * 
-                Math.pow(this.retryConfig.backoffMultiplier, status.recoveryAttempts),
-                this.retryConfig.maxBackoffDelay
+        // 构建 FFmpeg 输入参数
+        const inputArgs = [
+            '-hide_banner',
+            '-nostats',
+            '-y',
+            '-fflags', '+genpts+igndts+discardcorrupt',
+            '-avoid_negative_ts', 'make_zero',
+            '-analyzeduration', '2000000',
+            '-probesize', '1000000',
+            '-rw_timeout', '5000000',
+            '-thread_queue_size', '4096',
+            '-reconnect', '1',
+            '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '2',
+            '-multiple_requests', '1',
+            '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            '-i', streamConfig.url
+        ];
+
+        // 构建 FFmpeg 输出参数
+        const outputArgs = [
+            // HLS输出
+            '-c:v', 'copy',
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            '-ac', '2',
+            '-ar', '44100',
+            '-f', 'hls',
+            '-hls_time', '2',
+            '-hls_list_size', '6',
+            '-hls_flags', 'delete_segments+append_list+discont_start+independent_segments',
+            '-hls_segment_type', 'mpegts',
+            '-hls_segment_filename', `${outputPath}/segment_%d.ts`,
+            `${outputPath}/playlist.m3u8`
+        ];
+
+        // 如果是手动启动，添加 RTMP 推流输出
+        if (isManualStart || this.manuallyStartedStreams.has(streamId)) {
+            outputArgs.push(
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-f', 'flv',
+                `${this.config.rtmp.pushServer}${streamId}`
             );
-            
-            logger.info(`Scheduling recovery round ${status.recoveryAttempts + 1} for stream ${streamId} in ${recoveryDelay/1000} seconds`);
-            
-            status.recoveryAttempts++;
-            this.retryStatus.set(streamId, status);
-            
-            setTimeout(() => {
-                this.startStreamProcess(streamId).catch(err => {
-                    logger.error(`Recovery attempt failed for stream ${streamId}:`, err);
-                });
-            }, recoveryDelay);
+            // 确保流被标记为手动启动
+            this.manuallyStartedStreams.add(streamId);
+            logger.info(`Adding RTMP output for manually started stream: ${streamId}`);
         }
-    }
 
-    handleStreamExit(streamId, code, error, retryCount, maxRetries) {
-        if (code !== 0) {
-            logger.error(`Stream ${streamId} exited with code ${code}`);
-            if (error) logger.error(`Stream error: ${error}`);
-            
-            if (retryCount < maxRetries) {
+        // 合并所有参数
+        const args = [...inputArgs, ...outputArgs];
+
+        logger.info(`Starting FFmpeg for stream: ${streamId} (manual: ${isManualStart})`);
+        logger.debug(`FFmpeg command: ffmpeg ${args.join(' ')}`);
+
+        return new Promise((resolve, reject) => {
+            try {
+                const ffmpeg = spawn('ffmpeg', args);
+                let ffmpegError = '';
+                let retryCount = 0;
+                const maxRetries = 3;
+                const retryDelay = 5000;
+
+                ffmpeg.stderr.on('data', (data) => {
+                    const message = data.toString();
+                    ffmpegError += message;
+
+                    // 检查是否是致命错误
+                    const isFatalError = 
+                        message.includes('Connection timed out') ||
+                        message.includes('Server returned 404') || 
+                        message.includes('Failed to open segment') ||
+                        message.includes('Error when loading first segment') ||
+                        message.includes('Failed to reload playlist');
+
+                    if (isFatalError) {
+                        const stats = this.streamStats.get(streamId);
+                        if (stats) {
+                            stats.errors++;
+                        }
+                    }
+
+                    // 只记录重要的错误信息
+                    if (message.includes('Error') || 
+                        message.includes('Failed') ||
+                        message.includes('Invalid') ||
+                        message.includes('timeout')) {
+                        logger.error(`FFmpeg stderr: ${message}`);
+                    } else if (message.includes('fps=') || message.includes('speed=')) {
+                        // 忽略常规的进度信息
+                        return;
+                    } else {
+                        logger.debug(`FFmpeg stderr: ${message}`);
+                    }
+                });
+
+                ffmpeg.on('error', (error) => {
+                    logger.error(`FFmpeg error for stream ${streamId}:`, error);
+                    if (retryCount < maxRetries) {
+                        retryCount++;
+                        logger.info(`Retrying stream ${streamId} (attempt ${retryCount}/${maxRetries})`);
+                        setTimeout(() => {
+                            // 保持手动启动状态进行重试
+                            const wasManuallyStarted = this.manuallyStartedStreams.has(streamId);
+                            this.restartStream(streamId, wasManuallyStarted);
+                        }, retryDelay);
+                    } else {
+                        logger.error(`Max retries reached for stream ${streamId}, stopping stream`);
+                        this.stopStreaming(streamId);
+                    }
+                });
+
+                ffmpeg.on('exit', (code) => {
+                    if (code !== 0) {
+                        logger.error(`FFmpeg exited with code ${code} for stream ${streamId}`);
+                        logger.error(`FFmpeg stderr: ${ffmpegError}`);
+                        
+                        // 检查是否包含致命错误
+                        if (ffmpegError.includes('Server returned 400') ||
+                            ffmpegError.includes('Server returned 403') ||
+                            ffmpegError.includes('Server returned 404') ||
+                            ffmpegError.includes('Server returned 500')) {
+                            logger.error(`Fatal error detected for stream ${streamId}, stopping stream`);
+                            this.stopStreaming(streamId);
+                        } else if (retryCount < maxRetries && this.activeViewers.get(streamId) > 0) {
+                            // 只有在有观看者的情况下才重试
+                            retryCount++;
+                            logger.info(`Retrying stream ${streamId} (attempt ${retryCount}/${maxRetries})`);
+                            setTimeout(() => {
+                                const wasManuallyStarted = this.manuallyStartedStreams.has(streamId);
+                                this.restartStream(streamId, wasManuallyStarted);
+                            }, retryDelay);
+                        } else {
+                            logger.error(`Max retries reached or no viewers for stream ${streamId}, stopping stream`);
+                            this.stopStreaming(streamId);
+                        }
+                    }
+                });
+
+                // 保存进程引用
+                this.streamProcesses.set(streamId, {
+                    ffmpeg,
+                    startTime: new Date(),
+                    isManualStart: isManualStart || this.manuallyStartedStreams.has(streamId)
+                });
+
+                // 等待播放表文件创建
+                const checkInterval = setInterval(() => {
+                    if (fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
+                        clearInterval(checkInterval);
+                        logger.info(`Stream ${streamId} started successfully`);
+                        resolve();
+                    }
+                }, 1000);
+
+                // 设置检查超时
                 setTimeout(() => {
-                    const wasManuallyStarted = this.manuallyStartedStreams.has(streamId);
-                    this.restartStream(streamId, wasManuallyStarted);
-                }, 5000);
-            } else {
-                this.stopStreaming(streamId);
+                    clearInterval(checkInterval);
+                    if (!fs.existsSync(path.join(outputPath, 'playlist.m3u8'))) {
+                        logger.error(`Stream ${streamId} failed to start within timeout`);
+                        this.stopStreaming(streamId);
+                        reject(new Error('Stream start timeout'));
+                    }
+                }, 30000);
+
+            } catch (error) {
+                reject(error);
             }
-        }
+        });
     }
 
     // 加清理旧分的方法
@@ -663,35 +697,34 @@ class StreamManager extends EventEmitter {
                 return;
             }
 
-            // 获取重试状态
-            const status = this.retryStatus.get(streamId) || {
-                immediateRetries: 0,
-                recoveryAttempts: 0,
-                lastErrorTime: 0,
-                isInRecovery: false
-            };
-
-            // 如果正在恢复模式，记录尝试
-            if (status.isInRecovery) {
-                logger.info(`Recovery attempt for stream ${streamId}`);
+            // 检查失败次数
+            const failureCount = this.failureCount.get(streamId) || 0;
+            if (failureCount >= 3) {
+                logger.info(`Stream ${streamId} has failed too many times, marking as invalid`);
+                this.markStreamAsInvalid(streamId);
+                return;
             }
 
-            logger.info(`Restarting stream: ${streamId} (manual: ${isManualStart})`);
-            await this.forceStopStreaming(streamId);
-            await new Promise(resolve => setTimeout(resolve, 5000));  // 等待5秒
-            await this.startStreaming(streamId, isManualStart);
+            // 如是手动启动，记录到集合中
+            if (isManualStart) {
+                this.manuallyStartedStreams.add(streamId);
+                logger.info(`Stream ${streamId} marked as manually started for restart`);
+            }
 
+            logger.info(`Restarting stream: ${streamId}`);
+            await this.forceStopStreaming(streamId);
+            await new Promise(resolve => setTimeout(resolve, 5000));  // 增加等待时间到5秒
+            await this.startStreaming(streamId, isManualStart);  // 传递 isManualStart 参数
         } catch (error) {
-            logger.error(`Error restarting stream: ${streamId}`, error);
-            // 如果重启失败，交给错误处理机制
-            this.handleStreamError(streamId, error);
+            logger.error(`Error restarting stream: ${streamId}`, { error });
+            this.failureCount.set(streamId, (this.failureCount.get(streamId) || 0) + 1);
         }
     }
 
     // 添加 streamlink 作为备选方案
     async startStreamingWithStreamlink(streamId, streamConfig) {
         const { spawn } = require('child_process');
-        const outputPath = path.join(this.streamsDir, streamId);
+        const outputPath = path.join(this.rootDir, 'streams', streamId);
 
         const args = [
             '--player-external-http',
@@ -766,10 +799,6 @@ class StreamManager extends EventEmitter {
 
     async stopStreaming(streamId) {
         try {
-            // 清理重试状态
-            this.retryCounters.delete(streamId);
-            this.retryStatus.delete(streamId);
-            
             const wasManuallyStarted = this.manuallyStartedStreams.has(streamId);
             const processes = this.streamProcesses.get(streamId);
             if (processes) {
@@ -823,7 +852,7 @@ class StreamManager extends EventEmitter {
                 this.activeViewers.delete(streamId);
                 
                 // 清理文件
-                const outputPath = path.join(this.streamsDir, streamId);
+                const outputPath = path.join(this.rootDir, 'streams', streamId);
                 if (fs.existsSync(outputPath)) {
                     try {
                         const files = fs.readdirSync(outputPath);
@@ -860,7 +889,7 @@ class StreamManager extends EventEmitter {
                 }
 
                 const stats = this.streamStats.get(streamId);
-                const outputPath = path.join(this.streamsDir, streamId, 'playlist.m3u8');
+                const outputPath = path.join(this.rootDir, 'streams', streamId, 'playlist.m3u8');
                 
                 if (!fs.existsSync(outputPath)) {
                     logger.warn(`Unhealthy stream detected: ${streamId}`);
@@ -881,7 +910,7 @@ class StreamManager extends EventEmitter {
 
     async cleanupUnusedFiles() {
         try {
-            const streamsDir = path.join(this.streamsDir);
+            const streamsDir = path.join(this.rootDir, 'streams');
             const dirs = fs.readdirSync(streamsDir);
             
             for (const dir of dirs) {
@@ -920,7 +949,7 @@ class StreamManager extends EventEmitter {
                 this.streamProcesses.delete(streamId);
                 
                 // 清理文件
-                const outputPath = path.join(this.streamsDir, streamId);
+                const outputPath = path.join(this.rootDir, 'streams', streamId);
                 if (fs.existsSync(outputPath)) {
                     fs.rmSync(outputPath, { recursive: true, force: true });
                 }
@@ -949,41 +978,20 @@ class StreamManager extends EventEmitter {
     }
 
     // 添加检查流状态的方法
-    async checkStreamStatus(streamId) {
-        try {
-            // 检查进程是否存在
-            if (this.streamProcesses.has(streamId)) {
-                return true;
-            }
-
-            // 检查播放列表文件
-            const playlistPath = path.join(this.streamsDir, streamId, 'playlist.m3u8');
-            if (fs.existsSync(playlistPath)) {
-                const stats = fs.statSync(playlistPath);
-                if (Date.now() - stats.mtimeMs < 30000) {
-                    return true;
-                }
-            }
-
-            // 检查分片文件
-            const streamDir = path.join(this.streamsDir, streamId);
-            if (fs.existsSync(streamDir)) {
-                const files = fs.readdirSync(streamDir);
-                const tsFiles = files.filter(f => f.endsWith('.ts'));
-                if (tsFiles.length > 0) {
-                    const latestTs = tsFiles.sort().pop();
-                    const tsStats = fs.statSync(path.join(streamDir, latestTs));
-                    if (Date.now() - tsStats.mtimeMs < 30000) {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        } catch (error) {
-            logger.error(`Error checking stream status: ${streamId}`, error);
-            return false;
-        }
+    isStreamActive(streamId) {
+        // 检查是否有进程在运行
+        const hasProcess = this.streamProcesses.has(streamId);
+        
+        // 检查是否有最近的统计信息
+        const stats = this.streamStats.get(streamId);
+        const hasRecentStats = stats?.startTime && 
+            (Date.now() - new Date(stats.startTime).getTime()) < 30000;  // 30秒内有活动
+        
+        // 检查是否有放列表文件
+        const playlistPath = path.join(this.rootDir, 'streams', streamId, 'playlist.m3u8');
+        const hasPlaylist = fs.existsSync(playlistPath);
+        
+        return hasProcess || hasRecentStats || hasPlaylist;
     }
 
     // 添加观看者
@@ -1106,8 +1114,8 @@ class StreamManager extends EventEmitter {
                 }
 
                 // 移动流媒体件
-                const oldPath = path.join(this.streamsDir, streamId);
-                const newPath = path.join(this.streamsDir, newId);
+                const oldPath = path.join(this.rootDir, 'streams', streamId);
+                const newPath = path.join(this.rootDir, 'streams', newId);
                 if (fs.existsSync(oldPath)) {
                     if (fs.existsSync(newPath)) {
                         fs.rmSync(newPath, { recursive: true, force: true });
@@ -1160,7 +1168,7 @@ class StreamManager extends EventEmitter {
             if (activeStreams.length === 0) return;
 
             for (const streamId of activeStreams) {
-                const streamPath = path.join(this.streamsDir, streamId);
+                const streamPath = path.join(this.rootDir, 'streams', streamId);
                 if (!fs.existsSync(streamPath)) continue;
 
                 // 计算目录大小
@@ -1253,7 +1261,7 @@ class StreamManager extends EventEmitter {
     // 修改保存统计数据的方法
     async saveStats() {
         try {
-            const statsPath = path.join(this.configDir, 'stats.json');
+            const statsPath = path.join(this.rootDir, 'config/stats.json');
             const stats = {
                 startTime: this.startTime,
                 lastUpdate: new Date().toISOString(),
@@ -1274,7 +1282,7 @@ class StreamManager extends EventEmitter {
                 };
             }
 
-            await fsPromises.writeFile(statsPath, JSON.stringify(stats, null, 2));
+            await fs.promises.writeFile(statsPath, JSON.stringify(stats, null, 2));
             logger.info('Stats saved successfully');
         } catch (error) {
             logger.error('Error saving stats:', error);
@@ -1284,17 +1292,40 @@ class StreamManager extends EventEmitter {
     // 修改加载统计数据的方法
     async loadStats() {
         try {
-            if (fs.existsSync(this.statsPath)) {
-                const data = await fsPromises.readFile(this.statsPath, 'utf8');
-                const stats = JSON.parse(data);
-                this.streamStats = new Map(Object.entries(stats));
-                logger.info('Stats loaded successfully');
-            } else {
-                logger.info('No existing stats file found, creating new one');
-                await this.saveStats();
+            const statsPath = path.join(this.rootDir, 'config/stats.json');
+            if (fs.existsSync(statsPath)) {
+                const data = await fs.promises.readFile(statsPath, 'utf8');
+                if (data.trim()) {
+                    const stats = JSON.parse(data);
+                    
+                    // 恢复总流量统计
+                    if (stats.totalTraffic) {
+                        this.totalTraffic.received = BigInt(stats.totalTraffic.received || '0');
+                        this.totalTraffic.sent = BigInt(stats.totalTraffic.sent || '0');
+                    }
+
+                    // 恢复每个流的统计信息
+                    if (stats.streams) {
+                        for (const [streamId, streamStats] of Object.entries(stats.streams)) {
+                            this.trafficStats.set(streamId, {
+                                startTime: new Date(streamStats.startTime),
+                                bytesReceived: streamStats.bytesReceived,
+                                bytesSent: streamStats.bytesSent,
+                                lastUpdate: new Date(streamStats.lastUpdate),
+                                segments: new Set()
+                            });
+                        }
+                    }
+
+                    logger.info('Stats loaded successfully');
+                }
             }
         } catch (error) {
             logger.error('Error loading stats:', error);
+            // 重置统计数据
+            this.totalTraffic.received = 0n;
+            this.totalTraffic.sent = 0n;
+            this.trafficStats.clear();
         }
     }
 
@@ -1429,79 +1460,125 @@ class StreamManager extends EventEmitter {
 
     // 修改获取公网IP的方法
     async getPublicIP() {
+        // 添加缓存
+        if (this._cachedIP && (Date.now() - this._lastIPCheck) < 300000) { // 5分钟缓存
+            return this._cachedIP;
+        }
+
         try {
-            // 首先尝试从缓存获取
-            if (this._cachedIP && Date.now() - this._lastIPCheck < 300000) {
+            // 首先检查环境变量
+            if (process.env.SERVER_HOST) {
+                this._cachedIP = process.env.SERVER_HOST;
+                this._lastIPCheck = Date.now();
                 return this._cachedIP;
             }
 
-            // 尝试从本地网络接口获取IP
-            const interfaces = os.networkInterfaces();
+            const services = [
+                {
+                    url: 'https://api.ipify.org?format=json',
+                    parser: (data) => typeof data === 'string' ? data.trim() : data.ip
+                },
+                {
+                    url: 'https://api.ip.sb/ip',
+                    parser: (data) => data.trim()
+                },
+                {
+                    url: 'https://api64.ipify.org?format=json',
+                    parser: (data) => data.ip
+                }
+            ];
+
+            const axiosConfig = {
+                timeout: 3000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            };
+
+            // 使用 Promise.race 获取最快的响应
+            const requests = services.map(service => 
+                axios.get(service.url, axiosConfig)
+                    .then(response => {
+                        const ip = service.parser(response.data);
+                        if (ip && /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+                            return ip;
+                        }
+                        throw new Error('Invalid IP format');
+                    })
+                    .catch(() => null)
+            );
+
+            const ip = await Promise.race(requests);
+            
+            if (ip) {
+                this._cachedIP = ip;
+                this._lastIPCheck = Date.now();
+                logger.info(`Successfully obtained public IP: ${ip}`);
+                return ip;
+            }
+
+            // 如果获取公网IP失败，使用本地IP
+            const interfaces = require('os').networkInterfaces();
             for (const iface of Object.values(interfaces)) {
                 for (const alias of iface) {
                     if (alias.family === 'IPv4' && !alias.internal) {
                         this._cachedIP = alias.address;
                         this._lastIPCheck = Date.now();
-                        logger.info(`Using local IP: ${this._cachedIP}`);
-                        return this._cachedIP;
+                        logger.info(`Using local IP: ${alias.address}`);
+                        return alias.address;
                     }
                 }
-            }
-
-            // 如果本地获取失败，尝试从外部服务获取
-            const response = await axios.get('https://api.ipify.org?format=json');
-            if (response.data && response.data.ip) {
-                this._cachedIP = response.data.ip;
-                this._lastIPCheck = Date.now();
-                logger.info(`Successfully obtained public IP: ${this._cachedIP}`);
-                return this._cachedIP;
-            }
-
-            // 如果外部服务也失败，使用备用服务
-            const backupResponse = await axios.get('http://ip-api.com/json/');
-            if (backupResponse.data && backupResponse.data.query) {
-                this._cachedIP = backupResponse.data.query;
-                this._lastIPCheck = Date.now();
-                logger.info(`Successfully obtained public IP from backup service: ${this._cachedIP}`);
-                return this._cachedIP;
             }
 
             // 最后的后备方案
             this._cachedIP = '127.0.0.1';
             this._lastIPCheck = Date.now();
             return this._cachedIP;
+
         } catch (error) {
-            logger.error('Error getting public IP:', error);
-            // 如果所有方法都失败，返回本地回环地址
-            this._cachedIP = '127.0.0.1';
-            this._lastIPCheck = Date.now();
-            return this._cachedIP;
+            logger.error('Error getting IP:', error);
+            return process.env.SERVER_HOST || '127.0.0.1';
         }
     }
 
     // 添加加载自启动流配置的方法
-    async loadAutoStartStreams() {
+    loadAutoStartStreams() {
         try {
-            if (fs.existsSync(this.autoStartPath)) {
-                const data = await fsPromises.readFile(this.autoStartPath, 'utf8');
-                const autoStartStreams = JSON.parse(data);
-                this.autoStartStreams = new Set(autoStartStreams);
-                logger.info(`Loaded ${this.autoStartStreams.size} auto-start streams`);
+            const autoStartPath = path.join(this.rootDir, 'config/autostart.json');
+            if (fs.existsSync(autoStartPath)) {
+                const data = fs.readFileSync(autoStartPath, 'utf8');
+                if (data.trim()) {  // 检查文件是否为空
+                    const autoStartList = JSON.parse(data);
+                    this.autoStartStreams = new Set(autoStartList);
+                } else {
+                    this.autoStartStreams = new Set();
+                    // 写入空数组到文件
+                    fs.writeFileSync(autoStartPath, '[]');
+                }
             } else {
-                logger.info('Creating new auto-start streams file');
-                await fsPromises.writeFile(this.autoStartPath, '[]');
+                // 如果文件不存在，创建包含空数组的文件
+                fs.writeFileSync(autoStartPath, '[]');
+                this.autoStartStreams = new Set();
             }
+            logger.info(`Loaded ${this.autoStartStreams.size} auto-start streams`);
         } catch (error) {
             logger.error('Error loading auto-start streams:', error);
+            this.autoStartStreams = new Set();
+            // 尝试重新创建文件
+            try {
+                fs.writeFileSync(path.join(this.rootDir, 'config/autostart.json'), '[]');
+            } catch (e) {
+                logger.error('Error creating autostart.json:', e);
+            }
         }
     }
 
     // 添加保存自启动流配置的方法
     async saveAutoStartStreams() {
         try {
-            const autoStartPath = path.join(this.configDir, 'autostart.json');
+            const autoStartPath = path.join(this.rootDir, 'config/autostart.json');
             const autoStartList = Array.from(this.autoStartStreams);
-            await fsPromises.writeFile(autoStartPath, JSON.stringify(autoStartList, null, 2));
+            await fs.promises.writeFile(autoStartPath, JSON.stringify(autoStartList, null, 2));
             logger.info(`Saved ${autoStartList.length} auto-start streams`);
             return true;
         } catch (error) {
@@ -1551,6 +1628,17 @@ class StreamManager extends EventEmitter {
     // 添加获取自启动状态的方法
     isAutoStart(streamId) {
         return this.autoStartStreams.has(streamId);
+    }
+
+    // 添加流量统计方法
+    initTrafficStats(streamId) {
+        this.trafficStats.set(streamId, {
+            startTime: new Date(),
+            bytesReceived: 0,
+            bytesSent: 0,
+            lastUpdate: new Date(),
+            segments: new Set() // 用于追踪已统计的分片
+        });
     }
 
     // 更新流量统计
@@ -1604,6 +1692,97 @@ class StreamManager extends EventEmitter {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
+    // 修改停止流方法
+    async stopStreaming(streamId) {
+        try {
+            // ... 现有的停止流代码 ...
+
+            // 保存最终的流量统计
+            const stats = this.trafficStats.get(streamId);
+            if (stats) {
+                const stream = this.streams.get(streamId);
+                if (stream && stream.stats) {
+                    stream.stats.lastTraffic = {
+                        bytesReceived: stats.bytesReceived,
+                        bytesSent: stats.bytesSent,
+                        endTime: new Date()
+                    };
+                }
+                this.trafficStats.delete(streamId);
+            }
+
+            // ... 其他清理代码 ...
+        } catch (error) {
+            logger.error(`Error stopping stream ${streamId}:`, error);
+            throw error;
+        }
+    }
+
+    // 保存统计信息到文件
+    async saveStats() {
+        try {
+            const statsPath = path.join(this.rootDir, 'config/stats.json');
+            const stats = {
+                startTime: this.startTime,
+                lastUpdate: new Date().toISOString(),
+                totalTraffic: {
+                    received: String(this.totalTraffic.received),
+                    sent: String(this.totalTraffic.sent)
+                },
+                streams: {}
+            };
+
+            // 保存每个流的统计信息
+            for (const [streamId, streamStats] of this.trafficStats) {
+                stats.streams[streamId] = {
+                    startTime: streamStats.startTime,
+                    bytesReceived: streamStats.bytesReceived,
+                    bytesSent: streamStats.bytesSent,
+                    lastUpdate: streamStats.lastUpdate
+                };
+            }
+
+            await fs.promises.writeFile(statsPath, JSON.stringify(stats, null, 2));
+            logger.info('Stats saved successfully');
+        } catch (error) {
+            logger.error('Error saving stats:', error);
+        }
+    }
+
+    // 添加获取完整统计信息的方法
+    getStats() {
+        const now = Date.now();
+        const uptime = now - this.startTime;
+        
+        // 计算活跃流数量
+        const activeStreams = Array.from(this.streamProcesses.keys()).filter(streamId => {
+            const process = this.streamProcesses.get(streamId);
+            return process && process.ffmpeg && !process.ffmpeg.killed;
+        });
+
+        // 计算总观看人数
+        let totalViewers = 0;
+        for (const viewers of this.activeViewers.values()) {
+            totalViewers += viewers;
+        }
+
+        // 计算总流量
+        const totalReceived = Number(this.totalTraffic.received);
+        const totalSent = Number(this.totalTraffic.sent);
+
+        return {
+            uptime: this.formatUptime(uptime),
+            traffic: {
+                received: this.formatBytes(totalReceived),
+                sent: this.formatBytes(totalSent)
+            },
+            totalStreams: this.streams.size,
+            activeStreams: activeStreams.length,
+            totalViewers: totalViewers,
+            lastUpdate: new Date().toISOString()
+        };
+    }
+
     // 在 StreamManager 类中添加这个方法
     getStreamById(streamId) {
         // 尝试不同形式的streamId
@@ -1621,316 +1800,6 @@ class StreamManager extends EventEmitter {
         }
 
         return null;
-    }
-
-    // 添加恢复调度方法
-    async scheduleStreamRecovery(streamId) {
-        const status = this.retryStatus.get(streamId);
-        if (!status) return;
-
-        const stream = this.streams.get(streamId);
-        if (!stream) return;
-
-        // 检查是否达到最大恢复尝试次数
-        if (this.retryConfig.maxRecoveryAttempts > 0 && 
-            status.recoveryAttempts >= this.retryConfig.maxRecoveryAttempts) {
-            logger.error(`Stream ${streamId} reached maximum recovery attempts, giving up`);
-            return;
-        }
-
-        status.recoveryAttempts++;
-        logger.info(`Scheduling recovery attempt ${status.recoveryAttempts} for stream ${streamId} in ${this.retryConfig.recoveryDelay/1000} seconds`);
-
-        // 设置恢复定时器
-        setTimeout(async () => {
-            try {
-                // 尝试检查源是否可用
-                const isSourceAvailable = await this.checkStreamSource(stream.url);
-                
-                if (isSourceAvailable) {
-                    logger.info(`Stream source for ${streamId} is available, attempting recovery`);
-                    const wasManuallyStarted = this.manuallyStartedStreams.has(streamId);
-                    await this.restartStream(streamId, wasManuallyStarted);
-                    
-                    // 重置重试状态
-                    status.isInRecovery = false;
-                    status.recoveryAttempts = 0;
-                    status.immediateRetries = 0;
-                    
-                } else {
-                    logger.warn(`Stream source for ${streamId} is still unavailable`);
-                    // 继续调度下一次恢复
-                    this.scheduleStreamRecovery(streamId);
-                }
-            } catch (error) {
-                logger.error(`Error during recovery attempt for stream ${streamId}:`, error);
-                // 继续调度下一次恢复
-                this.scheduleStreamRecovery(streamId);
-            }
-        }, this.retryConfig.recoveryDelay);
-    }
-
-    // 添加获取重试信息的方法
-    getRetryInfo(streamId) {
-        const status = this.retryStatus.get(streamId) || {
-            immediateRetries: 0,
-            recoveryAttempts: 0,
-            isInRecovery: false
-        };
-        
-        const counter = this.retryCounters.get(streamId) || {
-            total: 0,
-            lastRetryTime: null
-        };
-
-        return {
-            immediateRetries: status.immediateRetries,
-            recoveryAttempts: status.recoveryAttempts,
-            isInRecovery: status.isInRecovery,
-            totalRetries: counter.total,
-            lastRetryTime: counter.lastRetryTime
-        };
-    }
-
-    // 修改 spawnFFmpeg 方法
-    spawnFFmpeg(streamId, inputUrl, outputUrl) {
-        try {
-            const ffmpegPath = '/usr/bin/ffmpeg';
-            
-            // 优化 FFmpeg 参数
-            const ffmpegArgs = [
-                '-hide_banner',
-                '-loglevel', 'info',
-                
-                // 输入前参数
-                '-fflags', '+genpts+discardcorrupt+igndts+nobuffer',
-                '-avoid_negative_ts', 'make_zero',
-                '-correct_ts_overflow', '0',
-                '-analyzeduration', this.ffmpegConfig.analyzeduration,
-                '-probesize', this.ffmpegConfig.probesize,
-                
-                // 重连和超时参数
-                '-reconnect', '1',
-                '-reconnect_at_eof', '1',
-                '-reconnect_streamed', '1',
-                '-reconnect_delay_max', this.ffmpegConfig.reconnectDelay,
-                '-stimeout', this.ffmpegConfig.timeout,
-                '-timeout', this.ffmpegConfig.httpTimeout,
-                
-                // HTTP参数
-                '-http_persistent', this.ffmpegConfig.httpKeepalive,
-                '-multiple_requests', '1',
-                
-                // 输入
-                '-i', inputUrl,
-                
-                // 输出参数
-                '-c', 'copy',
-                '-f', 'flv',
-                '-flvflags', 'no_duration_filesize',
-                '-bufsize', this.ffmpegConfig.bufferSize,
-                '-maxrate', this.ffmpegConfig.maxRate,
-                '-preset', 'veryfast',
-                '-tune', 'zerolatency',
-                '-max_muxing_queue_size', this.ffmpegConfig.threadQueueSize,
-                
-                // 输出
-                outputUrl
-            ];
-
-            logger.info(`Starting FFmpeg for stream ${streamId}`, {
-                args: ffmpegArgs.join(' '),
-                inputUrl,
-                outputUrl
-            });
-
-            const ffmpeg = spawn(ffmpegPath, ffmpegArgs);
-            
-            // 添加进程监控
-            this.setupProcessMonitoring(streamId, ffmpeg);
-
-            return ffmpeg;
-
-        } catch (error) {
-            logger.error(`Failed to spawn FFmpeg process [${streamId}]:`, error);
-            throw error;
-        }
-    }
-
-    // 添加检查流是否活跃的方法
-    async checkStreamActive(streamId) {
-        try {
-            const outputPath = path.join(this.streamsDir, streamId);
-            const files = await fsPromises.readdir(outputPath);
-            const tsFiles = files.filter(f => f.endsWith('.ts'));
-            
-            if (tsFiles.length === 0) {
-                return false;
-            }
-
-            // 检查最新的ts文件是否在最近30秒内更新
-            const latestTs = tsFiles.sort().pop();
-            const stats = await fsPromises.stat(path.join(outputPath, latestTs));
-            return (Date.now() - stats.mtimeMs) < 30000;
-        } catch (error) {
-            return false;
-        }
-    }
-
-    // 添加活动监控方法
-    setupActivityMonitoring(streamId) {
-        const monitor = setInterval(() => {
-            const processInfo = this.streamProcesses.get(streamId);
-            if (!processInfo) {
-                clearInterval(monitor);
-                return;
-            }
-
-            const now = Date.now();
-            const inactiveTime = now - processInfo.lastActivity;
-
-            // 如果30秒没有活动，重启流
-            if (inactiveTime > 30000) {
-                logger.warn(`Stream ${streamId} inactive for ${inactiveTime}ms, restarting...`);
-                this.handleStreamError(streamId, new Error('Stream inactive'));
-                clearInterval(monitor);
-            }
-        }, 5000);
-
-        // 保存监控引用
-        this.healthChecks.set(streamId, monitor);
-    }
-
-    // 修改添加流的方法,添加后自动启动
-    async addStream(streamData) {
-        try {
-            // 生成唯一ID
-            const streamId = `stream_${Math.random().toString(36).substr(2, 6)}`;
-            
-            // 构建流对象
-            const stream = {
-                id: streamId,
-                name: streamData.name,
-                url: streamData.url,
-                category: streamData.category || '未分类',
-                tvg: streamData.tvg || {
-                    id: '',
-                    name: streamData.name,
-                    logo: '',
-                    group: streamData.category || '未分类'
-                }
-            };
-
-            // 添加到流集合
-            this.streams.set(streamId, stream);
-            
-            // 初始化重试状态
-            this.retryStatus.set(streamId, {
-                immediateRetries: 0,
-                recoveryAttempts: 0,
-                isInRecovery: false
-            });
-
-            // 初始化重试计数器
-            this.retryCounters.set(streamId, {
-                total: 0,
-                lastRetryTime: null
-            });
-
-            // 保存配置
-            await this.saveStreams();
-
-            // 创建流目录
-            await this.prepareStreamDirectory(streamId);
-
-            logger.info(`Added new stream: ${streamId}`);
-
-            // 自动启动新添加的流
-            try {
-                await this.startStreaming(streamId);
-                logger.info(`Successfully started new stream: ${streamId}`);
-            } catch (error) {
-                logger.error(`Error starting new stream ${streamId}:`, error);
-            }
-
-            return {
-                success: true,
-                stream
-            };
-        } catch (error) {
-            logger.error('Error adding stream:', error);
-            return {
-                success: false,
-                error: error.message
-            };
-        }
-    }
-
-    // 保存流配置
-    async saveStreams() {
-        try {
-            const streams = Array.from(this.streams.values());
-            await fsPromises.writeFile(
-                this.configPath,
-                JSON.stringify(streams, null, 2)
-            );
-            logger.info(`Saved ${streams.length} streams to config`);
-        } catch (error) {
-            logger.error('Error saving streams:', error);
-            throw error;
-        }
-    }
-
-    // 添加系统资源检查
-    async checkSystemResources() {
-        const freemem = os.freemem();
-        const totalMem = os.totalmem();
-        const memoryUsage = process.memoryUsage();
-        
-        if (freemem / totalMem < 0.1) {
-            throw new Error('System memory is too low');
-        }
-        
-        // 检查文件描述符
-        const { stdout } = await exec('ulimit -n');
-        if (parseInt(stdout) < 1024) {
-            logger.warn('File descriptor limit may be too low');
-        }
-    }
-
-    startMonitoring() {
-        setInterval(() => {
-            this.checkSystemResources()
-                .then(() => this.checkProcessesHealth())
-                .catch(error => {
-                    logger.error('Monitoring check failed:', error);
-                });
-        }, this.monitoring.checkInterval);
-    }
-
-    async checkProcessesHealth() {
-        for (const [streamId, processInfo] of this.streamProcesses) {
-            if (!processInfo.process || processInfo.process.killed) {
-                continue;
-            }
-
-            try {
-                const pid = processInfo.process.pid;
-                if (!pid) continue;
-
-                const { stdout } = await exec(`ps -p ${pid} -o pid=`);
-                if (!stdout.trim()) {
-                    // 进程不存在，重启它
-                    logger.warn(`Process for stream ${streamId} not found, restarting...`);
-                    await this.startStreamProcess(streamId);
-                }
-            } catch (error) {
-                // 忽略进程检查错误
-                if (!error.message.includes('No such process')) {
-                    logger.debug(`Process check error for stream ${streamId}:`, error);
-                }
-            }
-        }
     }
 }
 
